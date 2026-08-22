@@ -118,3 +118,7 @@ temp/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Metadados locais de empacotamento e cache
+*.egg-info/
+.uv-cache/

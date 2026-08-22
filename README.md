@@ -1,70 +1,76 @@
 # Manutenção Prescritiva — Desafio SENAI
 
-Este repositório registra o desenvolvimento de uma solução de manutenção
-prescritiva para ativos industriais. O objetivo do projeto é evoluir, de forma
-auditável, da organização e validação dos dados até recursos de análise,
-recuperação de conhecimento técnico e recomendação de ações de manutenção.
+Este monorepo concentra o backend, a fronteira de integração web, a
+infraestrutura, a documentação, os dados, os experimentos e os scripts do
+projeto. A organização mantém uma única fonte de verdade e prepara um monólito
+modular sem antecipar funcionalidades de etapas posteriores.
 
-> **Estado atual:** esta é a baseline pública inicial. Ainda não há aplicação,
-> API, pipeline de dados, modelo de inteligência artificial ou infraestrutura
-> executável implementados.
+## Estado atual
 
-## Escopo desta baseline
+Esta fundação oferece somente:
 
-A fundação atual estabelece somente:
+- um workspace Python gerenciado por uv, com um único backend instalável em
+  `apps/api`;
+- execução de tarefas com Poe the Poet;
+- um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
+  como fronteira de integração;
+- versões de runtime, locks e regras de texto consistentes entre Windows e
+  Linux;
+- separação explícita entre código-fonte, materiais fornecidos, fixtures
+  sintéticas e artefatos gerados.
 
-- regras para impedir o versionamento dos materiais originais e de artefatos
-  locais;
-- documentação para preparar e validar os arquivos fornecidos fora do Git;
-- um manifesto com tamanho e SHA-256 dos oito arquivos originais;
-- fixtures pequenas e inteiramente sintéticas para futuros testes básicos;
-- normalização de fim de linha para os formatos textuais já versionados.
+Não há endpoints, regras de negócio, processamento de dados, similaridade, RAG,
+persistência, serviços locais, interface web ou infraestrutura executável nesta
+etapa.
 
-Essa separação mantém o repositório leve e permite comprovar a integridade das
-fontes sem redistribuir conteúdo recebido para o desafio.
+## Runtimes e instalação
 
-## Materiais originais
+- Python `>=3.13,<3.14`, com a linha `3.13` registrada em `.python-version`;
+- Node.js `>=22,<23`, com a linha `22` registrada em `.node-version`;
+- pnpm `10.15.1`, fixado em `packageManager` para uso via Corepack.
 
-Os PDFs e o arquivo `banner.csv` fornecidos para a prova não fazem parte do
-repositório. Eles devem permanecer em armazenamento local e, quando necessários,
-ser copiados para `data/raw/original/`, diretório ignorado pelo Git.
+Na raiz do repositório, execute:
 
-O arquivo [`data/source-manifest.json`](data/source-manifest.json) contém apenas
-os nomes, os tamanhos em bytes e os hashes SHA-256 esperados. As instruções de
-preparação e conferência estão em [`data/README.md`](data/README.md).
+```powershell
+uv sync --frozen
+uv run poe check-api-import
+corepack pnpm install --frozen-lockfile
+```
 
-As fixtures em `data/fixtures/` foram escritas especificamente para este projeto,
-com identificadores, datas, medições e relatos fictícios. Elas não reproduzem
-registros do CSV nem trechos dos documentos fornecidos.
+O repositório mantém um único `uv.lock` e um único `pnpm-lock.yaml`, ambos na
+raiz.
 
-## Estrutura atual
+## Estrutura
 
 ```text
 .
-├── data/
-│   ├── fixtures/
-│   │   ├── banner.synthetic.csv
-│   │   └── maintenance.synthetic.txt
-│   ├── README.md
-│   └── source-manifest.json
-├── .gitattributes
-├── .gitignore
-└── README.md
+├── apps/
+│   ├── api/          # pacote Python instalável do backend
+│   └── web/          # fronteira de workspace, sem implementação de UI
+├── data/             # manifesto, fixtures sintéticas e dados locais ignorados
+├── docs/             # convenções e documentação do projeto
+├── experiments/      # estudos isolados do código de produção
+├── infra/            # fronteira reservada para infraestrutura
+└── scripts/          # fronteira reservada para automações
 ```
 
-Não há dependências ou comandos de execução nesta etapa. Para preparar os dados
-locais, siga o guia do diretório `data/`.
+Os identificadores técnicos e o código são escritos em inglês. A documentação
+e as explicações destinadas ao projeto são escritas em português. As convenções
+completas estão em [`docs/README.md`](docs/README.md).
 
-## Próximos passos
+## Materiais originais e dados
 
-Após a revisão desta baseline, a próxima etapa será definir a estrutura do
-repositório e fixar os runtimes. As etapas posteriores poderão então implementar,
-de maneira incremental, validação e processamento de dados, recursos de IA e
-RAG, uma API com FastAPI e a infraestrutura necessária na AWS.
+Os oito materiais originais fornecidos para o desafio permanecem locais,
+ignorados pelo Git e fora do histórico. O arquivo
+[`data/source-manifest.json`](data/source-manifest.json) registra somente nomes,
+tamanhos e hashes SHA-256 para conferência de integridade; ele não redistribui o
+conteúdo recebido.
 
-Esta branch é a exceção de bootstrap criada a partir de `main`. Depois da
-aprovação da baseline e da criação de `develop`, as tarefas seguintes deverão
-partir de `develop` em worktrees próprias e retornar por pull request.
+As instruções de preparação estão em [`data/README.md`](data/README.md). As
+fixtures públicas em `data/fixtures/` são pequenas, sintéticas e independentes
+dos materiais originais. Dados fornecidos devem ficar em `data/raw/original/`,
+enquanto saídas intermediárias, processadas e geradas usam os diretórios
+ignorados definidos no `.gitignore`.
 
 ## Acesso e direitos
 
