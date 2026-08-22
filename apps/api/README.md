@@ -298,6 +298,57 @@ violações. O diretório canônico deve conter exclusivamente esses dois arquiv
 ambos regulares e sem links simbólicos; ausência, entrada extra ou tipo diferente
 é bloqueante inclusive no caminho idempotente de escrita.
 
+## Inventário categórico de rótulos de falha
+
+`normalize_fault_label()` aplica somente transformações textuais, na ordem
+versionada: Unicode NFKC, trim, colapso da allowlist explícita de whitespace,
+`casefold`, normalização dos separadores `-`, `/`, `\` e `_` para espaço e slug
+estável. A versão Unicode é fixada em `15.1.0`. O slug preserva letras e dígitos
+ASCII, representa espaço por hífen e codifica todos os demais bytes UTF-8 como
+`%XX`; nenhum caractere é transliterado ou removido silenciosamente.
+
+Nulo, tipo não textual, vazio, controles, caracteres de formato — inclusive
+bidi e zero-width —, surrogate, noncharacter e texto UTF-8 inválido produzem
+erros tipados com mensagens sanitizadas. A forma normalizada e o slug são
+campos distintos. A API de lookup exige texto válido e compara o `raw_label`
+exato; qualquer valor não inventariado gera `UnknownFaultLabelError`, mesmo
+quando sua normalização coincidiria com uma categoria conhecida.
+
+`run_fault_label_inventory()` usa a porta auditada em duas rodadas independentes.
+Cada consumidor recebe somente o `BinaryIO` não gravável e chama o parser CSV
+uma vez, com projeção explícita exclusiva de `fault`; o DataFrame de uma coluna
+é descartado dentro da rodada. O runner reconcilia a soma das frequências e a
+cardinalidade com a baseline pública, compara os bytes categóricos das rodadas e
+só então grava atomicamente
+`data/inventories/banner/<source-sha>/fault-labels.v1.json`.
+
+Colisões de raws no mesmo `normalized_label` e de formas normalizadas distintas
+no mesmo slug são detectadas antes da escrita. Uma colisão normalizada exige a
+aprovação explícita do fingerprint exato do grupo e fica marcada como
+`approved_textual_equivalence`; colisão de slug permanece bloqueante. A
+aprovação é somente da equivalência textual produzida pelo pipeline e não cria
+taxonomia, classe operacional ou equivalência semântica.
+
+Quando há colisão normalizada ainda não aprovada, o resultado bloqueado oferece
+`FaultLabelCollisionGroup` imutável com `group_id`, versão, destino normalizado
+e membros categóricos, sem frequências ou dados por linha. O `group_id` vincula
+esses quatro elementos; assim, o P.O. pode revisar o grupo exato antes de
+fornecer uma allowlist do tipo `Set`. Sequências ordenadas ou outros tipos são
+recusados por um gate tipado.
+
+O JSON contém exatamente os 151 mapeamentos categóricos autorizados com
+frequência global, versões de schema/normalização/Unicode, marca
+`approved_categorical_only`, `source_sha256` da baseline, recibos pre/post,
+reconciliações, decisões de colisão aprovadas e `inventory_id` por SHA-256 do
+corpo canônico. Cada decisão persistida repete o grupo categórico exato e sua
+resolução; o validador a compara com os grupos recalculados, além de conferir o
+ID. O arquivo não contém linha, ocorrência, identificador, timestamp, sensor,
+medição, caminho local, host ou usuário. `load_fault_label_inventory()` e
+`validate_fault_label_inventory()` verificam chaves duplicadas, campos extras,
+tipos exatos, ordem, serialização canônica, números não finitos, ID, conteúdo e
+localização somente com o inventário, manifesto e baseline públicos; nenhuma
+delas abre `banner.csv`.
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:

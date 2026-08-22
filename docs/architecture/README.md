@@ -17,14 +17,15 @@ não abre conexão com ele.
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app` e `GET /health/live`. | A liveness verifica apenas o processo e não acessa dependências. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
-| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only, emitir recibos pre/post efetivos, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame e executar a baseline determinística em duas rodadas. | Exige caminhos explícitos somente no acesso à fonte; o profiler normaliza para UTC os instantes aceitos pelo perfil ISO 8601 zonado sem alterar a tabela, e o runner só persiste agregados sanitizados após integridade, gates, reconciliações e igualdade byte a byte. |
-| `apps/api/tests/` | Contratos do pacote, da aplicação, da liveness, da configuração, da fonte, das 26 colunas e do perfil agregado, incluindo golden JSON sintético. | Os testes tabulares usam somente material público sintético; não há regras prescritivas implementadas. |
+| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only, emitir recibos pre/post efetivos, aplicar o contrato v2 das 26 colunas, perfilar o DataFrame, executar a baseline e gerar o inventário categórico normalizado de `fault` em duas rodadas. | Exige caminhos explícitos somente no acesso à fonte; os runners só persistem artefatos aprovados após integridade, gates, reconciliações e igualdade byte a byte, e o inventário pode ser validado offline. |
+| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, configuração, fonte, 26 colunas, perfil agregado e inventário de rótulos, incluindo JSON e cenários Unicode inteiramente sintéticos. | Os testes tabulares usam somente material público sintético; não há regras prescritivas nem taxonomia semântica implementadas. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
 | `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
 | `scripts/smoke.py` | Verifica runtimes, importação, `.env.example`, Compose e liveness HTTP; opcionalmente banco/pgvector. | Não inicia nem encerra serviços e não valida funcionalidades futuras. |
 | `data/source-manifest.json` | Nomes, tamanhos e hashes dos materiais locais. | Não contém nem redistribui os arquivos originais. |
 | `data/fixtures/` | Uma fixture tabular e um relato textual, ambos sintéticos. | Não são amostras dos materiais originais nem dados de produção. |
+| `data/inventories/banner/<source-sha>/fault-labels.v1.json` | Inventário categórico determinístico dos 151 raws, com frequência global, normalização, slug, colisões, versões, recibos e ID de conteúdo. | Não contém ocorrência, identificador, tempo, sensor ou medição e não define equivalência semântica. |
 | `.github/workflows/ci.yml` | Qualidade completa em Ubuntu e teste/smoke essenciais em Windows. | Não faz deploy nem publica release. |
 | `.github/workflows/pull-request-policy.yml` | Testa e aplica a política de título, origem e integridade Git de releases. | O gate Git atua somente em `release/*` → `main`; tarefas e hotfixes recebem apenas a validação de metadados. |
 | `.github/workflows/security.yml` | CodeQL, revisão de dependências e varredura de segredos. | Revisão de dependências existe somente no evento de pull request. |
@@ -88,8 +89,9 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 - **Persistência:** o banco está disponível localmente, mas não existe cliente,
   repositório, migração ou persistência integrada ao backend.
 - **Web:** `apps/web` reserva o limite do workspace; não existe frontend.
-- **Dados:** somente manifesto e fixtures sintéticas são públicos; originais e
-  derivados permanecem locais e ignorados.
+- **Dados:** manifesto, fixtures sintéticas, baseline agregada e inventário
+  categórico aprovado são públicos; originais e demais derivados permanecem
+  locais e ignorados.
 - **Experimentos:** `experiments/` não constitui código de produção.
 
 ## Futuro, não implementado
@@ -97,7 +99,7 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 Os itens abaixo não fazem parte da arquitetura executável atual:
 
 - módulos de domínio e regras de manutenção prescritiva;
-- ingestão, transformação ou pipeline de dados;
+- ingestão contínua ou pipeline de transformação tabular da aplicação;
 - esquema da aplicação, migrações e persistência integrada;
 - embeddings, uso de vetores pela aplicação, similaridade, recuperação de
   contexto, RAG ou LLM;

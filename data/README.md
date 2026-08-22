@@ -2,8 +2,8 @@
 
 Os oito arquivos recebidos para o desafio são fontes locais e não devem ser
 adicionados ao Git. Este diretório mantém o manifesto de integridade, fixtures
-sintéticas e a exceção pública estrita dos dois artefatos agregados da baseline
-auditada descrita abaixo.
+sintéticas e as exceções públicas estritas da baseline agregada e do inventário
+categórico auditado descritas abaixo.
 
 ## Arquivos esperados
 
@@ -139,10 +139,10 @@ para gerar o manifesto; ela não concede licença para publicar esses materiais.
 Todos os valores e textos das fixtures são sintéticos e independentes dos
 materiais originais.
 
-## Baseline pública agregada
+## Artefatos públicos derivados aprovados
 
-A única saída derivada permitida no Git é o par exato abaixo, identificado pelo
-SHA-256 público da fonte aprovado no manifesto:
+A baseline pública é o par exato abaixo, identificado pelo SHA-256 aprovado no
+manifesto:
 
 - `baselines/banner/<source-sha>/baseline.v1.json`;
 - `baselines/banner/<source-sha>/summary.md`.
@@ -155,17 +155,32 @@ fatos independentes. Nenhum deles contém linhas, valores ou timestamps
 individuais, identificadores, rótulos nominais, caminhos locais ou cópias dos
 arquivos originais.
 
-Essa exceção não autoriza outras saídas. Arquivos originais, dados brutos,
+O inventário categórico autorizado é o arquivo exato abaixo, sob a mesma
+identidade pública da fonte:
+
+- `inventories/banner/<source-sha>/fault-labels.v1.json`.
+
+Ele contém exatamente os 151 valores de `raw_label`, cada frequência global,
+`normalized_label`, `slug` e o estado/resolução auditável de colisão. Metadados
+adicionais limitam-se a versões de schema, normalização e Unicode, marca do
+escopo categórico aprovado, identidade pública da fonte, recibos pre/post,
+reconciliações agregadas, resumo e decisões aprovadas de colisões e
+`inventory_id` derivado por SHA-256 da serialização canônica. Cada decisão
+registra o fingerprint ligado à versão, ao destino normalizado e aos membros
+categóricos exatos e é revalidada offline. Não há identificadores, medições,
+timestamps, ocorrências, caminhos locais nem combinações por linha.
+
+Essas exceções não autorizam outras saídas. Arquivos originais, dados brutos,
 intermediários ou processados locais e qualquer outro artefato gerado permanecem
-ignorados, proibidos de versionamento e fora do repositório público. O par da
-baseline não deve ser editado manualmente: sua validação pública é somente
+ignorados, proibidos de versionamento e fora do repositório público. Os
+artefatos não devem ser editados manualmente: a validação pública é somente
 leitura e não depende de acessar a fonte local.
 
 ## Conteúdo público
 
-Somente fixtures inteiramente sintéticas, samples previamente sanitizados e o
-par agregado da baseline definido acima podem ser publicados. Um sample
-sanitizado não pode conter conteúdo proprietário, identificadores reais,
-credenciais ou trechos que permitam reconstruir os materiais originais;
-`data/raw/`, `data/processed/` e demais saídas locais permanecem exclusivamente
-locais e ignoradas pelo Git.
+Somente fixtures inteiramente sintéticas, samples previamente sanitizados, o par
+agregado da baseline e o inventário categórico estritamente limitado definidos
+acima podem ser publicados. Um sample sanitizado não pode conter conteúdo
+proprietário, identificadores reais, credenciais ou trechos que permitam
+reconstruir os materiais originais; `data/raw/`, `data/processed/` e demais
+saídas locais permanecem exclusivamente locais e ignoradas pelo Git.

@@ -40,7 +40,8 @@ A versão atual contém:
 - um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
   como fronteira de integração, ainda sem interface;
 - manifesto de integridade dos materiais locais, duas fixtures públicas
-  inteiramente sintéticas e um par versionado de artefatos agregados da baseline;
+  inteiramente sintéticas, uma baseline agregada e um inventário categórico de
+  rótulos, ambos versionados sob a identidade pública da fonte;
 - uma única porta tipada e somente leitura para `banner.csv`, com caminho de
   entrada explícito, validação de tamanho e SHA-256 antes e depois do consumo;
   `consume_banner_source_audited()` vincula a baseline aos fingerprints
@@ -55,6 +56,10 @@ A versão atual contém:
 - um runner auditado de baseline que executa duas rodadas independentes, aplica
   gates fail-closed e só publica JSON e Markdown sanitizados quando os bytes das
   duas rodadas e seus recibos de integridade coincidem;
+- normalização textual versionada de `fault` e um inventário JSON com os 151
+  rótulos brutos, frequências globais, forma normalizada, slug estável e estado
+  explícito de colisão, gerado em duas rodadas pela mesma porta auditada e
+  validável offline sem a fonte;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -62,8 +67,8 @@ A versão atual contém:
   GitHub Actions e Docker Compose, sempre direcionadas a `develop`;
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
-Não há, nesta etapa, regras de negócio, ingestão de dados, análise de
-similaridade, vetores integrados à aplicação, RAG, LLM, autenticação,
+Não há, nesta etapa, regras de negócio, ingestão contínua pela aplicação,
+análise de similaridade, vetores integrados à aplicação, RAG, LLM, autenticação,
 persistência integrada, readiness, infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
@@ -78,11 +83,11 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, contrato tabular e profiler agregado. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, contrato tabular, profiler agregado e inventário categórico de rótulos. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
-| `data/` | Manifesto dos materiais locais, fixtures sintéticas versionáveis e o par público, agregado e sanitizado da baseline auditada. |
+| `data/` | Manifesto dos materiais locais, fixtures sintéticas e artefatos públicos aprovados da baseline agregada e do inventário categórico. |
 
 O inventário detalhado está em
 [`docs/architecture/README.md`](docs/architecture/README.md), e as decisões que
@@ -100,6 +105,8 @@ sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md)
 │   ├── baselines/banner/<source-sha>/
 │   │   ├── baseline.v1.json # agregado determinístico e sanitizado
 │   │   └── summary.md       # resumo derivado somente do JSON
+│   ├── inventories/banner/<source-sha>/
+│   │   └── fault-labels.v1.json # inventário categórico determinístico
 │   ├── fixtures/            # dados públicos inteiramente sintéticos
 │   └── source-manifest.json # identidade pública dos materiais locais
 ├── docs/
@@ -193,19 +200,21 @@ pelo Git e não podem ser redistribuídos. O arquivo rastreado
 tamanhos e hashes SHA-256 para verificação de integridade; não contém nem
 concede direitos sobre o conteúdo recebido.
 
-Além das fixtures sintéticas em `data/fixtures/`, a única exceção rastreada para
-uma saída derivada é o par exato
-`data/baselines/banner/<source-sha>/baseline.v1.json` e `summary.md`. Esses dois
-arquivos são artefatos de auditoria agregados, determinísticos, sanitizados e
-somente leitura: não contêm linhas, valores ou timestamps individuais, rótulos
-nominais, caminhos locais nem qualquer arquivo original. O Markdown é derivado
-exclusivamente do JSON sanitizado e ambos são validados offline contra o
-manifesto rastreado.
+Além das fixtures sintéticas em `data/fixtures/`, há duas exceções rastreadas
+para saídas derivadas. O par
+`data/baselines/banner/<source-sha>/baseline.v1.json` e `summary.md` contém
+somente auditoria agregada e sanitizada. O arquivo
+`data/inventories/banner/<source-sha>/fault-labels.v1.json` contém somente o
+conjunto categórico aprovado: rótulo bruto, frequência global, forma
+normalizada, slug e estado/resolução de colisão, além de versões, identidade da
+fonte, recibos e reconciliações. Nenhum desses artefatos contém linha,
+identificador, medição, associação temporal, caminho local ou arquivo original;
+todos são validados offline contra o manifesto e a baseline pública.
 
 Dados originais devem ficar em `data/raw/original/`. Originais, dados brutos,
 saídas intermediárias, dados processados e quaisquer outros artefatos gerados
 continuam locais, proibidos de versionamento e cobertos pelos caminhos ignorados
-em `.gitignore`; a baseline pública acima não amplia essa exceção. As regras de
+em `.gitignore`; os artefatos públicos acima não ampliam essas exceções. As regras de
 preparação, conferência e publicação estão em
 [`data/README.md`](data/README.md).
 
@@ -251,7 +260,7 @@ As seguintes capacidades pertencem à evolução futura e **não estão
 implementadas**:
 
 - modelo de domínio e regras prescritivas;
-- ingestão, limpeza ou pipeline de dados;
+- ingestão contínua, limpeza tabular ou pipeline de transformação da aplicação;
 - persistência da aplicação no PostgreSQL e uso de vetores pelo backend;
 - busca por similaridade, recuperação de contexto, RAG ou integração com LLM;
 - autenticação, autorização, readiness e observabilidade de produção;
