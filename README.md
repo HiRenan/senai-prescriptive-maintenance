@@ -45,6 +45,9 @@ A versão atual contém:
   entrada explícito e validação de tamanho e SHA-256 antes e depois do consumo;
 - um catálogo v1 das 26 colunas e um contrato Pandera estrito, ordenado e sem
   coerção implícita, acompanhado de relatórios sanitizados de violação;
+- um profiler determinístico sobre DataFrames já carregados, com indicadores
+  agregados de estrutura, tempo, qualidade por coluna, duplicidade, estatística,
+  rótulos e pares redundantes, além de JSON estável e Markdown resumido;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -68,7 +71,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness e settings. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, contrato tabular e profiler agregado. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
