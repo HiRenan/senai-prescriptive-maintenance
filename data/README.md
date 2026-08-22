@@ -127,3 +127,11 @@ para gerar o manifesto; ela não concede licença para publicar esses materiais.
 
 Todos os valores e textos das fixtures são sintéticos e independentes dos
 materiais originais.
+
+## Conteúdo público
+
+Somente fixtures inteiramente sintéticas e samples previamente sanitizados podem
+ser publicados. Um sample sanitizado não pode conter conteúdo proprietário,
+identificadores reais, credenciais ou trechos que permitam reconstruir os
+materiais originais; `data/raw/` e `data/processed/` permanecem exclusivamente
+locais e ignorados pelo Git.
