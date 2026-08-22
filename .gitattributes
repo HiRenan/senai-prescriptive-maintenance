@@ -13,5 +13,7 @@
 *.lock text eol=lf
 
 .editorconfig   text eol=lf
+.env.example    text eol=lf
 .node-version   text eol=lf
 .python-version text eol=lf
+*.sql           text eol=lf

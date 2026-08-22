@@ -13,6 +13,8 @@ Esta fundação oferece somente:
   `apps/api`;
 - uma aplicação FastAPI mínima, inicializável pelo Uvicorn, com liveness em
   `GET /health/live`;
+- configuração explícita e tipada para ambiente e URL PostgreSQL;
+- um serviço local reproduzível de PostgreSQL 17 com pgvector;
 - verificações diretas de formatação, lint, tipagem estrita, testes e cobertura
   para o backend;
 - execução de tarefas com Poe the Poet;
@@ -23,9 +25,9 @@ Esta fundação oferece somente:
 - separação explícita entre código-fonte, materiais fornecidos, fixtures
   sintéticas e artefatos gerados.
 
-Além da liveness, não há regras de negócio, processamento de dados,
-similaridade, RAG, persistência, serviços locais, interface web ou
-infraestrutura executável nesta etapa.
+Além da liveness e da configuração local, não há regras de negócio,
+processamento de dados, similaridade, RAG, persistência integrada à aplicação ou
+interface web nesta etapa.
 
 ## Runtimes e instalação
 
@@ -44,6 +46,10 @@ corepack pnpm install --frozen-lockfile
 O repositório mantém um único `uv.lock` e um único `pnpm-lock.yaml`, ambos na
 raiz.
 
+A configuração tipada do backend está descrita em
+[`apps/api/README.md`](apps/api/README.md), e o PostgreSQL local está documentado
+em [`infra/README.md`](infra/README.md).
+
 ## Estrutura
 
 ```text
@@ -54,7 +60,7 @@ raiz.
 ├── data/             # manifesto, fixtures sintéticas e dados locais ignorados
 ├── docs/             # convenções e documentação do projeto
 ├── experiments/      # estudos isolados do código de produção
-├── infra/            # fronteira reservada para infraestrutura
+├── infra/            # PostgreSQL e pgvector para desenvolvimento local
 └── scripts/          # fronteira reservada para automações
 ```
 

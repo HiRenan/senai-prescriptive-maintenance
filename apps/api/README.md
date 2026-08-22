@@ -26,6 +26,27 @@ uv run uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --port 8000
 processo está vivo e não acessa banco, arquivos, rede, configurações externas
 ou outros serviços.
 
+## Configuração
+
+`prescriptive_maintenance.settings.Settings` carrega explicitamente dois campos
+obrigatórios: `environment`, restrito a `local`, `test` ou `production`, e
+`database_url`, validado como URL PostgreSQL. As fontes usam o prefixo
+`PRESCRIPTIVE_MAINTENANCE_`; variáveis do processo têm precedência sobre o
+arquivo `.env`, lido opcionalmente em UTF-8.
+
+Copie `.env.example` para `.env` conforme [`infra/README.md`](../../infra/README.md)
+e carregue a configuração somente no ponto que precisar dela:
+
+```python
+from prescriptive_maintenance.settings import Settings
+
+settings = Settings()
+```
+
+Não há valores padrão para os campos obrigatórios. Ausências e valores inválidos
+produzem `pydantic.ValidationError`; a aplicação e a liveness não instanciam
+`Settings` durante a importação ou a criação do app.
+
 ## Verificações
 
 Os comandos disponíveis são executados diretamente a partir da raiz:
