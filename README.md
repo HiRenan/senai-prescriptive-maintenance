@@ -1,70 +1,136 @@
 # Manutenção Prescritiva — Desafio SENAI
 
-Este repositório registra o desenvolvimento de uma solução de manutenção
-prescritiva para ativos industriais. O objetivo do projeto é evoluir, de forma
-auditável, da organização e validação dos dados até recursos de análise,
-recuperação de conhecimento técnico e recomendação de ações de manutenção.
+Este monorepo concentra o backend, a fronteira de integração web, a
+infraestrutura, a documentação, os dados, os experimentos e os scripts do
+projeto. A organização mantém uma única fonte de verdade e prepara um monólito
+modular sem antecipar funcionalidades de etapas posteriores.
 
-> **Estado atual:** esta é a baseline pública inicial. Ainda não há aplicação,
-> API, pipeline de dados, modelo de inteligência artificial ou infraestrutura
-> executável implementados.
+## Estado atual
 
-## Escopo desta baseline
+Esta fundação oferece somente:
 
-A fundação atual estabelece somente:
+- um workspace Python gerenciado por uv, com um único backend instalável em
+  `apps/api`;
+- uma aplicação FastAPI mínima, inicializável pelo Uvicorn, com liveness em
+  `GET /health/live`;
+- configuração explícita e tipada para ambiente e URL PostgreSQL;
+- um serviço local reproduzível de PostgreSQL 17 com pgvector;
+- uma interface Poe para bootstrap, formatação, lint, tipagem estrita, testes,
+  hooks, smoke e controle dos serviços locais;
+- um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
+  como fronteira de integração;
+- versões de runtime, locks e regras de texto consistentes entre Windows e
+  Linux;
+- separação explícita entre código-fonte, materiais fornecidos, fixtures
+  sintéticas e artefatos gerados.
 
-- regras para impedir o versionamento dos materiais originais e de artefatos
-  locais;
-- documentação para preparar e validar os arquivos fornecidos fora do Git;
-- um manifesto com tamanho e SHA-256 dos oito arquivos originais;
-- fixtures pequenas e inteiramente sintéticas para futuros testes básicos;
-- normalização de fim de linha para os formatos textuais já versionados.
+Além da liveness e da configuração local, não há regras de negócio,
+processamento de dados, similaridade, RAG, persistência integrada à aplicação ou
+interface web nesta etapa.
 
-Essa separação mantém o repositório leve e permite comprovar a integridade das
-fontes sem redistribuir conteúdo recebido para o desafio.
+## Pré-requisitos e bootstrap
 
-## Materiais originais
+- Python `>=3.13,<3.14`, com a linha `3.13` registrada em `.python-version`;
+- Node.js `>=22,<23`, com a linha `22` registrada em `.node-version`;
+- pnpm `10.15.1`, fixado em `packageManager` para uso via Corepack;
+- uv, Git, Corepack e, para os comandos de infraestrutura, Docker Desktop ou
+  Docker Engine com Compose v2.
 
-Os PDFs e o arquivo `banner.csv` fornecidos para a prova não fazem parte do
-repositório. Eles devem permanecer em armazenamento local e, quando necessários,
-ser copiados para `data/raw/original/`, diretório ignorado pelo Git.
+Na raiz do repositório, o bootstrap canônico é:
 
-O arquivo [`data/source-manifest.json`](data/source-manifest.json) contém apenas
-os nomes, os tamanhos em bytes e os hashes SHA-256 esperados. As instruções de
-preparação e conferência estão em [`data/README.md`](data/README.md).
+```powershell
+uv run --frozen poe setup
+```
 
-As fixtures em `data/fixtures/` foram escritas especificamente para este projeto,
-com identificadores, datas, medições e relatos fictícios. Elas não reproduzem
-registros do CSV nem trechos dos documentos fornecidos.
+`setup` sincroniza todos os pacotes Python pelo lock, instala o workspace pnpm
+com lock congelado e instala os hooks pre-commit. A tarefa é idempotente e pode
+ser executada novamente sem alterar os locks.
 
-## Estrutura atual
+O repositório mantém um único `uv.lock` e um único `pnpm-lock.yaml`, ambos na
+raiz.
+
+## Comandos locais
+
+Todas as tarefas são executadas da raiz no formato
+`uv run --frozen poe <tarefa>`.
+
+| Tarefa | Finalidade |
+| --- | --- |
+| `setup` | Sincroniza dependências e instala hooks locais. |
+| `format` | Aplica correções seguras e formata com Ruff. |
+| `format-check` | Verifica a formatação sem escrever. |
+| `lint` | Executa Ruff sem correções automáticas. |
+| `typecheck` | Executa Pyright em modo estrito. |
+| `test` | Executa Pytest com cobertura. |
+| `check` | Executa `format-check`, `lint`, `typecheck` e `test`, nessa ordem. |
+| `hooks` | Executa todos os hooks pre-commit. |
+| `services-up` | Inicia o PostgreSQL e aguarda o healthcheck. |
+| `services-down` | Remove contêiner e rede, preservando o volume. |
+| `smoke` | Valida runtimes, configuração, Compose e liveness real. |
+
+`format` é a única tarefa Poe de qualidade que reescreve código. `check` é
+fail-fast, não inicia Docker e não altera arquivos rastreados.
+
+O smoke padrão não exige banco nem arquivo `.env`:
+
+```powershell
+uv run --frozen poe smoke
+```
+
+Para a validação opcional do PostgreSQL e do pgvector, inicie antes o serviço e
+use a mesma flag no Windows e no Ubuntu:
+
+```powershell
+uv run --frozen poe services-up
+uv run --frozen poe smoke --with-services
+uv run --frozen poe services-down
+```
+
+Se `127.0.0.1:5432` estiver ocupada, defina
+`PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT` com uma porta host livre antes de
+`services-up`. A porta interna permanece `5432`; veja os exemplos por sistema em
+[`infra/README.md`](infra/README.md). `services-down` preserva o volume e os
+dados locais por padrão.
+
+A configuração tipada do backend está descrita em
+[`apps/api/README.md`](apps/api/README.md), e o PostgreSQL local está documentado
+em [`infra/README.md`](infra/README.md).
+
+Mensagens de commit são escritas em inglês no formato Conventional Commits
+`<type>(<scope opcional>): <description>`. A governança completa de contribuição
+pertence à SEN-17.
+
+## Estrutura
 
 ```text
 .
-├── data/
-│   ├── fixtures/
-│   │   ├── banner.synthetic.csv
-│   │   └── maintenance.synthetic.txt
-│   ├── README.md
-│   └── source-manifest.json
-├── .gitattributes
-├── .gitignore
-└── README.md
+├── apps/
+│   ├── api/          # pacote Python instalável do backend
+│   └── web/          # fronteira de workspace, sem implementação de UI
+├── data/             # manifesto, fixtures sintéticas e dados locais ignorados
+├── docs/             # convenções e documentação do projeto
+├── experiments/      # estudos isolados do código de produção
+├── infra/            # PostgreSQL e pgvector para desenvolvimento local
+└── scripts/          # fronteira reservada para automações
 ```
 
-Não há dependências ou comandos de execução nesta etapa. Para preparar os dados
-locais, siga o guia do diretório `data/`.
+Os identificadores técnicos e o código são escritos em inglês. A documentação
+e as explicações destinadas ao projeto são escritas em português. As convenções
+completas estão em [`docs/README.md`](docs/README.md).
 
-## Próximos passos
+## Materiais originais e dados
 
-Após a revisão desta baseline, a próxima etapa será definir a estrutura do
-repositório e fixar os runtimes. As etapas posteriores poderão então implementar,
-de maneira incremental, validação e processamento de dados, recursos de IA e
-RAG, uma API com FastAPI e a infraestrutura necessária na AWS.
+Os oito materiais originais fornecidos para o desafio permanecem locais,
+ignorados pelo Git e fora do histórico. O arquivo
+[`data/source-manifest.json`](data/source-manifest.json) registra somente nomes,
+tamanhos e hashes SHA-256 para conferência de integridade; ele não redistribui o
+conteúdo recebido.
 
-Esta branch é a exceção de bootstrap criada a partir de `main`. Depois da
-aprovação da baseline e da criação de `develop`, as tarefas seguintes deverão
-partir de `develop` em worktrees próprias e retornar por pull request.
+As instruções de preparação estão em [`data/README.md`](data/README.md). As
+fixtures públicas em `data/fixtures/` são pequenas, sintéticas e independentes
+dos materiais originais. Dados fornecidos devem ficar em `data/raw/original/`,
+enquanto saídas intermediárias, processadas e geradas usam os diretórios
+ignorados definidos no `.gitignore`.
 
 ## Acesso e direitos
 

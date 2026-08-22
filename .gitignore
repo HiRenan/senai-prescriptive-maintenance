@@ -22,6 +22,11 @@ Doc6.pdf
 *.db
 *.sqlite
 *.sqlite3
+*.backup
+*.dump
+*.dump.gz
+*.pgdump
+*.sql.gz
 
 # Modelos, experimentos e artefatos de ML
 /artifacts/
@@ -98,6 +103,8 @@ cdk.out/
 .terraform/
 *.tfstate
 *.tfstate.*
+/infra/postgres/data/
+/infra/volumes/
 
 # Logs e arquivos temporários
 *.log
@@ -118,3 +125,7 @@ temp/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Metadados locais de empacotamento e cache
+*.egg-info/
+.uv-cache/
