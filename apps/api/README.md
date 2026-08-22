@@ -87,9 +87,11 @@ inclui índices nem valores de células.
 Esta primeira versão preserva cada coluna na unidade em que a fonte a publica;
 por isso, unidade de origem e canônica são iguais. As colunas paralelas em
 `in/s` e `mm/s`, assim como `°F` e `°C`, continuam independentes e nenhuma
-conversão ou conferência cruzada é feita. Alterar nome, posição, tipo, unidade,
-nulabilidade ou domínio exige incrementar `BANNER_CONTRACT_VERSION`, editar o
-catálogo e acrescentar ou ajustar o teste correspondente no mesmo pull request.
+conversão é aplicada. O contrato não faz conferência cruzada; o profiler
+agregado descrito abaixo apenas mede a coerência observada. Alterar nome,
+posição, tipo, unidade, nulabilidade ou domínio exige incrementar
+`BANNER_CONTRACT_VERSION`, editar o catálogo e acrescentar ou ajustar o teste
+correspondente no mesmo pull request.
 
 `fault` é deliberadamente um rótulo bruto não vazio. O contrato não enumera o
 vocabulário real nem normaliza categorias; uma allowlist só é aplicada quando o
@@ -142,6 +144,114 @@ do contrato.
 A factory apenas constrói entradas intencionais. Ela não faz parsing,
 normalização, limpeza, taxonomia, perfil estatístico ou divisão de dados; essas
 responsabilidades permanecem fora deste escopo.
+
+## Profiler determinístico agregado
+
+`profile_banner_dataframe()` recebe somente um `DataFrame` já carregado. A
+função não abre arquivos, não conhece caminhos locais, não chama a porta de
+acesso à fonte e não altera a tabela. A chave de análise deve ser declarada pelo
+chamador porque o contrato não presume unicidade de `id`; no exemplo abaixo,
+`id` com `created_at` é uma escolha exclusivamente sintética:
+
+```python
+from prescriptive_maintenance.data import (
+    banner_profile_json_bytes,
+    profile_banner_dataframe,
+    render_banner_profile_markdown,
+)
+
+profile = profile_banner_dataframe(
+    dataframe,
+    key_columns=("id", "created_at"),
+    allowed_fault_categories=frozenset({"synthetic_nominal", "synthetic_warning"}),
+)
+json_bytes = banner_profile_json_bytes(profile)
+markdown = render_banner_profile_markdown(profile)
+```
+
+O argumento `allowed_fault_categories` é opcional. Quando ausente, cada categoria
+observada é publicada sem nome (`label = null`) e recebe apenas um
+`unapproved_ordinal` positivo na ordem das contagens. Quando presente, somente esse
+vocabulário explicitamente confiável pode ser nomeado; categorias não aprovadas
+continuam anônimas, e categorias permitidas com contagem zero aparecem na
+distribuição. Empates produzem registros públicos indistinguíveis: o texto bruto
+jamais escolhe nomes, desempata ou reserva ordinais, portanto histogramas iguais
+produzem os mesmos bytes quando os demais indicadores e a configuração são
+mantidos. Cardinalidade, contagens e balanceamento permanecem verificáveis sem
+expor o valor bruto.
+
+O vocabulário confiável aceita somente textos não vazios codificáveis em UTF-8 e
+sem caracteres Unicode de controle, formato ou surrogate. Configuração inválida,
+inclusive item não textual, gera `BannerProfileConfigurationError`; uma célula não
+hashable que impeça a agregação de duplicatas gera `BannerProfileInputError`, sempre
+com mensagem sanitizada. `key_columns` aceita somente uma sequência textual
+ordenada; string única, `set` e `frozenset` são rejeitados por serem ambíguos.
+
+### Inventário de indicadores
+
+| Indicador | Finalidade e definição |
+| --- | --- |
+| Volume e estrutura | Registra linhas, colunas observadas e esperadas, ausências, excedentes e aderência à ordem das 26 colunas sem publicar nomes inesperados. |
+| Período e ordenação | Usa somente timestamps válidos no formato UTC do contrato; publica limites agregados do período e classifica a sequência de entrada como constante, não decrescente, não crescente ou desordenada. |
+| Cadência e lacunas | Ordena instantes UTC distintos, calcula os intervalos positivos e escolhe a moda como cadência nominal; empates escolhem o menor intervalo. Lacuna é cada intervalo estritamente maior que a cadência, e sua duração é somente o excesso agregado. |
+| Qualidade por coluna | Para cada uma das 26 posições, inclusive ausentes ou sem achados, informa presença, aderência de tipo e contagens/percentuais separados de `null`, `NaN`, infinito, domínio e categoria desconhecida. |
+| Duplicatas completas | Conta grupos idênticos e linhas excedentes além da primeira, sem devolver índices, valores ou registros. |
+| Conflitos por chave | Para a chave explicitamente declarada, conta grupos repetidos e aqueles cujos demais campos divergem; linhas com chave incompleta são apenas contabilizadas e excluídas dos grupos. |
+| Estatística numérica | Para medições `float64`, usa somente valores finitos e publica contagem, mínimo, máximo, média, desvio, três quantis, IQR, cercas e quantidade fora das cercas. `id` não recebe estatísticas descritivas para não expor distribuição de identificadores. |
+| Distribuição de rótulos | Nomeia somente categorias da allowlist confiável, representa as demais por `label = null` e ordinal agregado, inclui categorias permitidas ausentes e calcula maioria, minoria, razão maioria/minoria e entropia normalizada sem publicar valores observados não aprovados. |
+| Pares redundantes | Compara agregadamente quatro pares `in/s`–`mm/s` pela relação `mm/s = in/s × 25,4` e o par de temperatura por `°F = °C × 1,8 + 32`, publicando disponibilidade, consistência e erro absoluto máximo. |
+
+### Definições reproduzíveis
+
+- os quantis são `0,25`, `0,50` e `0,75` pelo método linear tipo 7;
+- o desvio é populacional (`ddof = 0`); as cercas são
+  `Q1 - 1,5 × IQR` e `Q3 + 1,5 × IQR`, e somente valores estritamente fora delas
+  contam como outliers;
+- estatísticas incluem valores finitos mesmo quando violam domínio, mantendo
+  observação separada de decisão; `null`, `NaN` e infinito não entram nelas;
+- cálculos de estatísticas, quantis, IQR, desvio e pares de unidade convertem cada
+  `float64` finito para sua representação decimal exata e usam precisão interna
+  suficiente para toda a faixa do tipo, evitando overflow e cancelamento em
+  somas de sinais opostos. Cada operação usa um contexto decimal completo com
+  precisão calculada, arredondamento, expoentes, flags e traps definidos
+  internamente, sem herdar o contexto decimal do processo;
+- `None`, `pd.NA` e `pd.NaT` são `null`; `NaN` IEEE é contado separadamente;
+  infinito e violação de domínio também são dimensões separadas;
+- a tolerância dos pares é o maior valor entre `1e-6` absoluto e `1e-6`
+  relativo ao maior módulo comparado; a comparação ocorre no domínio decimal
+  mesmo quando o valor convertido não caberia em `float64`;
+- todo instante é interpretado em UTC com a fração decimal completa aceita pelo
+  contrato. Ordenação, distinção, cadência e lacunas usam essa precisão exata;
+  limites de período usam ISO 8601 canônico com ao menos seis casas e preservam
+  todas as casas significativas adicionais;
+- números derivados e percentuais são arredondados a seis casas pelo modo
+  decimal half-even. Se um derivado finito exceder `float64` ou um valor não zero
+  ficar abaixo dessa resolução pública, o campo recebe `null`, nunca infinito,
+  `NaN` ou zero enganoso; contagens e classificações continuam calculadas com a
+  precisão interna;
+- percentuais por coluna usam células observadas, percentuais de rótulo usam
+  rótulos válidos e percentuais de pares usam comparações disponíveis. Sem
+  denominador válido, inclusive para entropia, a métrica é `null`;
+- colunas seguem o catálogo; categorias confiáveis seguem pontos de código
+  Unicode e categorias não aprovadas seguem contagem decrescente e ordinal
+  sequencial, sem nome nem qualquer ordenação derivada do valor bruto. Chaves JSON
+  seguem a declaração do esquema público.
+
+`PUBLIC_BANNER_PROFILE_SCHEMA` classifica recursivamente cada campo como
+agregado, configuração ou esquema. A mesma proteção é executada antes do JSON e
+do Markdown e recusa qualquer campo classificado como linha, caminho local,
+amostra, identificador individual, timestamp individual ou combinação
+reidentificável. O JSON usa UTF-8, indentação fixa, LF final e ordem declarada,
+de modo que a mesma entrada e configuração produzam exatamente os mesmos bytes.
+Além da classificação estrutural, os publicadores validam os valores, recusam
+texto Unicode inseguro em perfis construídos manualmente e exigem `label = null`
+com ordinal sequencial para toda categoria não aprovada. O Markdown usa uma
+descrição fixa derivada somente do ordinal para categorias anônimas e codifica
+sintaxe ativa, inclusive links e HTML, mesmo para rótulos explicitamente
+confiáveis.
+
+O profiler mede; ele não limpa, remove, imputa, converte unidades, normaliza
+rótulos nem define limiares finais de qualidade.
 
 ## Verificações
 
