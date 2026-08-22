@@ -11,18 +11,29 @@ armazenamento de objetos ou recursos de nuvem.
 - porta `127.0.0.1:5432` livre, ou outra porta local livre escolhida
   explicitamente.
 
-Execute os comandos abaixo a partir da raiz do repositório. Antes de iniciar,
-copie deliberadamente o exemplo versionado para a configuração local:
+Execute os comandos abaixo a partir da raiz do repositório. A interface
+recomendada inicia o banco em modo detached, aguarda o healthcheck e o remove
+preservando os dados:
+
+```powershell
+uv run --frozen poe services-up
+uv run --frozen poe smoke --with-services
+uv run --frozen poe services-down
+```
+
+O smoke carrega `.env.example` explicitamente e não cria nem exige `.env`. Para
+executar manualmente um fluxo da aplicação que instancia `Settings()` sem
+informar um arquivo, copie deliberadamente o exemplo versionado para `.env`:
 
 ```powershell
 Copy-Item -LiteralPath .env.example -Destination .env
 ```
 
-O arquivo `.env` é ignorado pelo Git. Os valores do exemplo, inclusive a senha
-`local_only_change_me`, são fictícios e exclusivos para desenvolvimento local;
-nunca os reutilize em outro ambiente.
+O arquivo `.env` é ignorado pelo Git. Os valores do exemplo são fictícios e
+exclusivos para desenvolvimento local; nunca os reutilize em outro ambiente.
 
-Valide a configuração resolvida antes de criar recursos:
+Como diagnóstico estático avançado, valide a configuração resolvida sem criar
+recursos:
 
 ```powershell
 docker compose config
@@ -33,20 +44,26 @@ isso esse comando também funciona antes da cópia e usa a porta host `5432` com
 padrão. A cópia é necessária para carregar explicitamente as configurações da
 aplicação pelo exemplo.
 
-Se a porta host `5432` já estiver ocupada, preserve o serviço existente e
-sobrescreva, na mesma sessão do PowerShell, tanto a porta publicada quanto a URL
-consumida pela aplicação. O exemplo abaixo usa `55432`; confirme antes que ela
-está livre:
+Se a porta host `5432` já estiver ocupada, preserve o serviço existente e defina
+uma porta livre antes de executar `services-up`. No PowerShell:
 
 ```powershell
 $env:PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT = "55432"
-$env:PRESCRIPTIVE_MAINTENANCE_DATABASE_URL = "postgresql://prescriptive_maintenance:local_only_change_me@127.0.0.1:55432/prescriptive_maintenance"
-docker compose config
+uv run --frozen poe services-up
+```
+
+No Ubuntu:
+
+```bash
+export PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT=55432
+uv run --frozen poe services-up
 ```
 
 `PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT` altera somente a porta no host. A
 porta do contêiner permanece `5432`, e a publicação continua restrita a
-`127.0.0.1`.
+`127.0.0.1`. Ao conectar a aplicação manualmente, ajuste também
+`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL` para a mesma porta host. O comando
+`uv run --frozen poe smoke --with-services` é idêntico nos dois sistemas.
 
 ## Imagem reproduzível
 
@@ -67,11 +84,10 @@ docker pull pgvector/pgvector:0.8.6-pg17@sha256:cf134a767f474095eeba57e0117be8e5
 
 ## Inicialização e inspeção
 
-Baixe a referência fixada e aguarde o banco ficar saudável:
+Inicie a referência fixada e aguarde o banco ficar saudável:
 
 ```powershell
-docker compose pull postgres
-docker compose up --wait
+uv run --frozen poe services-up
 docker compose ps
 ```
 
@@ -98,12 +114,13 @@ docker compose stop
 docker compose up --wait
 ```
 
-`down` remove o contêiner e a rede deste projeto, mas preserva o volume nomeado.
-O próximo `up --wait` recria o serviço sobre os dados existentes:
+`services-down` executa `docker compose down`: remove o contêiner e a rede deste
+projeto, mas preserva o volume nomeado. O próximo `services-up` recria o serviço
+sobre os dados existentes:
 
 ```powershell
-docker compose down
-docker compose up --wait
+uv run --frozen poe services-down
+uv run --frozen poe services-up
 ```
 
 > **Operação destrutiva para dados locais:** o comando abaixo remove também o

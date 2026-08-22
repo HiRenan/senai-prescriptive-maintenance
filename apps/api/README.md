@@ -10,7 +10,7 @@ para execução e testes.
 A partir da raiz do repositório, sincronize todo o workspace pelo lock:
 
 ```powershell
-uv sync --all-packages --frozen
+uv run --frozen poe setup
 ```
 
 ## Execução local
@@ -18,13 +18,20 @@ uv sync --all-packages --frozen
 Inicie a aplicação em uma interface exclusivamente local:
 
 ```powershell
-uv run uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --port 8000
+uv run --frozen uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --port 8000
 ```
 
 `GET /health/live` responde com status HTTP `200`, conteúdo
 `application/json` e corpo `{"status":"ok"}`. A liveness verifica apenas que o
 processo está vivo e não acessa banco, arquivos, rede, configurações externas
 ou outros serviços.
+
+A verificação canônica inicia o Uvicorn em loopback e porta efêmera, faz a
+requisição HTTP real e encerra o processo ao final, sem exigir banco ou `.env`:
+
+```powershell
+uv run --frozen poe smoke
+```
 
 ## Configuração
 
@@ -49,12 +56,16 @@ produzem `pydantic.ValidationError`; a aplicação e a liveness não instanciam
 
 ## Verificações
 
-Os comandos disponíveis são executados diretamente a partir da raiz:
+As verificações canônicas são executadas a partir da raiz:
 
 ```powershell
-uv run poe check-api-import
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest
+uv run --frozen poe format-check
+uv run --frozen poe lint
+uv run --frozen poe typecheck
+uv run --frozen poe test
+uv run --frozen poe check
 ```
+
+`format` aplica correções seguras e formatação Ruff; é a única tarefa Poe de
+qualidade que escreve. `check` executa as quatro verificações somente leitura em
+sequência fail-fast.
