@@ -17,7 +17,7 @@ não abre conexão com ele.
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app` e `GET /health/live`. | A liveness verifica apenas o processo e não acessa dependências. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
-| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna importável da camada de dados, incluída na checagem estática do backend. | Não expõe API própria nem implementa leitura, contrato, validação, transformação, persistência ou visualização. |
+| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only e validar nome, tamanho e SHA-256 antes e depois do consumo. | Exige caminhos explícitos e não implementa parsing, contrato tabular, transformação, persistência ou visualização. |
 | `apps/api/tests/` | Contratos do pacote, da aplicação, da liveness e da configuração. | Não há testes de domínio porque não há domínio implementado. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
 | `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |

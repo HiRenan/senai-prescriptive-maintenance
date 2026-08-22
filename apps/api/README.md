@@ -54,6 +54,21 @@ Não há valores padrão para os campos obrigatórios. Ausências e valores inv�
 produzem `pydantic.ValidationError`; a aplicação e a liveness não instanciam
 `Settings` durante a importação ou a criação do app.
 
+## Acesso à fonte tabular
+
+`prescriptive_maintenance.data.consume_banner_source()` é a única porta de
+entrada autorizada para `banner.csv`. A chamada exige `input_path`,
+`manifest_path` e um consumidor binário explicitamente; não há descoberta,
+caminho padrão ou busca recursiva.
+
+O componente lê o nome aprovado, o tamanho e o SHA-256 do manifesto público,
+abre a fonte com descritor estritamente read-only e só chama o consumidor após
+validar o fingerprint inicial. Antes de devolver o resultado, calcula novamente
+o fingerprint no mesmo descritor e rejeita qualquer alteração. Os erros tipados
+diferenciam ausência, nome inesperado, tamanho, hash, mutação e permissão sem
+expor caminho absoluto ou conteúdo. Parsing tabular e interface de linha de
+comando não fazem parte deste contrato.
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:
