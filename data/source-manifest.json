@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "hash_algorithm": "sha256",
+  "files": [
+    {
+      "name": "11 - prova prtica.pdf",
+      "size_bytes": 290455,
+      "sha256": "02263b39130e45cc6849045655f488880bf281ca35acf703068cd6def6eb5270"
+    },
+    {
+      "name": "banner.csv",
+      "size_bytes": 32321076,
+      "sha256": "48ce42c0362edb7e25c215c68dd8e51890d435ab6df4b359501a83b001a994b7"
+    },
+    {
+      "name": "Doc1.pdf",
+      "size_bytes": 374101,
+      "sha256": "b3a04698d02d86f741e3dcfd21d210f12356f0c49d57a67e246338f8e748d8ea"
+    },
+    {
+      "name": "Doc2.pdf",
+      "size_bytes": 149163,
+      "sha256": "111b036ca63b74abd42ebc640219053ac8bf8db3181d808823190673ddd65153"
+    },
+    {
+      "name": "Doc3.pdf",
+      "size_bytes": 152526,
+      "sha256": "13d15dd038b506dcc0ad4ce379fb017d7b9fed77a3034b4c818383e0ed5388d8"
+    },
+    {
+      "name": "Doc4.pdf",
+      "size_bytes": 101173,
+      "sha256": "bb37221db8fb4c5359fc798d982f93d817556e70a7ebe178664a7ab4dc345ee2"
+    },
+    {
+      "name": "Doc5.pdf",
+      "size_bytes": 150699,
+      "sha256": "9312430fdb2411241bd49c183ca0c45a67ac043c88408ae241d4842ac205c46c"
+    },
+    {
+      "name": "Doc6.pdf",
+      "size_bytes": 102473,
+      "sha256": "7cd497828242d9ec0230618f1a999166951c4d8be6e282f89f75f08d36e3acf9"
+    }
+  ]
+}
