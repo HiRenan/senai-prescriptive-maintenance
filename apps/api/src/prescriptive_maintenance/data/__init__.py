@@ -1,5 +1,20 @@
 """Backend data-layer package boundary."""
 
+from prescriptive_maintenance.data.contract import (
+    BANNER_COLUMN_CATALOG,
+    BANNER_COLUMN_NAMES,
+    BANNER_CONTRACT_VERSION,
+    BANNER_DATAFRAME_SCHEMA,
+    BannerColumnContract,
+    BannerValidationReport,
+    ContractViolation,
+    ContractViolationCode,
+    LogicalType,
+    StatisticalFinding,
+    ValidationSeverity,
+    build_banner_dataframe_schema,
+    validate_banner_dataframe,
+)
 from prescriptive_maintenance.data.source import (
     BannerSourceError,
     SourceAccessError,
@@ -15,7 +30,16 @@ from prescriptive_maintenance.data.source import (
 )
 
 __all__ = [
+    "BANNER_COLUMN_CATALOG",
+    "BANNER_COLUMN_NAMES",
+    "BANNER_CONTRACT_VERSION",
+    "BANNER_DATAFRAME_SCHEMA",
+    "BannerColumnContract",
     "BannerSourceError",
+    "BannerValidationReport",
+    "ContractViolation",
+    "ContractViolationCode",
+    "LogicalType",
     "SourceAccessError",
     "SourceChangedError",
     "SourceHashMismatchError",
@@ -24,6 +48,10 @@ __all__ = [
     "SourceNotFoundError",
     "SourcePermissionError",
     "SourceSizeMismatchError",
+    "StatisticalFinding",
     "UnexpectedSourceNameError",
+    "ValidationSeverity",
+    "build_banner_dataframe_schema",
     "consume_banner_source",
+    "validate_banner_dataframe",
 ]

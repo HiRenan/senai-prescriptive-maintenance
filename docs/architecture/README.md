@@ -17,8 +17,8 @@ não abre conexão com ele.
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app` e `GET /health/live`. | A liveness verifica apenas o processo e não acessa dependências. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
-| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only e validar nome, tamanho e SHA-256 antes e depois do consumo. | Exige caminhos explícitos e não implementa parsing, contrato tabular, transformação, persistência ou visualização. |
-| `apps/api/tests/` | Contratos do pacote, da aplicação, da liveness e da configuração. | Não há testes de domínio porque não há domínio implementado. |
+| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only, validar sua integridade e aplicar o contrato v1 estrito e ordenado das 26 colunas a um DataFrame fornecido. | Exige caminhos explícitos, não faz coerção e não implementa parsing, correção, conversão de unidades, profiling, transformação, persistência ou visualização. |
+| `apps/api/tests/` | Contratos do pacote, da aplicação, da liveness, da configuração, da fonte e das 26 colunas. | Os testes tabulares usam somente a fixture pública sintética; não há regras prescritivas implementadas. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
 | `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
@@ -97,7 +97,7 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 Os itens abaixo não fazem parte da arquitetura executável atual:
 
 - módulos de domínio e regras de manutenção prescritiva;
-- ingestão, transformação, pipeline ou catálogo de dados;
+- ingestão, transformação, pipeline ou profiling estatístico de dados;
 - esquema da aplicação, migrações e persistência integrada;
 - embeddings, uso de vetores pela aplicação, similaridade, recuperação de
   contexto, RAG ou LLM;
