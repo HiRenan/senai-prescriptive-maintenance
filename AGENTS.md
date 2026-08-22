@@ -54,11 +54,28 @@ segurança, dados ou GitFlow sem uma decisão explícita do responsável pelo pr
   nessas branches.
 - Commits usam Conventional Commits em inglês. O pull request da tarefa aponta
   para `develop`, referencia o identificador Linear e registra validações.
-- A integração é feita por squash após revisão. A branch de tarefa só é removida
-  depois da confirmação do merge.
-- Uma release promove `develop` para `main` por pull request. Hotfix é a única
-  exceção: nasce de `main`, retorna a `main` por PR e deve ser sincronizado de
-  volta para `develop`.
+- Tarefas comuns entram em `develop` por squash após revisão. A branch de tarefa
+  só é removida depois da confirmação do merge.
+- Toda promoção é executada em uma nova worktree isolada, enquanto a worktree
+  principal permanece em `develop` e limpa. Sua branch curta local
+  `release/sen-<id>-<slug>` nasce da `origin/develop` validada e não recebe
+  implementação: incorpora somente a `origin/main` vigente e deve terminar em
+  um único merge commit com dois pais exatos, `origin/develop` primeiro e
+  `origin/main` segundo, além de árvore idêntica à `origin/develop`.
+- Antes do merge da release, `git merge-tree --write-tree origin/develop
+  origin/main` deve concluir sem conflito e produzir exatamente a árvore de
+  `origin/develop`. Não resolva conflito em uma release normal: sincronize
+  `develop` primeiro. Somente a reparação da divergência legada de squash pode
+  usar o fallback em que a árvore atual de `main` já existe no histórico
+  alcançável de `develop`, com resolução conservadora e árvore final idêntica.
+- O pull request de release aponta de `release/*` para `main`, cumpre os oito
+  checks obrigatórios e é integrado por merge commit. Pull request direto de
+  `develop`, branch de tarefa ou fork para `main` é proibido.
+- Hotfix nasce de `main`, retorna a `main` por PR com squash e deve ser
+  sincronizado de volta para `develop` antes da próxima release.
+- `develop` exige histórico linear. `main` permite os merge commits necessários
+  às releases; pull request obrigatório, branch atualizada, checks, conversas
+  resolvidas e bloqueios de force push e exclusão permanecem nas duas.
 - A SEN-11 foi uma exceção única de bootstrap criada de `main`; ela não é
   precedente para novas tarefas.
 

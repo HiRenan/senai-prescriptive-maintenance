@@ -9,11 +9,11 @@ sem repetir extensamente a mesma orientação.
 | Documento | Responsabilidade |
 | --- | --- |
 | [`../README.md`](../README.md) | Orientação inicial, quickstart e limites do produto atual. |
-| [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | GitFlow, papéis, branches, commits, pull requests, releases e hotfixes. |
+| [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | GitFlow, papéis, branches, commits, pull requests e promoção verificável de releases e hotfixes. |
 | [`../SECURITY.md`](../SECURITY.md) | Reporte privado, segredos, vazamentos e práticas proibidas em produção. |
 | [`adr/README.md`](adr/README.md) | Índice das decisões arquiteturais aceitas. |
 | [`architecture/README.md`](architecture/README.md) | Inventário dos componentes que realmente existem. |
-| [`validation/foundation-clean-room.md`](validation/foundation-clean-room.md) | Evidências da validação da Foundation em clone público limpo. |
+| [`validation/foundation-clean-room.md`](validation/foundation-clean-room.md) | Evidências históricas da validação da Foundation em clone público limpo e adendo sobre o fluxo de promoção. |
 | [`../data/README.md`](../data/README.md) | Preparação local, integridade e fronteira dos materiais e fixtures. |
 
 ## Idioma

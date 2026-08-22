@@ -11,7 +11,9 @@
 Marque exatamente o fluxo aplicável:
 
 - [ ] Tarefa: branch curta criada de `origin/develop` → `develop`.
-- [ ] Release: `develop` → `main`.
+- [ ] Release: branch local `release/sen-<id>-<slug>` criada de
+      `origin/develop`, contendo somente a reconciliação com `origin/main` →
+      `main`.
 - [ ] Hotfix: branch local `hotfix/sen-<id>-<slug>` criada de `main` → `main`.
 - [ ] Sincronização de hotfix: branch criada de `origin/develop` → `develop`,
       com referência ao PR e ao commit squash em `main`.
@@ -67,10 +69,14 @@ comando — resultado
 - [ ] O diff contém somente alterações justificadas pela tarefa.
 - [ ] Locks congelados e arquivos rastreados permaneceram estáveis durante as
       verificações.
+- [ ] Em uma release, o `HEAD` tem exatamente dois pais — `origin/develop`
+      primeiro e `origin/main` segundo —, contém a `main` vigente e tem árvore
+      idêntica à `develop` vigente; o merge virtual é limpo e neutro, ou o
+      fallback legado de árvore alcançável foi comprovado.
 - [ ] `git diff --check` e os checks obrigatórios passaram.
 - [ ] Conversas de revisão foram resolvidas.
-- [ ] A integração será feita por squash, sem push direto em `develop` ou
-      `main`.
+- [ ] Tarefas e hotfixes serão integrados por squash; releases serão integradas
+      por merge commit. Não haverá push direto em `develop` ou `main`.
 - [ ] Riscos, limitações e trabalho restante estão descritos abaixo.
 
 ## Riscos, limitações e trabalho restante
