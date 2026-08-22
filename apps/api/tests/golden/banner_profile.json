@@ -24,8 +24,8 @@
     "unrepresentable_numeric_policy": "json_null_after_public_rounding_underflow_or_float64_overflow",
     "percentage_denominators": "column=observed;label=valid;unit_pair=comparable",
     "column_order": "banner_contract_position_ascending",
-    "category_order": "trusted_unicode_then_unapproved_count_descending",
-    "label_publication_policy": "trusted_allowlist_or_opaque_sequential_alias",
+    "category_order": "trusted_unicode_then_unapproved_count_descending_ordinal",
+    "label_publication_policy": "trusted_allowlist_or_null_label_with_ordinal",
     "json_key_order": "public_schema_declaration_order"
   },
   "volume": {
@@ -950,12 +950,14 @@
     "distribution": [
       {
         "label": "synthetic_nominal",
+        "unapproved_ordinal": null,
         "count": 3,
         "percentage": 100.0,
         "is_allowed": true
       },
       {
         "label": "synthetic_warning",
+        "unapproved_ordinal": null,
         "count": 0,
         "percentage": 0.0,
         "is_allowed": true

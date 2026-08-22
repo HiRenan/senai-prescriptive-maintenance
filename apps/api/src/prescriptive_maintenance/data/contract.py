@@ -17,6 +17,8 @@ import pandera.pandas as pa
 from pandas.api.types import is_string_dtype
 from pandera.errors import SchemaErrors
 
+from prescriptive_maintenance.data._decimal import isolated_decimal_context
+
 BANNER_CONTRACT_VERSION: Final = 1
 
 
@@ -61,8 +63,8 @@ class BannerUtcTimestamp:
             -cast(int, earlier.fractional_second.as_tuple().exponent),
         )
         whole_digits = len(str(abs(whole_seconds))) if whole_seconds else 1
-        with localcontext() as context:
-            context.prec = whole_digits + fraction_places + 4
+        precision = whole_digits + fraction_places + 4
+        with localcontext(isolated_decimal_context(precision)):
             return (
                 Decimal(whole_seconds)
                 + self.fractional_second

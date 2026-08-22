@@ -6,7 +6,7 @@ import builtins
 import json
 import locale
 from dataclasses import replace
-from decimal import ROUND_DOWN, localcontext
+from decimal import ROUND_DOWN, Inexact, Rounded, localcontext
 from math import isfinite
 from numbers import Real
 from pathlib import Path
@@ -113,10 +113,10 @@ def test_profile_is_typed_complete_and_uses_fixed_numeric_definitions() -> None:
     )
     assert profile.definitions.column_order == "banner_contract_position_ascending"
     assert profile.definitions.category_order == (
-        "trusted_unicode_then_unapproved_count_descending"
+        "trusted_unicode_then_unapproved_count_descending_ordinal"
     )
     assert profile.definitions.label_publication_policy == (
-        "trusted_allowlist_or_opaque_sequential_alias"
+        "trusted_allowlist_or_null_label_with_ordinal"
     )
     assert profile.definitions.json_key_order == "public_schema_declaration_order"
     assert _column(profile, "id").numeric_statistics is None
@@ -428,6 +428,25 @@ def test_submicrosecond_utc_instants_remain_distinct_ordered_and_cadenced() -> N
     assert temporal.maximum_interval_seconds is None
 
 
+def test_year_one_utc_instants_keep_four_digit_padding_and_exact_order() -> None:
+    dataframe = make_banner_dataframe()
+    dataframe["created_at"] = pd.Series(
+        (
+            "0001-01-01T00:00:00.0000001Z",
+            "0001-01-01T00:00:00.0000002Z",
+            "0001-01-01T00:00:00.0000003Z",
+        ),
+        dtype="string",
+    )
+
+    profile = profile_banner_dataframe(dataframe, key_columns=_DECLARED_KEY)
+
+    assert profile.temporal.period_start_utc == "0001-01-01T00:00:00.0000001Z"
+    assert profile.temporal.period_end_utc == "0001-01-01T00:00:00.0000003Z"
+    assert profile.temporal.distinct_timestamp_count == 3
+    assert profile.temporal.input_order is TemporalOrder.NONDECREASING
+
+
 def test_temporal_input_order_is_reported_without_reordering_the_dataframe() -> None:
     descending = make_banner_dataframe().iloc[::-1].reset_index(drop=True)
     unordered = make_banner_dataframe().iloc[[0, 2, 1]].reset_index(drop=True)
@@ -489,7 +508,7 @@ def test_allowed_categories_include_zero_count_entries_and_balance() -> None:
     (None, frozenset({"synthetic_trusted"})),
     ids=("no-trusted-vocabulary", "explicit-trusted-vocabulary"),
 )
-def test_unapproved_fault_values_are_opaque_without_losing_aggregate_balance(
+def test_unapproved_fault_values_are_unnamed_without_losing_aggregate_balance(
     allowed_fault_categories: frozenset[str] | None,
 ) -> None:
     private_values = (
@@ -534,8 +553,11 @@ def test_unapproved_fault_values_are_opaque_without_losing_aggregate_balance(
         private_values
     )
     assert len(unapproved) == len(private_values)
-    assert all(
-        category.label.startswith("unapproved_label_") for category in unapproved
+    assert tuple(category.label for category in unapproved) == (None,) * len(
+        private_values
+    )
+    assert tuple(category.unapproved_ordinal for category in unapproved) == tuple(
+        range(1, len(private_values) + 1)
     )
     assert all(category.count == 1 for category in unapproved)
     assert profile.labels.majority_count == 1
@@ -552,6 +574,66 @@ def test_unapproved_fault_values_are_opaque_without_losing_aggregate_balance(
     for private_value in private_values:
         assert private_value not in json_output
         assert private_value not in markdown_output
+
+
+@pytest.mark.parametrize(
+    "allowed_fault_categories",
+    (None, frozenset({"synthetic_trusted"})),
+    ids=("without-vocabulary", "with-vocabulary"),
+)
+def test_unapproved_alias_collision_cannot_influence_public_output(
+    allowed_fault_categories: frozenset[str] | None,
+) -> None:
+    first = pd.concat(
+        (make_banner_dataframe(), make_banner_dataframe()), ignore_index=True
+    )
+    first["fault"] = pd.Series(
+        (
+            "unapproved_label_0001",
+            "unapproved_label_0001",
+            "unapproved_label_0002",
+            "unapproved_label_0002",
+            "private-category-a",
+            "private-category-b",
+        ),
+        dtype="string",
+    )
+    second = first.copy(deep=True)
+    second["fault"] = pd.Series(
+        (
+            "different-category-a",
+            "different-category-a",
+            "different-category-b",
+            "different-category-b",
+            "different-category-c",
+            "different-category-d",
+        ),
+        dtype="string",
+    )
+
+    first_profile = profile_banner_dataframe(
+        first,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=allowed_fault_categories,
+    )
+    second_profile = profile_banner_dataframe(
+        second,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=allowed_fault_categories,
+    )
+    json_output = banner_profile_json_bytes(first_profile)
+    markdown_output = render_banner_profile_markdown(first_profile)
+
+    assert json_output == banner_profile_json_bytes(second_profile)
+    assert markdown_output == render_banner_profile_markdown(second_profile)
+    assert b"unapproved_label_0001" not in json_output
+    assert "unapproved_label_0001" not in markdown_output
+    assert tuple(
+        (category.label, category.unapproved_ordinal, category.count)
+        for category in first_profile.labels.distribution
+        if category.is_allowed is not True
+    ) == ((None, 1, 2), (None, 2, 2), (None, 3, 1), (None, 4, 1))
+    assert "categoria não aprovada 1" in markdown_output
 
 
 def test_explicitly_trusted_label_is_named_in_json_but_markdown_is_inert() -> None:
@@ -572,6 +654,80 @@ def test_explicitly_trusted_label_is_named_in_json_but_markdown_is_inert() -> No
     assert "<b>" not in markdown_output
     assert "[link](" not in markdown_output
     assert "&lt;b&gt;" in markdown_output
+
+
+_UNSAFE_PUBLIC_LABELS: Final = (
+    "trusted\x00label",
+    "trusted\x07label",
+    "trusted\x1blabel",
+    "trusted\tlabel",
+    "trusted\u202elabel",
+    "trusted\u200blabel",
+    "trusted\ud800label",
+)
+
+
+@pytest.mark.parametrize(
+    "unsafe_label",
+    _UNSAFE_PUBLIC_LABELS,
+    ids=("nul", "bel", "esc", "tab", "bidi", "zero-width", "surrogate"),
+)
+def test_trusted_vocabulary_rejects_unsafe_unicode_with_typed_error(
+    unsafe_label: str,
+) -> None:
+    with pytest.raises(BannerProfileConfigurationError, match="safe UTF-8 text"):
+        profile_banner_dataframe(
+            make_banner_dataframe(),
+            key_columns=_DECLARED_KEY,
+            allowed_fault_categories=frozenset({unsafe_label}),
+        )
+
+
+@pytest.mark.parametrize(
+    "unsafe_label",
+    _UNSAFE_PUBLIC_LABELS,
+    ids=("nul", "bel", "esc", "tab", "bidi", "zero-width", "surrogate"),
+)
+def test_manual_profile_publishers_reject_unsafe_unicode(unsafe_label: str) -> None:
+    profile = _profile()
+    unsafe_category = replace(
+        profile.labels.distribution[0],
+        label=unsafe_label,
+        unapproved_ordinal=None,
+        is_allowed=True,
+    )
+    unsafe_profile = replace(
+        profile,
+        labels=replace(
+            profile.labels,
+            distribution=(unsafe_category, *profile.labels.distribution[1:]),
+        ),
+    )
+
+    with pytest.raises(ProfilePrivacyError, match="safe non-empty UTF-8 text"):
+        banner_profile_json_bytes(unsafe_profile)
+    with pytest.raises(ProfilePrivacyError, match="safe non-empty UTF-8 text"):
+        render_banner_profile_markdown(unsafe_profile)
+
+
+def test_unapproved_unsafe_unicode_is_aggregated_without_crossing_outputs() -> None:
+    raw_values = (
+        "hidden\x00\x07\x1b\tvalue",
+        "hidden\u202e\u200bvalue",
+        "hidden\ud800value",
+    )
+    dataframe = make_banner_dataframe()
+    dataframe["fault"] = pd.Series(raw_values, dtype="object")
+
+    profile = profile_banner_dataframe(dataframe, key_columns=_DECLARED_KEY)
+    json_output = banner_profile_json_bytes(profile).decode("utf-8")
+    markdown_output = render_banner_profile_markdown(profile)
+
+    assert profile.labels.valid_label_count == 3
+    assert all(category.label is None for category in profile.labels.distribution)
+    for raw_value in raw_values:
+        assert raw_value not in json_output
+        assert raw_value not in markdown_output
 
 
 @pytest.mark.parametrize(
@@ -637,6 +793,14 @@ def test_profile_is_independent_from_the_process_decimal_context() -> None:
     with localcontext() as context:
         context.prec = 2
         context.rounding = ROUND_DOWN
+        context.Emin = -2
+        context.Emax = 2
+        context.capitals = 0
+        context.clamp = 1
+        context.flags[Inexact] = True
+        context.flags[Rounded] = True
+        context.traps[Inexact] = True
+        context.traps[Rounded] = True
         observed = banner_profile_json_bytes(_profile(BannerScenario.LABEL_TRANSITION))
 
     assert observed == expected
@@ -662,6 +826,13 @@ def test_json_key_column_and_category_order_are_explicit() -> None:
     assert tuple(item["label"] for item in payload["labels"]["distribution"]) == (
         "synthetic_nominal",
         "synthetic_warning",
+    )
+    assert tuple(payload["labels"]["distribution"][0]) == (
+        "label",
+        "unapproved_ordinal",
+        "count",
+        "percentage",
+        "is_allowed",
     )
 
 
@@ -704,6 +875,7 @@ def test_public_publishers_fail_closed_on_unapproved_literal_label_value() -> No
     unsafe_category = replace(
         profile.labels.distribution[0],
         label="[private-row-991](https://example.invalid)",
+        unapproved_ordinal=1,
         is_allowed=False,
     )
     unsafe_profile = replace(
@@ -714,9 +886,32 @@ def test_public_publishers_fail_closed_on_unapproved_literal_label_value() -> No
         ),
     )
 
-    with pytest.raises(ProfilePrivacyError, match="opaque aliases"):
+    with pytest.raises(ProfilePrivacyError, match=r"unnamed.*sequential ordinals"):
         banner_profile_json_bytes(unsafe_profile)
-    with pytest.raises(ProfilePrivacyError, match="opaque aliases"):
+    with pytest.raises(ProfilePrivacyError, match=r"unnamed.*sequential ordinals"):
+        render_banner_profile_markdown(unsafe_profile)
+
+
+@pytest.mark.parametrize("ordinal", (0, 2, True, "1"))
+def test_public_publishers_reject_invalid_unapproved_ordinals(ordinal: object) -> None:
+    profile = _profile()
+    unsafe_category = replace(
+        profile.labels.distribution[0],
+        label=None,
+        unapproved_ordinal=cast(int, ordinal),
+        is_allowed=False,
+    )
+    unsafe_profile = replace(
+        profile,
+        labels=replace(
+            profile.labels,
+            distribution=(unsafe_category, *profile.labels.distribution[1:]),
+        ),
+    )
+
+    with pytest.raises(ProfilePrivacyError, match="sequential ordinals"):
+        banner_profile_json_bytes(unsafe_profile)
+    with pytest.raises(ProfilePrivacyError, match="sequential ordinals"):
         render_banner_profile_markdown(unsafe_profile)
 
 
@@ -776,6 +971,33 @@ def test_declared_key_must_be_explicit_valid_and_unique(
 ) -> None:
     with pytest.raises(BannerProfileConfigurationError, match=message):
         profile_banner_dataframe(make_banner_dataframe(), key_columns=key_columns)
+
+
+@pytest.mark.parametrize(
+    "key_columns",
+    (
+        "id",
+        {"id", "created_at"},
+        frozenset({"id", "created_at"}),
+    ),
+    ids=("single-string", "set", "frozenset"),
+)
+def test_declared_key_rejects_ambiguous_or_unordered_configuration(
+    key_columns: object,
+) -> None:
+    with pytest.raises(BannerProfileConfigurationError, match="ordered sequence"):
+        profile_banner_dataframe(
+            make_banner_dataframe(),
+            key_columns=cast(tuple[str, ...], key_columns),
+        )
+
+
+def test_declared_key_accepts_an_ordered_textual_list() -> None:
+    profile = profile_banner_dataframe(
+        make_banner_dataframe(), key_columns=["id", "created_at"]
+    )
+
+    assert profile.duplicates.key_columns == _DECLARED_KEY
 
 
 def test_allowed_categories_reject_ambiguous_empty_labels() -> None:

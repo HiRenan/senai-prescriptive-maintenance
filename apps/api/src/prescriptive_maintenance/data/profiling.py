@@ -12,11 +12,12 @@ from html import escape
 from itertools import pairwise
 from math import isfinite, isinf, isnan
 from numbers import Real
-from re import compile as compile_pattern
 from typing import Final, cast
+from unicodedata import category as unicode_category
 
 import pandas as pd
 
+from prescriptive_maintenance.data._decimal import isolated_decimal_context
 from prescriptive_maintenance.data.contract import (
     BANNER_COLUMN_CATALOG,
     BANNER_COLUMN_NAMES,
@@ -41,7 +42,7 @@ _DECIMAL_QUANTILES: Final = tuple(Decimal(str(value)) for value in PROFILE_QUANT
 _DECIMAL_IQR_MULTIPLIER: Final = Decimal(str(PROFILE_IQR_MULTIPLIER))
 _DECIMAL_UNIT_ABSOLUTE_TOLERANCE: Final = Decimal(str(PROFILE_UNIT_ABSOLUTE_TOLERANCE))
 _DECIMAL_UNIT_RELATIVE_TOLERANCE: Final = Decimal(str(PROFILE_UNIT_RELATIVE_TOLERANCE))
-_OPAQUE_LABEL_PATTERN: Final = compile_pattern(r"unapproved_label_\d{4,}")
+_UNSAFE_PUBLIC_UNICODE_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs"})
 
 
 class BannerProfileConfigurationError(ValueError):
@@ -211,7 +212,8 @@ class DuplicateProfile:
 class LabelCategoryProfile:
     """One aggregate label count, including allowed labels absent from input."""
 
-    label: str
+    label: str | None
+    unapproved_ordinal: int | None
     count: int
     percentage: float | None
     is_allowed: bool | None
@@ -296,8 +298,8 @@ PROFILE_DEFINITIONS: Final = ProfileDefinitions(
     ),
     percentage_denominators="column=observed;label=valid;unit_pair=comparable",
     column_order="banner_contract_position_ascending",
-    category_order="trusted_unicode_then_unapproved_count_descending",
-    label_publication_policy="trusted_allowlist_or_opaque_sequential_alias",
+    category_order="trusted_unicode_then_unapproved_count_descending_ordinal",
+    label_publication_policy="trusted_allowlist_or_null_label_with_ordinal",
     json_key_order="public_schema_declaration_order",
 )
 
@@ -517,6 +519,7 @@ PUBLIC_BANNER_PROFILE_SCHEMA: Final = _field(
             "distribution",
             ProfileFieldClassification.AGGREGATE,
             _field("label", ProfileFieldClassification.AGGREGATE),
+            _field("unapproved_ordinal", ProfileFieldClassification.AGGREGATE),
             _field("count", ProfileFieldClassification.AGGREGATE),
             _field("percentage", ProfileFieldClassification.AGGREGATE),
             _field("is_allowed", ProfileFieldClassification.AGGREGATE),
@@ -690,7 +693,7 @@ def render_banner_profile_markdown(profile: BannerDataProfile) -> str:
     )
     lines.extend(
         (
-            f"| {_markdown_value_cell(category.label)} | {category.count} | "
+            f"| {_markdown_label_cell(category)} | {category.count} | "
             f"{_format_percentage(category.percentage)} | "
             f"{_optional_yes_no(category.is_allowed)} |"
         )
@@ -731,25 +734,47 @@ def validate_public_profile_schema(schema: PublicProfileField) -> None:
 
 def _validate_profile_value_policy(profile: BannerDataProfile) -> None:
     public_labels: set[str] = set()
+    expected_unapproved_ordinal = 1
+    found_unapproved_category = False
     for category in profile.labels.distribution:
-        if category.label in public_labels:
-            raise ProfilePrivacyError(
-                "Public label distribution contains duplicate names."
-            )
-        public_labels.add(category.label)
         if category.is_allowed is True:
-            if not category.label.strip():
+            if found_unapproved_category:
                 raise ProfilePrivacyError(
-                    "Trusted public label must be a non-empty configured value."
+                    "Trusted public labels must precede unnamed categories."
                 )
+            if (
+                category.label is None
+                or category.unapproved_ordinal is not None
+                or not category.label.strip()
+                or not _is_safe_public_text(category.label)
+            ):
+                raise ProfilePrivacyError(
+                    "Trusted public label must be safe non-empty UTF-8 text."
+                )
+            if category.label in public_labels:
+                raise ProfilePrivacyError(
+                    "Public label distribution contains duplicate names."
+                )
+            public_labels.add(category.label)
             continue
-        if _OPAQUE_LABEL_PATTERN.fullmatch(category.label) is None:
+
+        found_unapproved_category = True
+        if (
+            category.label is not None
+            or type(category.unapproved_ordinal) is not int
+            or category.unapproved_ordinal != expected_unapproved_ordinal
+        ):
             raise ProfilePrivacyError(
-                "Unapproved public labels must use opaque aliases."
+                "Unapproved public labels must be unnamed and use sequential ordinals."
             )
+        expected_unapproved_ordinal += 1
 
 
-def _validate_key_columns(key_columns: Sequence[str]) -> tuple[str, ...]:
+def _validate_key_columns(key_columns: object) -> tuple[str, ...]:
+    if isinstance(key_columns, str | bytes) or not isinstance(key_columns, Sequence):
+        raise BannerProfileConfigurationError(
+            "Declared key columns must be an ordered sequence of column names."
+        )
     keys = tuple(cast(Sequence[object], key_columns))
     if not keys:
         raise BannerProfileConfigurationError(
@@ -772,16 +797,26 @@ def _validate_key_columns(key_columns: Sequence[str]) -> tuple[str, ...]:
 
 
 def _validate_allowed_fault_categories(
-    allowed_fault_categories: Set[str] | None,
+    allowed_fault_categories: object,
 ) -> frozenset[str] | None:
     if allowed_fault_categories is None:
         return None
+    if not isinstance(allowed_fault_categories, Set):
+        raise BannerProfileConfigurationError(
+            "Allowed fault categories must be a set of non-empty strings."
+        )
     raw_allowed = tuple(cast(Set[object], allowed_fault_categories))
     if any(not isinstance(value, str) or not value.strip() for value in raw_allowed):
         raise BannerProfileConfigurationError(
             "Allowed fault categories must be non-empty strings."
         )
-    return frozenset(cast(tuple[str, ...], raw_allowed))
+    string_allowed = cast(tuple[str, ...], raw_allowed)
+    if any(not _is_safe_public_text(value) for value in string_allowed):
+        raise BannerProfileConfigurationError(
+            "Allowed fault categories must be safe UTF-8 text without control, "
+            "format, or surrogate characters."
+        )
+    return frozenset(string_allowed)
 
 
 def _profile_volume(dataframe: pd.DataFrame) -> VolumeProfile:
@@ -858,8 +893,8 @@ def _profile_time(dataframe: pd.DataFrame) -> TemporalProfile:
     if cadence is None:
         total_gap = None
     else:
-        with localcontext() as context:
-            context.prec = _decimal_calculation_precision(intervals)
+        precision = _decimal_calculation_precision(intervals)
+        with localcontext(isolated_decimal_context(precision)):
             gap_excess = sum(
                 (interval - cadence for interval in gap_intervals), Decimal(0)
             )
@@ -1043,7 +1078,13 @@ def _profile_labels(
 ) -> LabelDistributionProfile:
     if "fault" not in dataframe.columns:
         distribution = tuple(
-            LabelCategoryProfile(label, 0, None, True)
+            LabelCategoryProfile(
+                label=label,
+                unapproved_ordinal=None,
+                count=0,
+                percentage=None,
+                is_allowed=True,
+            )
             for label in sorted(allowed_faults or ())
         )
         return LabelDistributionProfile(
@@ -1083,15 +1124,10 @@ def _profile_labels(
             reverse=True,
         )
     )
-    alias_width = max(4, len(str(len(unapproved_counts))))
-    opaque_aliases = _opaque_label_aliases(
-        len(unapproved_counts),
-        reserved=frozenset(counts) | frozenset(allowed_faults or ()),
-        width=alias_width,
-    )
     trusted_distribution = tuple(
         LabelCategoryProfile(
             label=label,
+            unapproved_ordinal=None,
             count=counts[label],
             percentage=_percentage(counts[label], valid_count),
             is_allowed=True,
@@ -1100,12 +1136,13 @@ def _profile_labels(
     )
     unapproved_distribution = tuple(
         LabelCategoryProfile(
-            label=alias,
+            label=None,
+            unapproved_ordinal=ordinal,
             count=count,
             percentage=_percentage(count, valid_count),
             is_allowed=(None if allowed_faults is None else False),
         )
-        for alias, count in zip(opaque_aliases, unapproved_counts, strict=True)
+        for ordinal, count in enumerate(unapproved_counts, start=1)
     )
     distribution = trusted_distribution + unapproved_distribution
     category_counts = [category.count for category in distribution]
@@ -1114,8 +1151,8 @@ def _profile_labels(
     if majority is None or minority in (None, 0):
         ratio = None
     else:
-        with localcontext() as context:
-            context.prec = max(50, len(str(majority)) + len(str(minority)) + 20)
+        precision = max(50, len(str(majority)) + len(str(minority)) + 20)
+        with localcontext(isolated_decimal_context(precision)):
             decimal_ratio = Decimal(majority) / Decimal(minority)
         ratio = _public_number(decimal_ratio)
     entropy = _normalized_entropy(category_counts, valid_count)
@@ -1143,19 +1180,6 @@ def _profile_labels(
         majority_to_minority_ratio=ratio,
         normalized_entropy=entropy,
     )
-
-
-def _opaque_label_aliases(
-    count: int, *, reserved: frozenset[str], width: int
-) -> tuple[str, ...]:
-    aliases: list[str] = []
-    candidate_number = 1
-    while len(aliases) < count:
-        candidate = f"unapproved_label_{candidate_number:0{width}d}"
-        candidate_number += 1
-        if candidate not in reserved:
-            aliases.append(candidate)
-    return tuple(aliases)
 
 
 def _profile_unit_pair(
@@ -1186,10 +1210,10 @@ def _profile_unit_pair(
         right_number = _finite_decimal(right)
         if left_number is None or right_number is None:
             continue
-        with localcontext() as context:
-            context.prec = _decimal_calculation_precision(
-                (left_number, right_number, spec.multiplier, spec.offset)
-            )
+        precision = _decimal_calculation_precision(
+            (left_number, right_number, spec.multiplier, spec.offset)
+        )
+        with localcontext(isolated_decimal_context(precision)):
             expected = left_number * spec.multiplier + spec.offset
             observed = right_number
             error = abs(observed - expected)
@@ -1220,8 +1244,8 @@ def _numeric_statistics(values: tuple[object, ...]) -> NumericStatistics:
     if not finite_values:
         return _empty_numeric_statistics()
 
-    with localcontext() as context:
-        context.prec = _decimal_calculation_precision(finite_values)
+    precision = _decimal_calculation_precision(finite_values)
+    with localcontext(isolated_decimal_context(precision)):
         count = Decimal(len(finite_values))
         mean = sum(finite_values, Decimal(0)) / count
         variance = (
@@ -1287,8 +1311,8 @@ def _normalized_entropy(counts: list[int], total: int) -> float | None:
         return None
     if len(counts) == 1:
         return 0.0
-    with localcontext() as context:
-        context.prec = 80
+    precision = max(80, len(str(total)) * 2 + len(str(len(counts))) + 32)
+    with localcontext(isolated_decimal_context(precision)):
         decimal_total = Decimal(total)
         probabilities = (
             Decimal(count) / decimal_total for count in counts if count > 0
@@ -1394,8 +1418,8 @@ def _within_unit_tolerance(observed: Decimal, expected: Decimal) -> bool:
 def _percentage(count: int, total: int) -> float | None:
     if total == 0:
         return None
-    with localcontext() as context:
-        context.prec = max(50, len(str(total)) * 2 + 20)
+    precision = max(50, len(str(total)) * 2 + 20)
+    with localcontext(isolated_decimal_context(precision)):
         value = Decimal(count) * Decimal(100) / Decimal(total)
     return _public_number(value)
 
@@ -1404,12 +1428,12 @@ def _public_number(decimal_value: Decimal) -> float | None:
     if not decimal_value.is_finite():
         return None
     try:
-        with localcontext() as context:
-            context.prec = max(
-                34,
-                abs(decimal_value.adjusted()) + PROFILE_DECIMAL_PLACES + 10,
-                len(decimal_value.as_tuple().digits) + PROFILE_DECIMAL_PLACES + 10,
-            )
+        precision = max(
+            34,
+            abs(decimal_value.adjusted()) + PROFILE_DECIMAL_PLACES + 10,
+            len(decimal_value.as_tuple().digits) + PROFILE_DECIMAL_PLACES + 10,
+        )
+        with localcontext(isolated_decimal_context(precision)):
             rounded = decimal_value.quantize(
                 _ROUNDING_QUANTUM, rounding=ROUND_HALF_EVEN
             )
@@ -1435,12 +1459,23 @@ def _decimal_calculation_precision(values: Sequence[Decimal]) -> int:
     return max(80, decimal_span * 2 + len(str(len(values))) + 32)
 
 
+def _is_safe_public_text(value: str) -> bool:
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    return all(
+        unicode_category(character) not in _UNSAFE_PUBLIC_UNICODE_CATEGORIES
+        for character in value
+    )
+
+
 def _public_value(value: object) -> object:
     if is_dataclass(value) and not isinstance(value, type):
         raw_dataclass = cast(dict[str, object], asdict(value))
         return {key: _public_value(item) for key, item in raw_dataclass.items()}
     if isinstance(value, StrEnum):
-        return value.value
+        return _public_value(value.value)
     if isinstance(value, Mapping):
         raw_mapping = cast(Mapping[object, object], value)
         return {str(key): _public_value(item) for key, item in raw_mapping.items()}
@@ -1449,7 +1484,13 @@ def _public_value(value: object) -> object:
         return [_public_value(item) for item in raw_sequence]
     if isinstance(value, float) and not isfinite(value):
         raise ProfilePrivacyError("Public profile contains a non-finite number.")
-    if value is None or isinstance(value, bool | int | float | str):
+    if isinstance(value, str):
+        if not _is_safe_public_text(value):
+            raise ProfilePrivacyError(
+                "Public profile contains unsafe or non-UTF-8 Unicode text."
+            )
+        return value
+    if value is None or isinstance(value, bool | int | float):
         return value
     raise ProfilePrivacyError("Public profile contains an unsupported value type.")
 
@@ -1523,6 +1564,12 @@ def _markdown_period(profile: TemporalProfile) -> str:
 
 def _markdown_schema_cell(value: str) -> str:
     return escape(value.replace("\r", " ").replace("\n", " ")).replace("|", "\\|")
+
+
+def _markdown_label_cell(category: LabelCategoryProfile) -> str:
+    if category.label is not None:
+        return _markdown_value_cell(category.label)
+    return f"categoria não aprovada {category.unapproved_ordinal}"
 
 
 def _markdown_value_cell(value: str) -> str:

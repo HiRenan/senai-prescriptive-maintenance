@@ -47,7 +47,7 @@ A versão atual contém:
   coerção implícita, acompanhado de relatórios sanitizados de violação;
 - um profiler determinístico sobre DataFrames já carregados, com indicadores
   agregados de estrutura, tempo, qualidade por coluna, duplicidade, estatística,
-  rótulos protegidos por vocabulário confiável ou aliases opacos e pares
+  rótulos protegidos por vocabulário confiável ou categorias anônimas e pares
   redundantes, além de JSON estável e Markdown resumido;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
