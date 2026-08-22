@@ -12,6 +12,7 @@ from typing import BinaryIO, NoReturn
 import prescriptive_maintenance.data.source as source_module
 import pytest
 from prescriptive_maintenance.data import (
+    BannerSourceFingerprint,
     SourceChangedError,
     SourceHashMismatchError,
     SourceManifestError,
@@ -20,6 +21,7 @@ from prescriptive_maintenance.data import (
     SourceSizeMismatchError,
     UnexpectedSourceNameError,
     consume_banner_source,
+    consume_banner_source_audited,
 )
 
 _SYNTHETIC_CONTENT = b"entirely-synthetic-source\n"
@@ -87,6 +89,28 @@ def test_consumes_valid_source_without_copying_or_modifying_it(tmp_path: Path) -
     assert after_stat.st_size == before_stat.st_size
     assert sha256(source_path.read_bytes()).hexdigest() == before_hash
     assert set(tmp_path.iterdir()) == before_files
+
+
+def test_audited_consumption_returns_exact_immutable_pre_post_receipt(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "banner.csv"
+    source_path.write_bytes(_SYNTHETIC_CONTENT)
+    manifest_path = _write_manifest(tmp_path, _SYNTHETIC_CONTENT)
+    expected = BannerSourceFingerprint(
+        size_bytes=len(_SYNTHETIC_CONTENT),
+        sha256=sha256(_SYNTHETIC_CONTENT).hexdigest(),
+    )
+
+    receipt = consume_banner_source_audited(
+        input_path=source_path,
+        manifest_path=manifest_path,
+        consumer=lambda source: source.read(),
+    )
+
+    assert receipt.result == _SYNTHETIC_CONTENT
+    assert receipt.pre_fingerprint == expected
+    assert receipt.post_fingerprint == expected
 
 
 def test_rejects_missing_source_before_consumer(tmp_path: Path) -> None:

@@ -89,6 +89,7 @@ class PublicProfileField:
     classification: ProfileFieldClassification
     children: tuple[PublicProfileField, ...] = ()
     sequence: bool = False
+    nullable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,6 +341,9 @@ _UNIT_PAIR_SPECS: Final = (
         "right = left * 25.4",
     ),
 )
+BANNER_REDUNDANT_UNIT_PAIR_IDENTITIES: Final = tuple(
+    (spec.left_column, spec.right_column, spec.relation) for spec in _UNIT_PAIR_SPECS
+)
 
 _SAFE_FIELD_CLASSIFICATIONS: Final = frozenset(
     {
@@ -355,8 +359,15 @@ def _field(
     classification: ProfileFieldClassification,
     *children: PublicProfileField,
     sequence: bool = False,
+    nullable: bool = False,
 ) -> PublicProfileField:
-    return PublicProfileField(name, classification, children, sequence)
+    return PublicProfileField(
+        name,
+        classification,
+        children,
+        sequence,
+        nullable,
+    )
 
 
 _NUMERIC_STATISTICS_SCHEMA: Final = (
@@ -478,6 +489,7 @@ PUBLIC_BANNER_PROFILE_SCHEMA: Final = _field(
             "numeric_statistics",
             ProfileFieldClassification.AGGREGATE,
             *_NUMERIC_STATISTICS_SCHEMA,
+            nullable=True,
         ),
         sequence=True,
     ),
@@ -596,7 +608,7 @@ def banner_profile_json_bytes(profile: BannerDataProfile) -> bytes:
     validate_public_profile_schema(PUBLIC_BANNER_PROFILE_SCHEMA)
     _validate_profile_value_policy(profile)
     payload = _public_value(profile)
-    _validate_public_payload(payload, PUBLIC_BANNER_PROFILE_SCHEMA)
+    validate_public_banner_profile_payload(payload)
     return (
         json.dumps(
             payload,
@@ -615,7 +627,7 @@ def render_banner_profile_markdown(profile: BannerDataProfile) -> str:
     validate_public_profile_schema(PUBLIC_BANNER_PROFILE_SCHEMA)
     _validate_profile_value_policy(profile)
     payload = _public_value(profile)
-    _validate_public_payload(payload, PUBLIC_BANNER_PROFILE_SCHEMA)
+    validate_public_banner_profile_payload(payload)
 
     lines = [
         "# Perfil agregado de qualidade do banner",
@@ -730,6 +742,26 @@ def validate_public_profile_schema(schema: PublicProfileField) -> None:
         )
     for child in schema.children:
         validate_public_profile_schema(child)
+
+
+def validate_public_banner_profile_payload(payload: object) -> None:
+    """Validate profile shape, versions, and fixed public definitions."""
+
+    validate_public_profile_schema(PUBLIC_BANNER_PROFILE_SCHEMA)
+    _validate_public_payload(payload, PUBLIC_BANNER_PROFILE_SCHEMA)
+    if not isinstance(payload, Mapping):
+        raise ProfilePrivacyError(
+            "Public profile object does not match its classified schema."
+        )
+    typed_payload = cast(Mapping[str, object], payload)
+    if (
+        type(typed_payload.get("profile_schema_version")) is not int
+        or typed_payload.get("profile_schema_version") != BANNER_PROFILE_SCHEMA_VERSION
+        or type(typed_payload.get("contract_version")) is not int
+        or typed_payload.get("contract_version") != BANNER_CONTRACT_VERSION
+        or typed_payload.get("definitions") != _public_value(PROFILE_DEFINITIONS)
+    ):
+        raise ProfilePrivacyError("Public profile versions or definitions are invalid.")
 
 
 def _validate_profile_value_policy(profile: BannerDataProfile) -> None:
@@ -1498,7 +1530,11 @@ def _public_value(value: object) -> object:
 def _validate_public_payload(value: object, schema: PublicProfileField) -> None:
     if schema.children:
         if value is None:
-            return
+            if schema.nullable:
+                return
+            raise ProfilePrivacyError(
+                "Required public profile container is unavailable."
+            )
         if schema.sequence:
             if not isinstance(value, list):
                 raise ProfilePrivacyError(

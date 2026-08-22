@@ -135,6 +135,20 @@ def test_profile_is_typed_complete_and_uses_fixed_numeric_definitions() -> None:
     assert rpm.numeric_statistics.iqr_outlier_count == 0
 
 
+def test_profile_publisher_rejects_altered_versioned_definitions() -> None:
+    profile = _profile()
+    altered = replace(
+        profile,
+        definitions=replace(
+            profile.definitions,
+            quantile_method="synthetic_altered_definition",
+        ),
+    )
+
+    with pytest.raises(ProfilePrivacyError):
+        banner_profile_json_bytes(altered)
+
+
 def test_empty_dataframe_keeps_every_column_and_normalizes_unavailable_values() -> None:
     dataframe = make_banner_dataframe().iloc[0:0]
 
@@ -426,6 +440,54 @@ def test_submicrosecond_utc_instants_remain_distinct_ordered_and_cadenced() -> N
     assert temporal.gap_count == 0
     assert temporal.total_gap_seconds == 0.0
     assert temporal.maximum_interval_seconds is None
+
+
+def test_zoned_instants_normalize_before_ordering_and_cadence() -> None:
+    dataframe = make_banner_dataframe()
+    dataframe["created_at"] = pd.Series(
+        (
+            "2099-04-01T00:00:00.000000123Z",
+            "2099-04-01 02:01:00.000000123+02:00",
+            "2099-03-31T19:02:00.000000123-05:00",
+        ),
+        dtype="string",
+    )
+
+    temporal = profile_banner_dataframe(
+        dataframe,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=SYNTHETIC_FAULT_ALLOWLIST,
+    ).temporal
+
+    assert temporal.valid_timestamp_count == 3
+    assert temporal.distinct_timestamp_count == 3
+    assert temporal.period_start_utc == "2099-04-01T00:00:00.000000123Z"
+    assert temporal.period_end_utc == "2099-04-01T00:02:00.000000123Z"
+    assert temporal.input_order is TemporalOrder.NONDECREASING
+    assert temporal.cadence_interval_count == 2
+    assert temporal.nominal_cadence_seconds == 60.0
+    assert temporal.irregular_interval_count == 0
+    assert temporal.gap_count == 0
+
+
+def test_utc_equivalent_offset_instants_share_one_profile_instant() -> None:
+    dataframe = make_banner_dataframe()
+    dataframe["created_at"] = pd.Series(
+        (
+            "2099-04-01T00:00:00.000000123Z",
+            "2099-04-01T02:00:00.000000123+02:00",
+            "2099-03-31 19:00:00.000000123-05:00",
+        ),
+        dtype="string",
+    )
+
+    temporal = profile_banner_dataframe(dataframe, key_columns=_DECLARED_KEY).temporal
+
+    assert temporal.valid_timestamp_count == 3
+    assert temporal.distinct_timestamp_count == 1
+    assert temporal.period_start_utc == temporal.period_end_utc
+    assert temporal.input_order is TemporalOrder.CONSTANT
+    assert temporal.cadence_interval_count == 0
 
 
 def test_year_one_utc_instants_keep_four_digit_padding_and_exact_order() -> None:
