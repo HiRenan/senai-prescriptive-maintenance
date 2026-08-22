@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Set
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 from enum import StrEnum
 from math import isfinite
@@ -19,7 +19,7 @@ from pandera.errors import SchemaErrors
 
 from prescriptive_maintenance.data._decimal import isolated_decimal_context
 
-BANNER_CONTRACT_VERSION: Final = 1
+BANNER_CONTRACT_VERSION: Final = 2
 
 
 class LogicalType(StrEnum):
@@ -108,7 +108,12 @@ BANNER_COLUMN_CATALOG: Final[tuple[BannerColumnContract, ...]] = (
         "UTC",
         "UTC",
         False,
-        "Texto ISO 8601 em UTC, terminado por Z, com segundos e fração opcional.",
+        (
+            "Texto no perfil ISO 8601 zonado suportado, com data e hora "
+            "separadas por T maiúsculo ou um espaço ASCII, segundos, fração "
+            "opcional e zona explícita em Z ou deslocamento numérico conhecido "
+            "com dois-pontos."
+        ),
         "Instante de criação do registro conforme publicado pela fonte.",
     ),
     BannerColumnContract(
@@ -435,9 +440,11 @@ class _SchemaErrorMetadata(Protocol):
     check: object
 
 
-_UTC_TIMESTAMP_PATTERN: Final = compile_pattern(
-    r"(?P<whole>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})"
-    r"(?:\.(?P<fraction>\d+))?Z"
+_ZONED_ISO8601_TIMESTAMP_PATTERN: Final = compile_pattern(
+    r"(?P<whole>[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T| )[0-9]{2}:[0-9]{2}:[0-9]{2})"
+    r"(?:\.(?P<fraction>[0-9]+))?"
+    r"(?P<zone>Z|(?P<offset_sign>[+-])(?P<offset_hour>[0-9]{2}):"
+    r"(?P<offset_minute>[0-9]{2}))"
 )
 _CHECK_FINITE: Final = "finite"
 _CHECK_TIMESTAMP: Final = "utc_timestamp_format"
@@ -471,7 +478,7 @@ _CHECK_CODES: Final[dict[str, ContractViolationCode]] = {
 
 _CHECK_MESSAGES: Final[dict[ContractViolationCode, str]] = {
     ContractViolationCode.TIMESTAMP_FORMAT: (
-        "Column contains text outside the declared UTC timestamp format."
+        "Column contains text outside the supported zoned ISO 8601 profile."
     ),
     ContractViolationCode.EMPTY_FAULT: "Column contains an empty raw fault label.",
     ContractViolationCode.UNKNOWN_FAULT_CATEGORY: (
@@ -485,15 +492,34 @@ _CHECK_MESSAGES: Final[dict[ContractViolationCode, str]] = {
 
 
 def parse_banner_utc_timestamp(value: object) -> BannerUtcTimestamp | None:
-    """Parse the contract UTC syntax without truncating fractional seconds."""
+    """Parse the supported zoned ISO 8601 profile into an exact UTC instant."""
 
     if not isinstance(value, str):
         return None
-    match = _UTC_TIMESTAMP_PATTERN.fullmatch(value)
+    match = _ZONED_ISO8601_TIMESTAMP_PATTERN.fullmatch(value)
     if match is None:
         return None
     try:
-        whole_second = datetime.fromisoformat(match.group("whole") + "+00:00")
+        local_whole_second = datetime.fromisoformat(match.group("whole"))
+        if match.group("zone") == "Z":
+            offset_minutes = 0
+        else:
+            offset_hour = int(match.group("offset_hour"))
+            offset_minute = int(match.group("offset_minute"))
+            offset_sign = match.group("offset_sign")
+            if (
+                offset_hour > 23
+                or offset_minute > 59
+                or (offset_sign == "-" and offset_hour == 0 and offset_minute == 0)
+            ):
+                return None
+            offset_minutes = offset_hour * 60 + offset_minute
+            if offset_sign == "-":
+                offset_minutes = -offset_minutes
+        source_timezone = timezone(timedelta(minutes=offset_minutes))
+        whole_second = local_whole_second.replace(tzinfo=source_timezone).astimezone(
+            UTC
+        )
         raw_fraction = match.group("fraction")
         fractional_second = (
             Decimal(0) if raw_fraction is None else Decimal(f"0.{raw_fraction}")
@@ -549,7 +575,7 @@ def banner_value_violates_domain(value: object, column: BannerColumnContract) ->
 def build_banner_dataframe_schema(
     *, allowed_fault_categories: Set[str] | None = None
 ) -> pa.DataFrameSchema:
-    """Build the v1 Pandera schema, optionally restricting raw fault labels."""
+    """Build the v2 Pandera schema, optionally restricting raw fault labels."""
 
     allowed_faults = (
         None

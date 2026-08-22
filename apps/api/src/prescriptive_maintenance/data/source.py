@@ -57,15 +57,26 @@ class SourceManifestError(BannerSourceError):
 
 
 @dataclass(frozen=True, slots=True)
-class _Fingerprint:
+class BannerSourceFingerprint:
+    """Public size and SHA-256 evidence observed on the read-only descriptor."""
+
     size_bytes: int
     sha256: str
 
 
 @dataclass(frozen=True, slots=True)
+class BannerSourceReceipt[ConsumerResult]:
+    """Consumer result bound to the exact pre/post source fingerprints."""
+
+    result: ConsumerResult
+    pre_fingerprint: BannerSourceFingerprint
+    post_fingerprint: BannerSourceFingerprint
+
+
+@dataclass(frozen=True, slots=True)
 class _ManifestEntry:
     name: str
-    fingerprint: _Fingerprint
+    fingerprint: BannerSourceFingerprint
 
 
 def consume_banner_source[ConsumerResult](
@@ -82,6 +93,21 @@ def consume_banner_source[ConsumerResult](
     fingerprint.
     """
 
+    return consume_banner_source_audited(
+        input_path=input_path,
+        manifest_path=manifest_path,
+        consumer=consumer,
+    ).result
+
+
+def consume_banner_source_audited[ConsumerResult](
+    *,
+    input_path: Path,
+    manifest_path: Path,
+    consumer: Callable[[BinaryIO], ConsumerResult],
+) -> BannerSourceReceipt[ConsumerResult]:
+    """Consume the source and return the exact integrity evidence for the call."""
+
     expected = _load_banner_manifest_entry(manifest_path)
     if input_path.name != expected.name:
         raise UnexpectedSourceNameError(
@@ -94,13 +120,18 @@ def consume_banner_source[ConsumerResult](
         source.seek(0)
 
         try:
-            return consumer(source)
+            result = consumer(source)
         finally:
             after = _fingerprint(source)
             if after != before:
                 raise SourceChangedError(
                     "Banner source changed during consumption."
                 ) from None
+    return BannerSourceReceipt(
+        result=result,
+        pre_fingerprint=before,
+        post_fingerprint=after,
+    )
 
 
 def _load_banner_manifest_entry(manifest_path: Path) -> _ManifestEntry:
@@ -157,7 +188,10 @@ def _parse_banner_entry(entry: dict[str, object]) -> _ManifestEntry:
 
     return _ManifestEntry(
         name=name,
-        fingerprint=_Fingerprint(size_bytes=size_bytes, sha256=expected_hash),
+        fingerprint=BannerSourceFingerprint(
+            size_bytes=size_bytes,
+            sha256=expected_hash,
+        ),
     )
 
 
@@ -184,7 +218,7 @@ def _open_source_read_only(input_path: Path) -> BinaryIO:
         raise SourceAccessError("Banner source could not be opened safely.") from None
 
 
-def _fingerprint(source: BinaryIO) -> _Fingerprint:
+def _fingerprint(source: BinaryIO) -> BannerSourceFingerprint:
     try:
         source.seek(0)
         digest = sha256()
@@ -192,7 +226,10 @@ def _fingerprint(source: BinaryIO) -> _Fingerprint:
         while chunk := source.read(_FINGERPRINT_CHUNK_SIZE):
             digest.update(chunk)
             size_bytes += len(chunk)
-        return _Fingerprint(size_bytes=size_bytes, sha256=digest.hexdigest())
+        return BannerSourceFingerprint(
+            size_bytes=size_bytes,
+            sha256=digest.hexdigest(),
+        )
     except PermissionError:
         raise SourcePermissionError(
             "Permission denied while reading the banner source."
@@ -202,7 +239,7 @@ def _fingerprint(source: BinaryIO) -> _Fingerprint:
 
 
 def _validate_initial_fingerprint(
-    *, actual: _Fingerprint, expected: _Fingerprint
+    *, actual: BannerSourceFingerprint, expected: BannerSourceFingerprint
 ) -> None:
     if actual.size_bytes != expected.size_bytes:
         raise SourceSizeMismatchError(

@@ -69,6 +69,13 @@ diferenciam ausência, nome inesperado, tamanho, hash, mutação e permissão se
 expor caminho absoluto ou conteúdo. Parsing tabular e interface de linha de
 comando não fazem parte deste contrato.
 
+`consume_banner_source_audited()` preserva a mesma fronteira e devolve um recibo
+imutável com o resultado do consumidor e os fingerprints de tamanho e SHA-256
+realmente observados antes e depois da chamada. A API original permanece
+retrocompatível e devolve somente o resultado. O runner de baseline usa os
+recibos para impedir que uma alteração coordenada de manifesto e fonte entre
+rodadas seja declarada sob uma identidade anterior.
+
 ## Contrato tabular de `banner`
 
 `prescriptive_maintenance.data.BANNER_COLUMN_CATALOG` é a fonte versionada e
@@ -82,9 +89,24 @@ Pandera com `strict=True`, `ordered=True` e `coerce=False`. A função
 `validate_banner_dataframe()` devolve um relatório sanitizado: violações do
 contrato são bloqueantes e têm código estável e severidade `error`, enquanto
 `statistical_findings` permanece separado e vazio nesta etapa. O relatório não
-inclui índices nem valores de células.
+inclui índices nem valores de células. O validador offline aceita somente os
+códigos de `ContractViolationCode` com essa severidade canônica e exige
+`statistical_finding_count = 0` com a sequência vazia.
 
-Esta primeira versão preserva cada coluna na unidade em que a fonte a publica;
+O contrato v2 aceita `created_at` somente no perfil ISO 8601 zonado suportado,
+com `T` maiúsculo ou um único espaço ASCII entre a data e a hora completas e
+zona explícita em `Z` ou deslocamento numérico no formato `±HH:MM`. O deslocamento
+`-00:00` é recusado porque representa offset local desconhecido; `+00:00`
+permanece válido. Textos sem zona, offsets fora do intervalo, `t`/`z` minúsculos,
+espaços repetidos ou nas extremidades, segundos intercalares, datas civis
+impossíveis e demais variações são bloqueados.
+O parser preserva toda a fração decimal e normaliza o instante para UTC somente na
+representação interna usada por igualdade, ordenação, período e cadência; o
+texto do `DataFrame` não é alterado. A versão foi incrementada após uma auditoria
+demonstrar que a regra anterior rejeitava uma forma zonada válida, sem registrar
+no repositório nenhum valor observado na fonte.
+
+O contrato preserva cada coluna na unidade em que a fonte a publica;
 por isso, unidade de origem e canônica são iguais. As colunas paralelas em
 `in/s` e `mm/s`, assim como `°F` e `°C`, continuam independentes e nenhuma
 conversão é aplicada. O contrato não faz conferência cruzada; o profiler
@@ -220,8 +242,10 @@ ordenada; string única, `set` e `frozenset` são rejeitados por serem ambíguos
 - a tolerância dos pares é o maior valor entre `1e-6` absoluto e `1e-6`
   relativo ao maior módulo comparado; a comparação ocorre no domínio decimal
   mesmo quando o valor convertido não caberia em `float64`;
-- todo instante é interpretado em UTC com a fração decimal completa aceita pelo
-  contrato. Ordenação, distinção, cadência e lacunas usam essa precisão exata;
+- todo instante aceito pelo perfil ISO 8601 zonado é normalizado para UTC com a
+  fração decimal completa aceita pelo contrato. Formas equivalentes com offsets diferentes
+  representam o mesmo instante; ordenação, distinção, cadência e lacunas usam
+  essa precisão exata;
   limites de período usam ISO 8601 canônico com ao menos seis casas e preservam
   todas as casas significativas adicionais;
 - números derivados e percentuais são arredondados a seis casas pelo modo
@@ -252,6 +276,27 @@ confiáveis.
 
 O profiler mede; ele não limpa, remove, imputa, converte unidades, normaliza
 rótulos nem define limiares finais de qualidade.
+
+## Baseline auditada de `banner`
+
+`run_banner_baseline()` faz um único parse por descritor em cada uma de duas
+rodadas independentes. A política CSV é integralmente registrada: UTF-8 estrito,
+linhas malformadas bloqueantes, nenhuma inferência de datas ou chunks, tokens NA
+padrão desativados e somente a célula exatamente vazia reconhecida como ausente.
+`id` é lido como `Int64` anulável para que a ausência alcance contrato e profiler,
+e só é convertido para o `int64` NumPy contratual quando está completo; entradas
+completas mantêm os tipos finais `int64`, `float64` e `string`.
+
+Cada rodada liga contrato, perfil e reconciliações ao recibo pre/post efetivo da
+porta segura. Os dois recibos devem coincidir entre si e com a identidade
+inicial do manifesto. Somente depois de todos os gates, da sanitização e da
+igualdade byte a byte, o runner grava atomicamente `baseline.v1.json` e
+`summary.md` em `data/baselines/banner/<sha256-da-fonte>/`. O Markdown é sempre
+regenerado do JSON sanitizado; o validador offline também exige definições do
+profiler canônicas e coerência entre o resultado contratual e sua contagem de
+violações. O diretório canônico deve conter exclusivamente esses dois arquivos,
+ambos regulares e sem links simbólicos; ausência, entrada extra ou tipo diferente
+é bloqueante inclusive no caminho idempotente de escrita.
 
 ## Verificações
 

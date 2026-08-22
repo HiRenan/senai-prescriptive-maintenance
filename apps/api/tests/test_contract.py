@@ -15,6 +15,7 @@ from prescriptive_maintenance.data import (
     ContractViolationCode,
     ValidationSeverity,
     build_banner_dataframe_schema,
+    parse_banner_utc_timestamp,
     validate_banner_dataframe,
 )
 
@@ -36,10 +37,10 @@ def _codes(report: BannerValidationReport) -> set[ContractViolationCode]:
     return {violation.code for violation in report.blocking_violations}
 
 
-def test_catalog_v1_matches_the_public_synthetic_header_exactly() -> None:
+def test_catalog_v2_matches_the_public_synthetic_header_exactly() -> None:
     dataframe = _valid_dataframe()
 
-    assert BANNER_CONTRACT_VERSION == 1
+    assert BANNER_CONTRACT_VERSION == 2
     assert len(BANNER_COLUMN_CATALOG) == 26
     assert tuple(column.position for column in BANNER_COLUMN_CATALOG) == tuple(
         range(1, 27)
@@ -226,7 +227,7 @@ def test_whitespace_only_fault_label_is_blocking_without_normalization() -> None
     assert dataframe.loc[0, "fault"] == raw_synthetic_value
 
 
-def test_fractional_utc_timestamp_is_semantically_valid_without_coercion() -> None:
+def test_contract_v2_keeps_z_timestamp_compatibility_without_coercion() -> None:
     raw_synthetic_value = "2099-01-01T00:00:00.123456Z"
     dataframe = _valid_dataframe()
     dataframe.loc[0, "created_at"] = raw_synthetic_value
@@ -238,12 +239,99 @@ def test_fractional_utc_timestamp_is_semantically_valid_without_coercion() -> No
 
 
 @pytest.mark.parametrize(
+    "synthetic_value",
+    (
+        "2099-01-01T03:30:00.123456789+03:30",
+        "2099-01-01 03:30:00.123456789+03:30",
+        "2098-12-31T16:45:00.123456789-07:15",
+    ),
+)
+def test_contract_v2_accepts_colon_form_numeric_offsets(
+    synthetic_value: str,
+) -> None:
+    dataframe = _valid_dataframe()
+    dataframe.loc[0, "created_at"] = synthetic_value
+
+    report = validate_banner_dataframe(dataframe)
+
+    assert report.is_valid
+    assert dataframe.loc[0, "created_at"] == synthetic_value
+
+
+def test_equivalent_z_and_offset_instants_compare_identically() -> None:
+    synthetic_values = (
+        "2099-01-01T00:00:00.123456789Z",
+        "2099-01-01T02:00:00.123456789+02:00",
+        "2099-01-01 00:00:00.123456789+00:00",
+        "2098-12-31T20:30:00.123456789-03:30",
+    )
+
+    parsed = tuple(parse_banner_utc_timestamp(value) for value in synthetic_values)
+
+    assert all(timestamp is not None for timestamp in parsed)
+    assert parsed[0] == parsed[1] == parsed[2] == parsed[3]
+    assert parsed[0] is not None
+    assert parsed[0].canonical_text() == "2099-01-01T00:00:00.123456789Z"
+
+
+def test_contract_v2_handles_known_and_unknown_zero_offsets() -> None:
+    known_offset = "2099-01-01T00:00:00.123456+00:00"
+    unknown_offset = "2099-01-01T00:00:00.123456-00:00"
+    assert parse_banner_utc_timestamp(known_offset) == parse_banner_utc_timestamp(
+        "2099-01-01T00:00:00.123456Z"
+    )
+
+    dataframe = _valid_dataframe()
+    dataframe.loc[0, "created_at"] = unknown_offset
+    report = validate_banner_dataframe(dataframe)
+
+    assert parse_banner_utc_timestamp(unknown_offset) is None
+    assert _codes(report) == {ContractViolationCode.TIMESTAMP_FORMAT}
+
+
+@pytest.mark.parametrize(
+    ("synthetic_value", "expected_utc"),
+    (
+        (
+            "2099-01-01T00:15:00.0000001+01:00",
+            "2098-12-31T23:15:00.0000001Z",
+        ),
+        (
+            "2098-12-31 23:45:00.0000001-01:00",
+            "2099-01-01T00:45:00.0000001Z",
+        ),
+    ),
+)
+def test_offset_normalization_crosses_date_boundaries_exactly(
+    synthetic_value: str,
+    expected_utc: str,
+) -> None:
+    parsed = parse_banner_utc_timestamp(synthetic_value)
+
+    assert parsed is not None
+    assert parsed.canonical_text() == expected_utc
+
+
+@pytest.mark.parametrize(
     "private_synthetic_value",
     (
         "2099-01-01 00:00:00",
+        "2099-01-01T00:00:00",
         "2026-13-40T25:61:61Z",
         "2026-02-29T00:00:00Z",
         "2026-12-31T25:61:61Z",
+        "2099-01-01T00:00:00+24:00",
+        "2099-01-01T00:00:00-24:00",
+        "2099-01-01T00:00:00+01:60",
+        "2099-01-01T00:00:00+0100",
+        "2099-01-01T00:00:00+1:00",
+        "2099-01-01T00:00:00+01",
+        "2099-01-01t00:00:00+01:00",
+        "2099-01-01T00:00:00z",
+        "2099-01-01  00:00:00+01:00",
+        "2099-01-01\t00:00:00+01:00",
+        " 2099-01-01 00:00:00+01:00",
+        "2099-01-01 00:00:00+01:00 ",
     ),
 )
 def test_invalid_timestamp_is_blocking_after_semantic_validation(
