@@ -6,25 +6,27 @@ import json
 from collections import Counter
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from enum import StrEnum
 from html import escape
 from itertools import pairwise
-from math import ceil, floor, fsum, isfinite, isinf, isnan, log, sqrt
-from numbers import Integral, Real
+from math import isfinite, isinf, isnan
+from numbers import Real
 from re import compile as compile_pattern
-from typing import Any, Final, cast
+from typing import Final, cast
 
 import pandas as pd
-from pandas.api.types import is_string_dtype
 
 from prescriptive_maintenance.data.contract import (
     BANNER_COLUMN_CATALOG,
     BANNER_COLUMN_NAMES,
     BANNER_CONTRACT_VERSION,
     BannerColumnContract,
+    BannerUtcTimestamp,
     LogicalType,
+    banner_value_violates_domain,
+    matches_banner_logical_type,
+    parse_banner_utc_timestamp,
 )
 
 BANNER_PROFILE_SCHEMA_VERSION: Final = 1
@@ -35,29 +37,19 @@ PROFILE_UNIT_ABSOLUTE_TOLERANCE: Final = 0.000001
 PROFILE_UNIT_RELATIVE_TOLERANCE: Final = 0.000001
 
 _ROUNDING_QUANTUM: Final = Decimal("0.000001")
-_UTC_TIMESTAMP_PATTERN: Final = compile_pattern(
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z"
-)
-_SIGNED_INT64_MIN: Final = -(2**63)
-_SIGNED_INT64_MAX: Final = 2**63 - 1
-_PHYSICAL_MINIMUMS: Final[dict[str, float]] = {
-    "z_rms_velocity_in_s": 0.0,
-    "z_rms_velocity_mm_s": 0.0,
-    "temperature_f": -459.67,
-    "temperature_c": -273.15,
-    "x_rms_velocity_in_s": 0.0,
-    "x_rms_velocity_mm_s": 0.0,
-    "z_peak_vel_comp_freq_hz": 0.0,
-    "x_peak_vel_comp_freq_hz": 0.0,
-    "z_rms_acceleration_g": 0.0,
-    "x_rms_acceleration_g": 0.0,
-    "z_high_freq_rms_accel_g": 0.0,
-    "x_high_freq_rms_accel_g": 0.0,
-}
+_DECIMAL_QUANTILES: Final = tuple(Decimal(str(value)) for value in PROFILE_QUANTILES)
+_DECIMAL_IQR_MULTIPLIER: Final = Decimal(str(PROFILE_IQR_MULTIPLIER))
+_DECIMAL_UNIT_ABSOLUTE_TOLERANCE: Final = Decimal(str(PROFILE_UNIT_ABSOLUTE_TOLERANCE))
+_DECIMAL_UNIT_RELATIVE_TOLERANCE: Final = Decimal(str(PROFILE_UNIT_RELATIVE_TOLERANCE))
+_OPAQUE_LABEL_PATTERN: Final = compile_pattern(r"unapproved_label_\d{4,}")
 
 
 class BannerProfileConfigurationError(ValueError):
     """Raised when a profiling configuration is ambiguous or invalid."""
+
+
+class BannerProfileInputError(ValueError):
+    """Raised when input cells cannot be aggregated safely."""
 
 
 class ProfilePrivacyError(ValueError):
@@ -113,12 +105,15 @@ class ProfileDefinitions:
     unit_absolute_tolerance: float
     unit_relative_tolerance: float
     timezone: str
+    timestamp_precision: str
     decimal_places: int
     rounding_mode: str
     unavailable_numeric_value: str
+    unrepresentable_numeric_policy: str
     percentage_denominators: str
     column_order: str
     category_order: str
+    label_publication_policy: str
     json_key_order: str
 
 
@@ -224,7 +219,7 @@ class LabelCategoryProfile:
 
 @dataclass(frozen=True, slots=True)
 class LabelDistributionProfile:
-    """Aggregate raw-label distribution and deterministic balance measures."""
+    """Aggregate public-label distribution and deterministic balance measures."""
 
     source_column: str
     allowed_category_check_applied: bool
@@ -275,8 +270,8 @@ class BannerDataProfile:
 class _UnitPairSpec:
     left_column: str
     right_column: str
-    multiplier: float
-    offset: float
+    multiplier: Decimal
+    offset: Decimal
     relation: str
 
 
@@ -292,12 +287,17 @@ PROFILE_DEFINITIONS: Final = ProfileDefinitions(
     unit_absolute_tolerance=PROFILE_UNIT_ABSOLUTE_TOLERANCE,
     unit_relative_tolerance=PROFILE_UNIT_RELATIVE_TOLERANCE,
     timezone="UTC",
+    timestamp_precision="exact_input_fraction_period_and_interval_comparison",
     decimal_places=PROFILE_DECIMAL_PLACES,
     rounding_mode="decimal_half_even",
     unavailable_numeric_value="json_null",
+    unrepresentable_numeric_policy=(
+        "json_null_after_public_rounding_underflow_or_float64_overflow"
+    ),
     percentage_denominators="column=observed;label=valid;unit_pair=comparable",
     column_order="banner_contract_position_ascending",
-    category_order="unicode_code_point_ascending",
+    category_order="trusted_unicode_then_unapproved_count_descending",
+    label_publication_policy="trusted_allowlist_or_opaque_sequential_alias",
     json_key_order="public_schema_declaration_order",
 )
 
@@ -305,36 +305,36 @@ _UNIT_PAIR_SPECS: Final = (
     _UnitPairSpec(
         "z_rms_velocity_in_s",
         "z_rms_velocity_mm_s",
-        25.4,
-        0.0,
+        Decimal("25.4"),
+        Decimal(0),
         "right = left * 25.4",
     ),
     _UnitPairSpec(
         "temperature_c",
         "temperature_f",
-        1.8,
-        32.0,
+        Decimal("1.8"),
+        Decimal(32),
         "right = left * 1.8 + 32",
     ),
     _UnitPairSpec(
         "x_rms_velocity_in_s",
         "x_rms_velocity_mm_s",
-        25.4,
-        0.0,
+        Decimal("25.4"),
+        Decimal(0),
         "right = left * 25.4",
     ),
     _UnitPairSpec(
         "z_peak_velocity_in_s",
         "z_peak_velocity_mm_s",
-        25.4,
-        0.0,
+        Decimal("25.4"),
+        Decimal(0),
         "right = left * 25.4",
     ),
     _UnitPairSpec(
         "x_peak_velocity_in_s",
         "x_peak_velocity_mm_s",
-        25.4,
-        0.0,
+        Decimal("25.4"),
+        Decimal(0),
         "right = left * 25.4",
     ),
 )
@@ -391,15 +391,21 @@ PUBLIC_BANNER_PROFILE_SCHEMA: Final = _field(
         _field("unit_absolute_tolerance", ProfileFieldClassification.CONFIGURATION),
         _field("unit_relative_tolerance", ProfileFieldClassification.CONFIGURATION),
         _field("timezone", ProfileFieldClassification.CONFIGURATION),
+        _field("timestamp_precision", ProfileFieldClassification.CONFIGURATION),
         _field("decimal_places", ProfileFieldClassification.CONFIGURATION),
         _field("rounding_mode", ProfileFieldClassification.CONFIGURATION),
         _field(
             "unavailable_numeric_value",
             ProfileFieldClassification.CONFIGURATION,
         ),
+        _field(
+            "unrepresentable_numeric_policy",
+            ProfileFieldClassification.CONFIGURATION,
+        ),
         _field("percentage_denominators", ProfileFieldClassification.CONFIGURATION),
         _field("column_order", ProfileFieldClassification.CONFIGURATION),
         _field("category_order", ProfileFieldClassification.CONFIGURATION),
+        _field("label_publication_policy", ProfileFieldClassification.CONFIGURATION),
         _field("json_key_order", ProfileFieldClassification.CONFIGURATION),
     ),
     _field(
@@ -585,6 +591,7 @@ def banner_profile_json_bytes(profile: BannerDataProfile) -> bytes:
     """Serialize a profile to stable UTF-8 JSON with a trailing LF."""
 
     validate_public_profile_schema(PUBLIC_BANNER_PROFILE_SCHEMA)
+    _validate_profile_value_policy(profile)
     payload = _public_value(profile)
     _validate_public_payload(payload, PUBLIC_BANNER_PROFILE_SCHEMA)
     return (
@@ -603,6 +610,7 @@ def render_banner_profile_markdown(profile: BannerDataProfile) -> str:
     """Render a deterministic aggregate Markdown summary."""
 
     validate_public_profile_schema(PUBLIC_BANNER_PROFILE_SCHEMA)
+    _validate_profile_value_policy(profile)
     payload = _public_value(profile)
     _validate_public_payload(payload, PUBLIC_BANNER_PROFILE_SCHEMA)
 
@@ -642,7 +650,7 @@ def render_banner_profile_markdown(profile: BannerDataProfile) -> str:
     ]
     lines.extend(
         (
-            f"| {column.position} | {_markdown_cell(column.name)} | "
+            f"| {column.position} | {_markdown_schema_cell(column.name)} | "
             f"{_yes_no(column.present)} | {column.null_count} | "
             f"{column.nan_count} | {column.infinite_count} | "
             f"{column.domain_violation_count} | "
@@ -658,7 +666,7 @@ def render_banner_profile_markdown(profile: BannerDataProfile) -> str:
             (
                 "- Chave declarada: "
                 + ", ".join(
-                    _markdown_cell(key) for key in profile.duplicates.key_columns
+                    _markdown_schema_cell(key) for key in profile.duplicates.key_columns
                 )
             ),
             (
@@ -682,7 +690,7 @@ def render_banner_profile_markdown(profile: BannerDataProfile) -> str:
     )
     lines.extend(
         (
-            f"| {_markdown_cell(category.label)} | {category.count} | "
+            f"| {_markdown_value_cell(category.label)} | {category.count} | "
             f"{_format_percentage(category.percentage)} | "
             f"{_optional_yes_no(category.is_allowed)} |"
         )
@@ -699,8 +707,8 @@ def render_banner_profile_markdown(profile: BannerDataProfile) -> str:
     )
     lines.extend(
         (
-            f"| {_markdown_cell(pair.left_column)} → "
-            f"{_markdown_cell(pair.right_column)} | {pair.comparable_count} | "
+            f"| {_markdown_schema_cell(pair.left_column)} → "
+            f"{_markdown_schema_cell(pair.right_column)} | {pair.comparable_count} | "
             f"{pair.inconsistent_count} | "
             f"{_format_percentage(pair.consistency_percentage)} |"
         )
@@ -721,21 +729,46 @@ def validate_public_profile_schema(schema: PublicProfileField) -> None:
         validate_public_profile_schema(child)
 
 
+def _validate_profile_value_policy(profile: BannerDataProfile) -> None:
+    public_labels: set[str] = set()
+    for category in profile.labels.distribution:
+        if category.label in public_labels:
+            raise ProfilePrivacyError(
+                "Public label distribution contains duplicate names."
+            )
+        public_labels.add(category.label)
+        if category.is_allowed is True:
+            if not category.label.strip():
+                raise ProfilePrivacyError(
+                    "Trusted public label must be a non-empty configured value."
+                )
+            continue
+        if _OPAQUE_LABEL_PATTERN.fullmatch(category.label) is None:
+            raise ProfilePrivacyError(
+                "Unapproved public labels must use opaque aliases."
+            )
+
+
 def _validate_key_columns(key_columns: Sequence[str]) -> tuple[str, ...]:
-    keys = tuple(key_columns)
+    keys = tuple(cast(Sequence[object], key_columns))
     if not keys:
         raise BannerProfileConfigurationError(
             "At least one declared key column is required."
         )
-    if any(key not in BANNER_COLUMN_NAMES for key in keys):
+    if any(not isinstance(key, str) for key in keys):
+        raise BannerProfileConfigurationError(
+            "Declared key columns must be contract column names."
+        )
+    string_keys = cast(tuple[str, ...], keys)
+    if any(key not in BANNER_COLUMN_NAMES for key in string_keys):
         raise BannerProfileConfigurationError(
             "Declared key columns must belong to the banner contract."
         )
-    if len(keys) != len(set(keys)):
+    if len(string_keys) != len(set(string_keys)):
         raise BannerProfileConfigurationError(
             "Declared key columns must not contain duplicates."
         )
-    return keys
+    return string_keys
 
 
 def _validate_allowed_fault_categories(
@@ -743,12 +776,12 @@ def _validate_allowed_fault_categories(
 ) -> frozenset[str] | None:
     if allowed_fault_categories is None:
         return None
-    allowed = frozenset(allowed_fault_categories)
-    if any(not value.strip() for value in allowed):
+    raw_allowed = tuple(cast(Set[object], allowed_fault_categories))
+    if any(not isinstance(value, str) or not value.strip() for value in raw_allowed):
         raise BannerProfileConfigurationError(
             "Allowed fault categories must be non-empty strings."
         )
-    return allowed
+    return frozenset(cast(tuple[str, ...], raw_allowed))
 
 
 def _profile_volume(dataframe: pd.DataFrame) -> VolumeProfile:
@@ -784,12 +817,12 @@ def _profile_time(dataframe: pd.DataFrame) -> TemporalProfile:
             maximum_interval_seconds=None,
         )
 
-    parsed: list[datetime] = []
+    parsed: list[BannerUtcTimestamp] = []
     invalid_count = 0
     for value in dataframe["created_at"]:
         if _is_missing(value):
             continue
-        timestamp = _parse_utc_timestamp(value)
+        timestamp = parse_banner_utc_timestamp(value)
         if timestamp is None:
             invalid_count += 1
         else:
@@ -812,7 +845,7 @@ def _profile_time(dataframe: pd.DataFrame) -> TemporalProfile:
         )
 
     distinct = sorted(set(parsed))
-    intervals = [(right - left).total_seconds() for left, right in pairwise(distinct)]
+    intervals = [right.seconds_since(left) for left, right in pairwise(distinct)]
     cadence = _nominal_cadence(intervals)
     irregular_count = (
         0 if cadence is None else sum(interval != cadence for interval in intervals)
@@ -822,25 +855,29 @@ def _profile_time(dataframe: pd.DataFrame) -> TemporalProfile:
         if cadence is None
         else [interval for interval in intervals if interval > cadence]
     )
-    total_gap = (
-        None
-        if cadence is None
-        else _round_number(fsum(interval - cadence for interval in gap_intervals))
-    )
+    if cadence is None:
+        total_gap = None
+    else:
+        with localcontext() as context:
+            context.prec = _decimal_calculation_precision(intervals)
+            gap_excess = sum(
+                (interval - cadence for interval in gap_intervals), Decimal(0)
+            )
+        total_gap = _public_number(gap_excess)
     return TemporalProfile(
         valid_timestamp_count=len(parsed),
         invalid_timestamp_count=invalid_count,
         distinct_timestamp_count=len(distinct),
-        period_start_utc=_format_utc(distinct[0]),
-        period_end_utc=_format_utc(distinct[-1]),
+        period_start_utc=distinct[0].canonical_text(),
+        period_end_utc=distinct[-1].canonical_text(),
         input_order=_temporal_order(parsed),
         cadence_interval_count=len(intervals),
-        nominal_cadence_seconds=(None if cadence is None else _round_number(cadence)),
+        nominal_cadence_seconds=(None if cadence is None else _public_number(cadence)),
         irregular_interval_count=irregular_count,
         gap_count=len(gap_intervals),
         total_gap_seconds=total_gap,
         maximum_interval_seconds=(
-            None if not intervals else _round_number(max(intervals))
+            None if not intervals else _public_number(max(intervals))
         ),
     )
 
@@ -908,7 +945,7 @@ def _profile_column(
         name=column.name,
         logical_type=column.logical_type,
         present=True,
-        dtype_matches_contract=_dtype_matches(series, column.logical_type),
+        dtype_matches_contract=matches_banner_logical_type(series, column.logical_type),
         observed_count=observed_count,
         null_count=null_count,
         null_percentage=_percentage(null_count, observed_count),
@@ -930,6 +967,17 @@ def _profile_column(
 
 
 def _profile_duplicates(
+    dataframe: pd.DataFrame, key_columns: tuple[str, ...]
+) -> DuplicateProfile:
+    try:
+        return _profile_hashable_duplicates(dataframe, key_columns)
+    except (TypeError, ValueError):
+        raise BannerProfileInputError(
+            "Duplicate aggregation requires hashable scalar dataframe cells."
+        ) from None
+
+
+def _profile_hashable_duplicates(
     dataframe: pd.DataFrame, key_columns: tuple[str, ...]
 ) -> DuplicateProfile:
     complete_duplicate_mask = dataframe.duplicated(keep=False)
@@ -994,6 +1042,10 @@ def _profile_labels(
     dataframe: pd.DataFrame, allowed_faults: frozenset[str] | None
 ) -> LabelDistributionProfile:
     if "fault" not in dataframe.columns:
+        distribution = tuple(
+            LabelCategoryProfile(label, 0, None, True)
+            for label in sorted(allowed_faults or ())
+        )
         return LabelDistributionProfile(
             source_column="fault",
             allowed_category_check_applied=allowed_faults is not None,
@@ -1007,14 +1059,11 @@ def _profile_labels(
             missing_label_count=0,
             invalid_label_count=0,
             distinct_observed_label_count=0,
-            distribution=tuple(
-                LabelCategoryProfile(label, 0, None, True)
-                for label in sorted(allowed_faults or ())
-            ),
-            majority_count=(0 if allowed_faults else None),
-            minority_count=(0 if allowed_faults else None),
+            distribution=distribution,
+            majority_count=None,
+            minority_count=None,
             majority_to_minority_ratio=None,
-            normalized_entropy=(0.0 if allowed_faults else None),
+            normalized_entropy=None,
         )
 
     values = tuple(dataframe["fault"])
@@ -1022,25 +1071,53 @@ def _profile_labels(
         value for value in values if isinstance(value, str) and bool(value.strip())
     ]
     counts = Counter(labels)
-    category_names = sorted(set(counts) | set(allowed_faults or ()))
     valid_count = len(labels)
-    distribution = tuple(
+    trusted_categories = tuple(sorted(allowed_faults or ()))
+    unapproved_counts = tuple(
+        sorted(
+            (
+                count
+                for label, count in counts.items()
+                if allowed_faults is None or label not in allowed_faults
+            ),
+            reverse=True,
+        )
+    )
+    alias_width = max(4, len(str(len(unapproved_counts))))
+    opaque_aliases = _opaque_label_aliases(
+        len(unapproved_counts),
+        reserved=frozenset(counts) | frozenset(allowed_faults or ()),
+        width=alias_width,
+    )
+    trusted_distribution = tuple(
         LabelCategoryProfile(
             label=label,
             count=counts[label],
             percentage=_percentage(counts[label], valid_count),
-            is_allowed=(None if allowed_faults is None else label in allowed_faults),
+            is_allowed=True,
         )
-        for label in category_names
+        for label in trusted_categories
     )
+    unapproved_distribution = tuple(
+        LabelCategoryProfile(
+            label=alias,
+            count=count,
+            percentage=_percentage(count, valid_count),
+            is_allowed=(None if allowed_faults is None else False),
+        )
+        for alias, count in zip(opaque_aliases, unapproved_counts, strict=True)
+    )
+    distribution = trusted_distribution + unapproved_distribution
     category_counts = [category.count for category in distribution]
-    majority = max(category_counts, default=None)
-    minority = min(category_counts, default=None)
-    ratio = (
-        None
-        if majority is None or minority in (None, 0)
-        else _round_number(majority / minority)
-    )
+    majority = max(category_counts) if valid_count else None
+    minority = min(category_counts) if valid_count else None
+    if majority is None or minority in (None, 0):
+        ratio = None
+    else:
+        with localcontext() as context:
+            context.prec = max(50, len(str(majority)) + len(str(minority)) + 20)
+            decimal_ratio = Decimal(majority) / Decimal(minority)
+        ratio = _public_number(decimal_ratio)
     entropy = _normalized_entropy(category_counts, valid_count)
     return LabelDistributionProfile(
         source_column="fault",
@@ -1068,6 +1145,19 @@ def _profile_labels(
     )
 
 
+def _opaque_label_aliases(
+    count: int, *, reserved: frozenset[str], width: int
+) -> tuple[str, ...]:
+    aliases: list[str] = []
+    candidate_number = 1
+    while len(aliases) < count:
+        candidate = f"unapproved_label_{candidate_number:0{width}d}"
+        candidate_number += 1
+        if candidate not in reserved:
+            aliases.append(candidate)
+    return tuple(aliases)
+
+
 def _profile_unit_pair(
     dataframe: pd.DataFrame, spec: _UnitPairSpec
 ) -> UnitPairConsistencyProfile:
@@ -1087,20 +1177,25 @@ def _profile_unit_pair(
             maximum_absolute_error=None,
         )
 
-    errors: list[float] = []
+    errors: list[Decimal] = []
     consistent_count = 0
     for left, right in zip(
         dataframe[spec.left_column], dataframe[spec.right_column], strict=True
     ):
-        left_number = _finite_float(left)
-        right_number = _finite_float(right)
+        left_number = _finite_decimal(left)
+        right_number = _finite_decimal(right)
         if left_number is None or right_number is None:
             continue
-        expected = left_number * spec.multiplier + spec.offset
-        observed = right_number
-        error = abs(observed - expected)
+        with localcontext() as context:
+            context.prec = _decimal_calculation_precision(
+                (left_number, right_number, spec.multiplier, spec.offset)
+            )
+            expected = left_number * spec.multiplier + spec.offset
+            observed = right_number
+            error = abs(observed - expected)
+            is_consistent = _within_unit_tolerance(observed, expected)
         errors.append(error)
-        if _within_unit_tolerance(observed, expected):
+        if is_consistent:
             consistent_count += 1
 
     comparable_count = len(errors)
@@ -1114,37 +1209,43 @@ def _profile_unit_pair(
         consistent_count=consistent_count,
         inconsistent_count=inconsistent_count,
         consistency_percentage=_percentage(consistent_count, comparable_count),
-        maximum_absolute_error=(None if not errors else _round_number(max(errors))),
+        maximum_absolute_error=(None if not errors else _public_number(max(errors))),
     )
 
 
 def _numeric_statistics(values: tuple[object, ...]) -> NumericStatistics:
     finite_values = sorted(
-        number for value in values if (number := _finite_float(value)) is not None
+        number for value in values if (number := _finite_decimal(value)) is not None
     )
     if not finite_values:
         return _empty_numeric_statistics()
 
-    mean = fsum(finite_values) / len(finite_values)
-    variance = fsum((value - mean) ** 2 for value in finite_values) / len(finite_values)
-    quantile_25 = _linear_quantile(finite_values, PROFILE_QUANTILES[0])
-    median = _linear_quantile(finite_values, PROFILE_QUANTILES[1])
-    quantile_75 = _linear_quantile(finite_values, PROFILE_QUANTILES[2])
-    iqr = quantile_75 - quantile_25
-    lower = quantile_25 - PROFILE_IQR_MULTIPLIER * iqr
-    upper = quantile_75 + PROFILE_IQR_MULTIPLIER * iqr
+    with localcontext() as context:
+        context.prec = _decimal_calculation_precision(finite_values)
+        count = Decimal(len(finite_values))
+        mean = sum(finite_values, Decimal(0)) / count
+        variance = (
+            sum(((value - mean) ** 2 for value in finite_values), Decimal(0)) / count
+        )
+        standard_deviation = variance.sqrt()
+        quantile_25 = _linear_quantile(finite_values, _DECIMAL_QUANTILES[0])
+        median = _linear_quantile(finite_values, _DECIMAL_QUANTILES[1])
+        quantile_75 = _linear_quantile(finite_values, _DECIMAL_QUANTILES[2])
+        iqr = quantile_75 - quantile_25
+        lower = quantile_25 - _DECIMAL_IQR_MULTIPLIER * iqr
+        upper = quantile_75 + _DECIMAL_IQR_MULTIPLIER * iqr
     return NumericStatistics(
         finite_count=len(finite_values),
-        minimum=_round_number(finite_values[0]),
-        maximum=_round_number(finite_values[-1]),
-        mean=_round_number(mean),
-        population_standard_deviation=_round_number(sqrt(variance)),
-        quantile_25=_round_number(quantile_25),
-        median=_round_number(median),
-        quantile_75=_round_number(quantile_75),
-        iqr=_round_number(iqr),
-        iqr_lower_bound=_round_number(lower),
-        iqr_upper_bound=_round_number(upper),
+        minimum=_public_number(finite_values[0]),
+        maximum=_public_number(finite_values[-1]),
+        mean=_public_number(mean),
+        population_standard_deviation=_public_number(standard_deviation),
+        quantile_25=_public_number(quantile_25),
+        median=_public_number(median),
+        quantile_75=_public_number(quantile_75),
+        iqr=_public_number(iqr),
+        iqr_lower_bound=_public_number(lower),
+        iqr_upper_bound=_public_number(upper),
         iqr_outlier_count=sum(
             value < lower or value > upper for value in finite_values
         ),
@@ -1168,62 +1269,46 @@ def _empty_numeric_statistics() -> NumericStatistics:
     )
 
 
-def _linear_quantile(sorted_values: list[float], probability: float) -> float:
-    position = (len(sorted_values) - 1) * probability
-    lower_index = floor(position)
-    upper_index = ceil(position)
+def _linear_quantile(sorted_values: list[Decimal], probability: Decimal) -> Decimal:
+    position = Decimal(len(sorted_values) - 1) * probability
+    lower_index = int(position)
+    upper_index = lower_index if position == lower_index else lower_index + 1
     if lower_index == upper_index:
         return sorted_values[lower_index]
-    weight = position - lower_index
+    weight = position - Decimal(lower_index)
     return (
-        sorted_values[lower_index] * (1.0 - weight)
+        sorted_values[lower_index] * (Decimal(1) - weight)
         + sorted_values[upper_index] * weight
     )
 
 
 def _normalized_entropy(counts: list[int], total: int) -> float | None:
-    if not counts:
+    if not counts or total == 0:
         return None
-    if len(counts) == 1 or total == 0:
+    if len(counts) == 1:
         return 0.0
-    entropy = -fsum(
-        (count / total) * log(count / total) for count in counts if count > 0
-    )
-    return _round_number(entropy / log(len(counts)))
+    with localcontext() as context:
+        context.prec = 80
+        decimal_total = Decimal(total)
+        probabilities = (
+            Decimal(count) / decimal_total for count in counts if count > 0
+        )
+        entropy = -sum(
+            (probability * probability.ln() for probability in probabilities),
+            Decimal(0),
+        )
+        normalized = entropy / Decimal(len(counts)).ln()
+    return _public_number(normalized)
 
 
 def _numeric_statistics_allowed(column: BannerColumnContract) -> bool:
     return column.logical_type is LogicalType.FLOAT64
 
 
-def _dtype_matches(series: pd.Series[Any], logical_type: LogicalType) -> bool:
-    dtype_name = str(series.dtype).lower()
-    if logical_type is LogicalType.INT64:
-        return dtype_name == "int64"
-    if logical_type is LogicalType.FLOAT64:
-        return dtype_name == "float64"
-    return bool(is_string_dtype(series))
-
-
 def _violates_domain(value: object, column: BannerColumnContract) -> bool:
     if _is_missing(value) or _is_infinite(value):
         return False
-    if column.logical_type is LogicalType.INT64:
-        if type(value) is bool:
-            return True
-        return not (
-            isinstance(value, Integral)
-            and _SIGNED_INT64_MIN <= int(value) <= _SIGNED_INT64_MAX
-        )
-    if column.logical_type is LogicalType.FLOAT64:
-        number = _finite_float(value)
-        if number is None:
-            return True
-        minimum = _PHYSICAL_MINIMUMS.get(column.name)
-        return minimum is not None and number < minimum
-    if column.logical_type is LogicalType.UTC_TIMESTAMP_STRING:
-        return _parse_utc_timestamp(value) is None
-    return not isinstance(value, str) or not value.strip()
+    return banner_value_violates_domain(value, column)
 
 
 def _is_null(value: object) -> bool:
@@ -1233,7 +1318,12 @@ def _is_null(value: object) -> bool:
 def _is_nan(value: object) -> bool:
     if type(value) is bool:
         return False
-    return isinstance(value, Real) and isnan(float(value))
+    if not isinstance(value, Real):
+        return False
+    try:
+        return isnan(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _is_missing(value: object) -> bool:
@@ -1243,33 +1333,30 @@ def _is_missing(value: object) -> bool:
 def _is_infinite(value: object) -> bool:
     if type(value) is bool:
         return False
-    return isinstance(value, Real) and isinf(float(value))
+    if not isinstance(value, Real):
+        return False
+    try:
+        return isinf(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _finite_float(value: object) -> float | None:
     if type(value) is bool or not isinstance(value, Real):
         return None
-    number = float(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
     return number if isfinite(number) else None
 
 
-def _parse_utc_timestamp(value: object) -> datetime | None:
-    if not isinstance(value, str) or _UTC_TIMESTAMP_PATTERN.fullmatch(value) is None:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
+def _finite_decimal(value: object) -> Decimal | None:
+    number = _finite_float(value)
+    return None if number is None else Decimal.from_float(number)
 
 
-def _format_utc(value: datetime) -> str:
-    return (
-        value.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
-    )
-
-
-def _temporal_order(values: list[datetime]) -> TemporalOrder:
+def _temporal_order(values: list[BannerUtcTimestamp]) -> TemporalOrder:
     if len(values) < 2:
         return TemporalOrder.NOT_APPLICABLE
     nondecreasing = all(left <= right for left, right in pairwise(values))
@@ -1283,7 +1370,7 @@ def _temporal_order(values: list[datetime]) -> TemporalOrder:
     return TemporalOrder.UNORDERED
 
 
-def _nominal_cadence(intervals: list[float]) -> float | None:
+def _nominal_cadence(intervals: list[Decimal]) -> Decimal | None:
     if not intervals:
         return None
     counts = Counter(intervals)
@@ -1295,30 +1382,57 @@ def _nominal_cadence(intervals: list[float]) -> float | None:
     )
 
 
-def _within_unit_tolerance(observed: float, expected: float) -> bool:
+def _within_unit_tolerance(observed: Decimal, expected: Decimal) -> bool:
     difference = abs(observed - expected)
     permitted = max(
-        PROFILE_UNIT_ABSOLUTE_TOLERANCE,
-        PROFILE_UNIT_RELATIVE_TOLERANCE * max(abs(observed), abs(expected)),
+        _DECIMAL_UNIT_ABSOLUTE_TOLERANCE,
+        _DECIMAL_UNIT_RELATIVE_TOLERANCE * max(abs(observed), abs(expected)),
     )
     return difference <= permitted
 
 
 def _percentage(count: int, total: int) -> float | None:
-    return None if total == 0 else _round_number(count * 100.0 / total)
-
-
-def _round_number(value: float) -> float:
-    decimal_value = Decimal(str(value))
+    if total == 0:
+        return None
     with localcontext() as context:
-        context.prec = max(
-            34,
-            abs(decimal_value.adjusted()) + PROFILE_DECIMAL_PLACES + 10,
-            len(decimal_value.as_tuple().digits) + PROFILE_DECIMAL_PLACES + 10,
-        )
-        rounded = decimal_value.quantize(_ROUNDING_QUANTUM, rounding=ROUND_HALF_EVEN)
-    result = float(rounded)
+        context.prec = max(50, len(str(total)) * 2 + 20)
+        value = Decimal(count) * Decimal(100) / Decimal(total)
+    return _public_number(value)
+
+
+def _public_number(decimal_value: Decimal) -> float | None:
+    if not decimal_value.is_finite():
+        return None
+    try:
+        with localcontext() as context:
+            context.prec = max(
+                34,
+                abs(decimal_value.adjusted()) + PROFILE_DECIMAL_PLACES + 10,
+                len(decimal_value.as_tuple().digits) + PROFILE_DECIMAL_PLACES + 10,
+            )
+            rounded = decimal_value.quantize(
+                _ROUNDING_QUANTUM, rounding=ROUND_HALF_EVEN
+            )
+    except ArithmeticError:
+        return None
+    if decimal_value != 0 and rounded == 0:
+        return None
+    try:
+        result = float(rounded)
+    except (OverflowError, ValueError):
+        return None
+    if not isfinite(result):
+        return None
     return 0.0 if result == 0 else result
+
+
+def _decimal_calculation_precision(values: Sequence[Decimal]) -> int:
+    maximum_adjusted = max(
+        (value.adjusted() for value in values if value != 0), default=0
+    )
+    minimum_exponent = min(cast(int, value.as_tuple().exponent) for value in values)
+    decimal_span = maximum_adjusted - minimum_exponent + 1
+    return max(80, decimal_span * 2 + len(str(len(values))) + 32)
 
 
 def _public_value(value: object) -> object:
@@ -1407,5 +1521,34 @@ def _markdown_period(profile: TemporalProfile) -> str:
     return f"{profile.period_start_utc} a {profile.period_end_utc}"
 
 
-def _markdown_cell(value: str) -> str:
+def _markdown_schema_cell(value: str) -> str:
     return escape(value.replace("\r", " ").replace("\n", " ")).replace("|", "\\|")
+
+
+def _markdown_value_cell(value: str) -> str:
+    sanitized = value.replace("\r", " ").replace("\n", " ")
+    active_syntax = {
+        "\\": "&#92;",
+        "`": "&#96;",
+        "*": "&#42;",
+        "_": "&#95;",
+        "{": "&#123;",
+        "}": "&#125;",
+        "[": "&#91;",
+        "]": "&#93;",
+        "(": "&#40;",
+        ")": "&#41;",
+        "#": "&#35;",
+        "+": "&#43;",
+        "-": "&#45;",
+        ".": "&#46;",
+        "!": "&#33;",
+        "|": "&#124;",
+        ">": "&gt;",
+        "<": "&lt;",
+        "&": "&amp;",
+        ":": "&#58;",
+        "/": "&#47;",
+        "~": "&#126;",
+    }
+    return "".join(active_syntax.get(character, character) for character in sanitized)

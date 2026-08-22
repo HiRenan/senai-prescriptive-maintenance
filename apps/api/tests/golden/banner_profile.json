@@ -17,12 +17,15 @@
     "unit_absolute_tolerance": 1e-06,
     "unit_relative_tolerance": 1e-06,
     "timezone": "UTC",
+    "timestamp_precision": "exact_input_fraction_period_and_interval_comparison",
     "decimal_places": 6,
     "rounding_mode": "decimal_half_even",
     "unavailable_numeric_value": "json_null",
+    "unrepresentable_numeric_policy": "json_null_after_public_rounding_underflow_or_float64_overflow",
     "percentage_denominators": "column=observed;label=valid;unit_pair=comparable",
     "column_order": "banner_contract_position_ascending",
-    "category_order": "unicode_code_point_ascending",
+    "category_order": "trusted_unicode_then_unapproved_count_descending",
+    "label_publication_policy": "trusted_allowlist_or_opaque_sequential_alias",
     "json_key_order": "public_schema_declaration_order"
   },
   "volume": {
@@ -973,7 +976,7 @@
       "consistent_count": 3,
       "inconsistent_count": 0,
       "consistency_percentage": 100.0,
-      "maximum_absolute_error": 0.0
+      "maximum_absolute_error": null
     },
     {
       "left_column": "temperature_c",
@@ -995,7 +998,7 @@
       "consistent_count": 3,
       "inconsistent_count": 0,
       "consistency_percentage": 100.0,
-      "maximum_absolute_error": 0.0
+      "maximum_absolute_error": null
     },
     {
       "left_column": "z_peak_velocity_in_s",
@@ -1006,7 +1009,7 @@
       "consistent_count": 3,
       "inconsistent_count": 0,
       "consistency_percentage": 100.0,
-      "maximum_absolute_error": 0.0
+      "maximum_absolute_error": null
     },
     {
       "left_column": "x_peak_velocity_in_s",
@@ -1017,7 +1020,7 @@
       "consistent_count": 3,
       "inconsistent_count": 0,
       "consistency_percentage": 100.0,
-      "maximum_absolute_error": 0.0
+      "maximum_absolute_error": null
     }
   ]
 }

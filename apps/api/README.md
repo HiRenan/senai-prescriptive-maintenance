@@ -170,10 +170,14 @@ markdown = render_banner_profile_markdown(profile)
 ```
 
 O argumento `allowed_fault_categories` é opcional. Quando ausente, o profiler
-preserva e distribui os rótulos brutos sem classificá-los como conhecidos ou
-desconhecidos. Quando presente, categorias permitidas com contagem zero também
-aparecem na distribuição, tornando a ausência total verificável sem inventar
-observações.
+publica cada categoria observada apenas por um alias opaco determinístico. Quando
+presente, somente esse vocabulário explicitamente confiável pode ser nomeado;
+categorias não aprovadas também recebem aliases, e categorias permitidas com
+contagem zero aparecem na distribuição. Assim, cardinalidade, contagens e
+balanceamento permanecem verificáveis sem expor o valor bruto. Um item não textual
+na allowlist gera `BannerProfileConfigurationError`; uma célula não hashable que
+impeça a agregação de duplicatas gera `BannerProfileInputError`, sempre com mensagem
+sanitizada.
 
 ### Inventário de indicadores
 
@@ -186,7 +190,7 @@ observações.
 | Duplicatas completas | Conta grupos idênticos e linhas excedentes além da primeira, sem devolver índices, valores ou registros. |
 | Conflitos por chave | Para a chave explicitamente declarada, conta grupos repetidos e aqueles cujos demais campos divergem; linhas com chave incompleta são apenas contabilizadas e excluídas dos grupos. |
 | Estatística numérica | Para medições `float64`, usa somente valores finitos e publica contagem, mínimo, máximo, média, desvio, três quantis, IQR, cercas e quantidade fora das cercas. `id` não recebe estatísticas descritivas para não expor distribuição de identificadores. |
-| Distribuição de rótulos | Preserva categorias brutas, ordena-as deterministicamente, inclui categorias permitidas ausentes e calcula maioria, minoria, razão maioria/minoria e entropia normalizada. Não normaliza Unicode, caixa, espaços ou separadores. |
+| Distribuição de rótulos | Nomeia somente categorias da allowlist confiável, representa as demais por aliases opacos, inclui categorias permitidas ausentes e calcula maioria, minoria, razão maioria/minoria e entropia normalizada sem publicar valores observados não aprovados. |
 | Pares redundantes | Compara agregadamente quatro pares `in/s`–`mm/s` pela relação `mm/s = in/s × 25,4` e o par de temperatura por `°F = °C × 1,8 + 32`, publicando disponibilidade, consistência e erro absoluto máximo. |
 
 ### Definições reproduzíveis
@@ -197,19 +201,31 @@ observações.
   contam como outliers;
 - estatísticas incluem valores finitos mesmo quando violam domínio, mantendo
   observação separada de decisão; `null`, `NaN` e infinito não entram nelas;
+- cálculos de estatísticas, quantis, IQR, desvio e pares de unidade convertem cada
+  `float64` finito para sua representação decimal exata e usam precisão interna
+  suficiente para toda a faixa do tipo, evitando overflow e cancelamento em
+  somas de sinais opostos;
 - `None`, `pd.NA` e `pd.NaT` são `null`; `NaN` IEEE é contado separadamente;
   infinito e violação de domínio também são dimensões separadas;
 - a tolerância dos pares é o maior valor entre `1e-6` absoluto e `1e-6`
-  relativo ao maior módulo comparado;
-- todo instante é interpretado e emitido em UTC; limites de período usam ISO
-  8601 com seis casas de microssegundos e sufixo `Z`;
+  relativo ao maior módulo comparado; a comparação ocorre no domínio decimal
+  mesmo quando o valor convertido não caberia em `float64`;
+- todo instante é interpretado em UTC com a fração decimal completa aceita pelo
+  contrato. Ordenação, distinção, cadência e lacunas usam essa precisão exata;
+  limites de período usam ISO 8601 canônico com ao menos seis casas e preservam
+  todas as casas significativas adicionais;
 - números derivados e percentuais são arredondados a seis casas pelo modo
-  decimal half-even; quando não existe denominador ou valor numérico, o JSON
-  usa `null` em vez de `NaN` ou infinito;
+  decimal half-even. Se um derivado finito exceder `float64` ou um valor não zero
+  ficar abaixo dessa resolução pública, o campo recebe `null`, nunca infinito,
+  `NaN` ou zero enganoso; contagens e classificações continuam calculadas com a
+  precisão interna;
 - percentuais por coluna usam células observadas, percentuais de rótulo usam
-  rótulos válidos e percentuais de pares usam comparações disponíveis;
-- colunas seguem o catálogo, categorias seguem ordem crescente de pontos de
-  código Unicode e chaves JSON seguem a declaração do esquema público.
+  rótulos válidos e percentuais de pares usam comparações disponíveis. Sem
+  denominador válido, inclusive para entropia, a métrica é `null`;
+- colunas seguem o catálogo; categorias confiáveis seguem pontos de código
+  Unicode e aliases de não aprovadas seguem contagem decrescente, sem qualquer
+  ordenação derivada do valor bruto. Chaves JSON seguem a declaração do esquema
+  público.
 
 `PUBLIC_BANNER_PROFILE_SCHEMA` classifica recursivamente cada campo como
 agregado, configuração ou esquema. A mesma proteção é executada antes do JSON e
@@ -217,6 +233,10 @@ do Markdown e recusa qualquer campo classificado como linha, caminho local,
 amostra, identificador individual, timestamp individual ou combinação
 reidentificável. O JSON usa UTF-8, indentação fixa, LF final e ordem declarada,
 de modo que a mesma entrada e configuração produzam exatamente os mesmos bytes.
+Além da classificação estrutural, os publicadores validam os valores e recusam
+qualquer rótulo não aprovado que não seja um alias opaco. O Markdown codifica
+sintaxe ativa, inclusive links e HTML, mesmo para rótulos explicitamente
+confiáveis.
 
 O profiler mede; ele não limpa, remove, imputa, converte unidades, normaliza
 rótulos nem define limiares finais de qualidade.

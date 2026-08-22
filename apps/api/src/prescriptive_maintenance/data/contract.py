@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Set
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, localcontext
 from enum import StrEnum
 from math import isfinite
+from numbers import Integral, Real
 from re import compile as compile_pattern
 from typing import Any, Final, Protocol, cast
 
@@ -39,6 +41,48 @@ class BannerColumnContract:
     nullable: bool
     domain: str
     operational_description: str
+
+
+@dataclass(frozen=True, order=True, slots=True)
+class BannerUtcTimestamp:
+    """Exactly parsed UTC instant, including arbitrary decimal precision."""
+
+    whole_second_utc: datetime
+    fractional_second: Decimal
+
+    def seconds_since(self, earlier: BannerUtcTimestamp) -> Decimal:
+        """Return an exact decimal difference without float conversion."""
+
+        whole_delta = self.whole_second_utc - earlier.whole_second_utc
+        whole_seconds = whole_delta.days * 86_400 + whole_delta.seconds
+        fraction_places = max(
+            0,
+            -cast(int, self.fractional_second.as_tuple().exponent),
+            -cast(int, earlier.fractional_second.as_tuple().exponent),
+        )
+        whole_digits = len(str(abs(whole_seconds))) if whole_seconds else 1
+        with localcontext() as context:
+            context.prec = whole_digits + fraction_places + 4
+            return (
+                Decimal(whole_seconds)
+                + self.fractional_second
+                - earlier.fractional_second
+            )
+
+    def canonical_text(self) -> str:
+        """Render UTC with at least microseconds and all significant precision."""
+
+        fraction = format(self.fractional_second, "f").partition(".")[2]
+        significant = fraction.rstrip("0")
+        rendered_fraction = (
+            significant if len(significant) > 6 else significant.ljust(6, "0")
+        )
+        whole = self.whole_second_utc
+        return (
+            f"{whole.year:04d}-{whole.month:02d}-{whole.day:02d}"
+            f"T{whole.hour:02d}:{whole.minute:02d}:{whole.second:02d}"
+            f".{rendered_fraction}Z"
+        )
 
 
 BANNER_COLUMN_CATALOG: Final[tuple[BannerColumnContract, ...]] = (
@@ -390,7 +434,8 @@ class _SchemaErrorMetadata(Protocol):
 
 
 _UTC_TIMESTAMP_PATTERN: Final = compile_pattern(
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z"
+    r"(?P<whole>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d+))?Z"
 )
 _CHECK_FINITE: Final = "finite"
 _CHECK_TIMESTAMP: Final = "utc_timestamp_format"
@@ -412,6 +457,8 @@ _PHYSICAL_MINIMUMS: Final[dict[str, float]] = {
     "z_high_freq_rms_accel_g": 0.0,
     "x_high_freq_rms_accel_g": 0.0,
 }
+_SIGNED_INT64_MIN: Final = -(2**63)
+_SIGNED_INT64_MAX: Final = 2**63 - 1
 
 _CHECK_CODES: Final[dict[str, ContractViolationCode]] = {
     _CHECK_TIMESTAMP: ContractViolationCode.TIMESTAMP_FORMAT,
@@ -433,6 +480,68 @@ _CHECK_MESSAGES: Final[dict[ContractViolationCode, str]] = {
     ),
     ContractViolationCode.CHECK_FAILED: "Column failed a declared contract check.",
 }
+
+
+def parse_banner_utc_timestamp(value: object) -> BannerUtcTimestamp | None:
+    """Parse the contract UTC syntax without truncating fractional seconds."""
+
+    if not isinstance(value, str):
+        return None
+    match = _UTC_TIMESTAMP_PATTERN.fullmatch(value)
+    if match is None:
+        return None
+    try:
+        whole_second = datetime.fromisoformat(match.group("whole") + "+00:00")
+        raw_fraction = match.group("fraction")
+        fractional_second = (
+            Decimal(0) if raw_fraction is None else Decimal(f"0.{raw_fraction}")
+        )
+    except (ValueError, ArithmeticError):
+        return None
+    return BannerUtcTimestamp(whole_second, fractional_second)
+
+
+def matches_banner_logical_type(
+    series: pd.Series[Any], logical_type: LogicalType
+) -> bool:
+    """Return whether a series dtype matches the canonical contract rule."""
+
+    dtype_name = str(series.dtype).lower()
+    if logical_type is LogicalType.INT64:
+        return dtype_name == "int64"
+    if logical_type is LogicalType.FLOAT64:
+        return dtype_name == "float64"
+    return bool(is_string_dtype(series))
+
+
+def banner_value_violates_domain(value: object, column: BannerColumnContract) -> bool:
+    """Apply the canonical scalar domain rule for a non-missing cell."""
+
+    if column.logical_type is LogicalType.INT64:
+        if type(value) is bool or not isinstance(value, Integral):
+            return True
+        try:
+            integer = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return True
+        return not (_SIGNED_INT64_MIN <= integer <= _SIGNED_INT64_MAX)
+
+    if column.logical_type is LogicalType.FLOAT64:
+        if type(value) is bool or not isinstance(value, Real):
+            return True
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return True
+        if not isfinite(number):
+            return True
+        minimum = _PHYSICAL_MINIMUMS.get(column.name)
+        return minimum is not None and number < minimum
+
+    if column.logical_type is LogicalType.UTC_TIMESTAMP_STRING:
+        return parse_banner_utc_timestamp(value) is None
+
+    return not isinstance(value, str) or not value.strip()
 
 
 def build_banner_dataframe_schema(
@@ -503,23 +612,11 @@ def _build_pandera_column(
     if column.logical_type is LogicalType.FLOAT64:
         checks.append(pa.Check(_is_finite, element_wise=True, name=_CHECK_FINITE))
     if column.name in _PHYSICAL_MINIMUMS:
-        checks.append(_minimum_check(_PHYSICAL_MINIMUMS[column.name]))
+        checks.append(_domain_check(column, _CHECK_PHYSICAL_MINIMUM))
     if column.logical_type is LogicalType.UTC_TIMESTAMP_STRING:
-        checks.append(
-            pa.Check(
-                _is_utc_timestamp,
-                element_wise=True,
-                name=_CHECK_TIMESTAMP,
-            )
-        )
+        checks.append(_domain_check(column, _CHECK_TIMESTAMP))
     if column.name == "fault":
-        checks.append(
-            pa.Check(
-                _is_non_empty_fault,
-                element_wise=True,
-                name=_CHECK_NON_EMPTY_FAULT,
-            )
-        )
+        checks.append(_domain_check(column, _CHECK_NON_EMPTY_FAULT))
         if allowed_faults is not None:
             checks.append(_allowed_fault_check(allowed_faults))
 
@@ -533,14 +630,14 @@ def _build_pandera_column(
     return pa.Column(dtype=dtype, checks=checks, nullable=column.nullable)
 
 
-def _minimum_check(minimum: float) -> pa.Check:
-    def at_or_above_minimum(value: float) -> bool:
-        return value >= minimum
+def _domain_check(column: BannerColumnContract, name: str) -> pa.Check:
+    def is_in_domain(value: object) -> bool:
+        return not banner_value_violates_domain(value, column)
 
     return pa.Check(
-        at_or_above_minimum,
+        is_in_domain,
         element_wise=True,
-        name=_CHECK_PHYSICAL_MINIMUM,
+        name=name,
     )
 
 
@@ -557,20 +654,6 @@ def _allowed_fault_check(allowed_faults: frozenset[str]) -> pa.Check:
 
 def _is_finite(value: float) -> bool:
     return isfinite(value)
-
-
-def _is_utc_timestamp(value: str) -> bool:
-    if _UTC_TIMESTAMP_PATTERN.fullmatch(value) is None:
-        return False
-    try:
-        datetime.fromisoformat(value)
-    except ValueError:
-        return False
-    return True
-
-
-def _is_non_empty_fault(value: str) -> bool:
-    return bool(value.strip())
 
 
 def _validate_structure(dataframe: pd.DataFrame) -> tuple[ContractViolation, ...]:
@@ -635,17 +718,8 @@ def _validate_dtypes(dataframe: pd.DataFrame) -> tuple[ContractViolation, ...]:
             "Column dtype does not match the declared logical type.",
         )
         for column in BANNER_COLUMN_CATALOG
-        if not _matches_logical_type(dataframe[column.name], column.logical_type)
+        if not matches_banner_logical_type(dataframe[column.name], column.logical_type)
     )
-
-
-def _matches_logical_type(series: pd.Series[Any], logical_type: LogicalType) -> bool:
-    dtype_name = str(series.dtype).lower()
-    if logical_type is LogicalType.INT64:
-        return dtype_name == "int64"
-    if logical_type is LogicalType.FLOAT64:
-        return dtype_name == "float64"
-    return bool(is_string_dtype(series))
 
 
 def _validate_missing_values(

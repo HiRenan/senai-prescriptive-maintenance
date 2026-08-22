@@ -5,25 +5,35 @@ from __future__ import annotations
 import builtins
 import json
 import locale
+from dataclasses import replace
+from decimal import ROUND_DOWN, localcontext
+from math import isfinite
+from numbers import Real
 from pathlib import Path
-from typing import Final, NoReturn
+from typing import Final, NoReturn, cast
 
 import pandas as pd
 import pytest
 from prescriptive_maintenance.data import (
+    BANNER_COLUMN_CATALOG,
     BANNER_COLUMN_NAMES,
     BANNER_PROFILE_SCHEMA_VERSION,
     PUBLIC_BANNER_PROFILE_SCHEMA,
     BannerDataProfile,
     BannerProfileConfigurationError,
+    BannerProfileInputError,
     ColumnProfile,
     ProfileFieldClassification,
     ProfilePrivacyError,
     PublicProfileField,
     TemporalOrder,
     banner_profile_json_bytes,
+    banner_value_violates_domain,
+    matches_banner_logical_type,
+    parse_banner_utc_timestamp,
     profile_banner_dataframe,
     render_banner_profile_markdown,
+    validate_banner_dataframe,
     validate_public_profile_schema,
 )
 from synthetic_banner_factory import (
@@ -52,6 +62,17 @@ def _column(profile: BannerDataProfile, name: str) -> ColumnProfile:
     return next(column for column in profile.columns if column.name == name)
 
 
+def _assert_public_numbers_are_finite(value: object) -> None:
+    if isinstance(value, dict):
+        for nested in cast(dict[str, object], value).values():
+            _assert_public_numbers_are_finite(nested)
+    elif isinstance(value, list):
+        for nested in cast(list[object], value):
+            _assert_public_numbers_are_finite(nested)
+    elif isinstance(value, float):
+        assert isfinite(value)
+
+
 def test_profile_is_typed_complete_and_uses_fixed_numeric_definitions() -> None:
     profile = _profile()
     rpm = _column(profile, "rpm")
@@ -78,14 +99,25 @@ def test_profile_is_typed_complete_and_uses_fixed_numeric_definitions() -> None:
     )
     assert profile.definitions.iqr_multiplier == 1.5
     assert profile.definitions.timezone == "UTC"
+    assert profile.definitions.timestamp_precision == (
+        "exact_input_fraction_period_and_interval_comparison"
+    )
     assert profile.definitions.decimal_places == 6
     assert profile.definitions.rounding_mode == "decimal_half_even"
     assert profile.definitions.unavailable_numeric_value == "json_null"
+    assert profile.definitions.unrepresentable_numeric_policy == (
+        "json_null_after_public_rounding_underflow_or_float64_overflow"
+    )
     assert profile.definitions.percentage_denominators == (
         "column=observed;label=valid;unit_pair=comparable"
     )
     assert profile.definitions.column_order == "banner_contract_position_ascending"
-    assert profile.definitions.category_order == "unicode_code_point_ascending"
+    assert profile.definitions.category_order == (
+        "trusted_unicode_then_unapproved_count_descending"
+    )
+    assert profile.definitions.label_publication_policy == (
+        "trusted_allowlist_or_opaque_sequential_alias"
+    )
     assert profile.definitions.json_key_order == "public_schema_declaration_order"
     assert _column(profile, "id").numeric_statistics is None
     assert rpm.numeric_statistics is not None
@@ -165,6 +197,47 @@ def test_column_findings_are_counted_separately(
     assert len(profile.columns) == 26
 
 
+@pytest.mark.parametrize(
+    "scenario",
+    (
+        BannerScenario.VALID,
+        BannerScenario.PHYSICAL_VIOLATION,
+        BannerScenario.INVALID_TIMESTAMP,
+        BannerScenario.EMPTY_FAULT,
+        BannerScenario.NAN_VALUE,
+        BannerScenario.INFINITE_VALUE,
+    ),
+)
+def test_profiler_reuses_canonical_contract_dtype_and_domain_rules(
+    scenario: BannerScenario,
+) -> None:
+    dataframe = make_banner_dataframe(scenario=scenario)
+    profile = _profile(scenario)
+
+    for contract_column in BANNER_COLUMN_CATALOG:
+        column = _column(profile, contract_column.name)
+        series = dataframe[contract_column.name]
+        expected_domain_violations = 0
+        for value in cast(tuple[object, ...], tuple(series)):
+            if value is None or value is pd.NA or value is pd.NaT:
+                continue
+            if isinstance(value, Real) and not isfinite(float(value)):
+                continue
+            expected_domain_violations += banner_value_violates_domain(
+                value, contract_column
+            )
+        assert column.dtype_matches_contract is matches_banner_logical_type(
+            series, contract_column.logical_type
+        )
+        assert column.domain_violation_count == expected_domain_violations
+
+    if scenario is BannerScenario.VALID:
+        assert all(
+            parse_banner_utc_timestamp(value) is not None
+            for value in dataframe["created_at"]
+        )
+
+
 def test_nan_and_infinity_are_excluded_from_finite_statistics() -> None:
     nan_profile = _profile(BannerScenario.NAN_VALUE)
     infinite_profile = _profile(BannerScenario.INFINITE_VALUE)
@@ -180,6 +253,57 @@ def test_nan_and_infinity_are_excluded_from_finite_statistics() -> None:
     assert nan_statistics.maximum == infinite_statistics.maximum == 1750.0
     assert _column(nan_profile, "rpm").missing_count == 1
     assert _column(infinite_profile, "rpm").missing_count == 0
+
+
+def test_extreme_finite_float64_arithmetic_is_total_and_never_publicly_nonfinite() -> (
+    None
+):
+    dataframe = make_banner_dataframe()
+    maximum_float64 = float.fromhex("0x1.fffffffffffffp+1023")
+    dataframe["rpm"] = pd.Series(
+        (-maximum_float64, 0.0, maximum_float64), dtype="float64"
+    )
+    unit_pairs = (
+        ("z_rms_velocity_in_s", "z_rms_velocity_mm_s"),
+        ("temperature_c", "temperature_f"),
+        ("x_rms_velocity_in_s", "x_rms_velocity_mm_s"),
+        ("z_peak_velocity_in_s", "z_peak_velocity_mm_s"),
+        ("x_peak_velocity_in_s", "x_peak_velocity_mm_s"),
+    )
+    for left_column, right_column in unit_pairs:
+        dataframe[left_column] = maximum_float64
+        dataframe[right_column] = maximum_float64
+
+    first = profile_banner_dataframe(
+        dataframe,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=SYNTHETIC_FAULT_ALLOWLIST,
+    )
+    second = profile_banner_dataframe(
+        dataframe,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=SYNTHETIC_FAULT_ALLOWLIST,
+    )
+    serialized = banner_profile_json_bytes(first)
+    statistics = _column(first, "rpm").numeric_statistics
+
+    assert statistics is not None
+    assert statistics.minimum == -maximum_float64
+    assert statistics.maximum == maximum_float64
+    assert statistics.mean == 0.0
+    assert statistics.population_standard_deviation is not None
+    assert isfinite(statistics.population_standard_deviation)
+    assert statistics.iqr_lower_bound is None
+    assert statistics.iqr_upper_bound is None
+    assert all(pair.comparable_count == 3 for pair in first.redundant_unit_pairs)
+    assert all(pair.consistent_count == 0 for pair in first.redundant_unit_pairs)
+    assert all(pair.inconsistent_count == 3 for pair in first.redundant_unit_pairs)
+    assert all(
+        pair.maximum_absolute_error is None or isfinite(pair.maximum_absolute_error)
+        for pair in first.redundant_unit_pairs
+    )
+    assert serialized == banner_profile_json_bytes(second)
+    _assert_public_numbers_are_finite(json.loads(serialized))
 
 
 def test_missing_and_unexpected_columns_are_aggregated_without_names_leaking() -> None:
@@ -271,6 +395,39 @@ def test_temporal_period_order_cadence_and_gaps_are_fixed() -> None:
     assert long_gap.maximum_interval_seconds == 28800.0
 
 
+def test_submicrosecond_utc_instants_remain_distinct_ordered_and_cadenced() -> None:
+    dataframe = make_banner_dataframe()
+    dataframe["created_at"] = pd.Series(
+        (
+            "2099-04-01T00:00:00.0000001Z",
+            "2099-04-01T00:00:00.0000002Z",
+            "2099-04-01T00:00:00.0000003Z",
+        ),
+        dtype="string",
+    )
+
+    temporal = profile_banner_dataframe(
+        dataframe,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=SYNTHETIC_FAULT_ALLOWLIST,
+    ).temporal
+
+    assert validate_banner_dataframe(
+        dataframe, allowed_fault_categories=SYNTHETIC_FAULT_ALLOWLIST
+    ).is_valid
+    assert temporal.valid_timestamp_count == 3
+    assert temporal.distinct_timestamp_count == 3
+    assert temporal.period_start_utc == "2099-04-01T00:00:00.0000001Z"
+    assert temporal.period_end_utc == "2099-04-01T00:00:00.0000003Z"
+    assert temporal.input_order is TemporalOrder.NONDECREASING
+    assert temporal.cadence_interval_count == 2
+    assert temporal.nominal_cadence_seconds is None
+    assert temporal.irregular_interval_count == 0
+    assert temporal.gap_count == 0
+    assert temporal.total_gap_seconds == 0.0
+    assert temporal.maximum_interval_seconds is None
+
+
 def test_temporal_input_order_is_reported_without_reordering_the_dataframe() -> None:
     descending = make_banner_dataframe().iloc[::-1].reset_index(drop=True)
     unordered = make_banner_dataframe().iloc[[0, 2, 1]].reset_index(drop=True)
@@ -327,6 +484,130 @@ def test_allowed_categories_include_zero_count_entries_and_balance() -> None:
     assert transition.normalized_entropy == 0.918296
 
 
+@pytest.mark.parametrize(
+    "allowed_fault_categories",
+    (None, frozenset({"synthetic_trusted"})),
+    ids=("no-trusted-vocabulary", "explicit-trusted-vocabulary"),
+)
+def test_unapproved_fault_values_are_opaque_without_losing_aggregate_balance(
+    allowed_fault_categories: frozenset[str] | None,
+) -> None:
+    private_values = (
+        r"C:\Users\private\record-4821.json",
+        "asset-id-998811",
+        "2099-04-01T00:00:00.0000001Z",
+        "https://example.invalid/private?q=1",
+        "<script>alert(1)</script>",
+        "[click](javascript:alert(1)) **bold** | row",
+    )
+    dataframe = pd.concat(
+        (make_banner_dataframe(), make_banner_dataframe()), ignore_index=True
+    )
+    dataframe["fault"] = pd.Series(private_values, dtype="string")
+
+    profile = profile_banner_dataframe(
+        dataframe,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=allowed_fault_categories,
+    )
+    alternate = dataframe.copy(deep=True)
+    alternate["fault"] = pd.Series(
+        tuple(f"different-private-label-{index}" for index in range(6)),
+        dtype="string",
+    )
+    alternate_profile = profile_banner_dataframe(
+        alternate,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=allowed_fault_categories,
+    )
+    json_output = banner_profile_json_bytes(profile).decode("utf-8")
+    markdown_output = render_banner_profile_markdown(profile)
+    unapproved = tuple(
+        category
+        for category in profile.labels.distribution
+        if category.is_allowed is not True
+    )
+
+    assert profile.labels.valid_label_count == len(private_values)
+    assert profile.labels.distinct_observed_label_count == len(private_values)
+    assert sum(category.count for category in profile.labels.distribution) == len(
+        private_values
+    )
+    assert len(unapproved) == len(private_values)
+    assert all(
+        category.label.startswith("unapproved_label_") for category in unapproved
+    )
+    assert all(category.count == 1 for category in unapproved)
+    assert profile.labels.majority_count == 1
+    assert profile.labels.minority_count == (
+        1 if allowed_fault_categories is None else 0
+    )
+    assert profile.labels.normalized_entropy is not None
+    assert banner_profile_json_bytes(profile) == banner_profile_json_bytes(
+        alternate_profile
+    )
+    assert render_banner_profile_markdown(profile) == render_banner_profile_markdown(
+        alternate_profile
+    )
+    for private_value in private_values:
+        assert private_value not in json_output
+        assert private_value not in markdown_output
+
+
+def test_explicitly_trusted_label_is_named_in_json_but_markdown_is_inert() -> None:
+    trusted_label = "<b>**trusted** ~~strike~~ [link](https://example.invalid)</b>"
+    dataframe = make_banner_dataframe()
+    dataframe["fault"] = pd.Series((trusted_label,) * len(dataframe), dtype="string")
+
+    profile = profile_banner_dataframe(
+        dataframe,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=frozenset({trusted_label}),
+    )
+    json_output = banner_profile_json_bytes(profile).decode("utf-8")
+    markdown_output = render_banner_profile_markdown(profile)
+
+    assert trusted_label in json_output
+    assert trusted_label not in markdown_output
+    assert "<b>" not in markdown_output
+    assert "[link](" not in markdown_output
+    assert "&lt;b&gt;" in markdown_output
+
+
+@pytest.mark.parametrize(
+    "allowed_fault_categories",
+    (None, SYNTHETIC_FAULT_ALLOWLIST),
+    ids=("without-vocabulary", "with-vocabulary"),
+)
+@pytest.mark.parametrize("fault_state", ("empty", "missing", "null", "invalid"))
+def test_label_metrics_without_a_valid_denominator_are_unavailable(
+    allowed_fault_categories: frozenset[str] | None,
+    fault_state: str,
+) -> None:
+    dataframe = make_banner_dataframe()
+    if fault_state == "empty":
+        dataframe = dataframe.iloc[0:0]
+    elif fault_state == "missing":
+        dataframe = dataframe.drop(columns="fault")
+    elif fault_state == "null":
+        dataframe["fault"] = pd.Series((pd.NA,) * len(dataframe), dtype="string")
+    else:
+        dataframe["fault"] = pd.Series(("", " ", "\t"), dtype="string")
+
+    labels = profile_banner_dataframe(
+        dataframe,
+        key_columns=_DECLARED_KEY,
+        allowed_fault_categories=allowed_fault_categories,
+    ).labels
+
+    assert labels.valid_label_count == 0
+    assert labels.majority_count is None
+    assert labels.minority_count is None
+    assert labels.majority_to_minority_ratio is None
+    assert labels.normalized_entropy is None
+    assert all(category.percentage is None for category in labels.distribution)
+
+
 def test_json_is_byte_stable_golden_and_locale_independent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -348,6 +629,17 @@ def test_json_is_byte_stable_golden_and_locale_independent(
     assert second == expected
     assert first.endswith(b"\n")
     assert b'"mean": 1750.0' in first
+
+
+def test_profile_is_independent_from_the_process_decimal_context() -> None:
+    expected = banner_profile_json_bytes(_profile(BannerScenario.LABEL_TRANSITION))
+
+    with localcontext() as context:
+        context.prec = 2
+        context.rounding = ROUND_DOWN
+        observed = banner_profile_json_bytes(_profile(BannerScenario.LABEL_TRANSITION))
+
+    assert observed == expected
 
 
 def test_json_key_column_and_category_order_are_explicit() -> None:
@@ -405,6 +697,27 @@ def test_recursive_privacy_guard_rejects_every_disclosure_classification(
 
 def test_public_schema_is_recursively_aggregate_safe() -> None:
     validate_public_profile_schema(PUBLIC_BANNER_PROFILE_SCHEMA)
+
+
+def test_public_publishers_fail_closed_on_unapproved_literal_label_value() -> None:
+    profile = _profile()
+    unsafe_category = replace(
+        profile.labels.distribution[0],
+        label="[private-row-991](https://example.invalid)",
+        is_allowed=False,
+    )
+    unsafe_profile = replace(
+        profile,
+        labels=replace(
+            profile.labels,
+            distribution=(unsafe_category, *profile.labels.distribution[1:]),
+        ),
+    )
+
+    with pytest.raises(ProfilePrivacyError, match="opaque aliases"):
+        banner_profile_json_bytes(unsafe_profile)
+    with pytest.raises(ProfilePrivacyError, match="opaque aliases"):
+        render_banner_profile_markdown(unsafe_profile)
 
 
 def test_outputs_never_include_row_ids_middle_timestamp_or_local_paths() -> None:
@@ -472,6 +785,30 @@ def test_allowed_categories_reject_ambiguous_empty_labels() -> None:
             key_columns=_DECLARED_KEY,
             allowed_fault_categories=frozenset({"synthetic_nominal", " "}),
         )
+
+
+def test_allowed_categories_reject_non_string_items_with_typed_error() -> None:
+    invalid_allowlist = cast(frozenset[str], frozenset({"synthetic_nominal", 17}))
+
+    with pytest.raises(BannerProfileConfigurationError, match="non-empty strings"):
+        profile_banner_dataframe(
+            make_banner_dataframe(),
+            key_columns=_DECLARED_KEY,
+            allowed_fault_categories=invalid_allowlist,
+        )
+
+
+def test_non_hashable_cell_raises_sanitized_typed_input_error() -> None:
+    private_value = "synthetic-private-cell-77421"
+    dataframe = make_banner_dataframe()
+    fault_values = cast(list[object], dataframe["fault"].tolist())
+    fault_values[0] = [private_value]
+    dataframe["fault"] = pd.Series(fault_values, dtype="object")
+
+    with pytest.raises(BannerProfileInputError, match="hashable scalar") as error:
+        profile_banner_dataframe(dataframe, key_columns=_DECLARED_KEY)
+
+    assert private_value not in str(error.value)
 
 
 def test_duplicate_dataframe_column_names_are_rejected() -> None:
