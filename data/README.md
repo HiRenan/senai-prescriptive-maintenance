@@ -81,6 +81,11 @@ O arquivo `source-manifest.json` segue um formato JSON simples:
 O hash é representado por 64 caracteres hexadecimais em minúsculas. O tamanho é
 o número exato de bytes, sem conversão de unidade.
 
+No backend, o consumo de `banner.csv` passa exclusivamente por
+`prescriptive_maintenance.data.consume_banner_source()`. O caminho da fonte e o
+caminho deste manifesto são obrigatórios e explícitos; a validação ocorre antes
+do consumidor e é repetida no mesmo descritor binário read-only depois dele.
+
 Para comparar as cópias locais com o manifesto no PowerShell:
 
 ```powershell
