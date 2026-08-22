@@ -43,6 +43,8 @@ A versão atual contém:
   inteiramente sintéticas;
 - uma única porta tipada e somente leitura para `banner.csv`, com caminho de
   entrada explícito e validação de tamanho e SHA-256 antes e depois do consumo;
+- um catálogo v1 das 26 colunas e um contrato Pandera estrito, ordenado e sem
+  coerção implícita, acompanhado de relatórios sanitizados de violação;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;

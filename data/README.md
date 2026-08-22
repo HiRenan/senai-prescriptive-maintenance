@@ -126,7 +126,9 @@ para gerar o manifesto; ela não concede licença para publicar esses materiais.
 
 - `fixtures/banner.synthetic.csv` preserva o cabeçalho e os tipos essenciais do
   conjunto tabular: identificador inteiro, data ISO 8601, medições numéricas,
-  rótulo textual e rotação numérica.
+  rótulo textual e rotação numérica. Seus três rótulos de falha autorizados são
+  `synthetic_healthy`, `synthetic_imbalance` e
+  `synthetic_bearing_warning`; eles não representam o vocabulário original.
 - `fixtures/maintenance.synthetic.txt` contém um relato fictício curto para
   futuros testes de leitura e recuperação textual.
 

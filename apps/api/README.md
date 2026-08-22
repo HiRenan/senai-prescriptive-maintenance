@@ -69,6 +69,35 @@ diferenciam ausência, nome inesperado, tamanho, hash, mutação e permissão se
 expor caminho absoluto ou conteúdo. Parsing tabular e interface de linha de
 comando não fazem parte deste contrato.
 
+## Contrato tabular de `banner`
+
+`prescriptive_maintenance.data.BANNER_COLUMN_CATALOG` é a fonte versionada e
+revisável dos metadados das 26 colunas. Cada entrada declara posição, nome,
+tipo lógico, unidade de origem, unidade canônica, nulabilidade, domínio e
+descrição operacional. A ordem do catálogo é exatamente a ordem pública de
+`data/fixtures/banner.synthetic.csv`.
+
+`BANNER_DATAFRAME_SCHEMA` materializa esse catálogo como um `DataFrameSchema`
+Pandera com `strict=True`, `ordered=True` e `coerce=False`. A função
+`validate_banner_dataframe()` devolve um relatório sanitizado: violações do
+contrato são bloqueantes e têm código estável e severidade `error`, enquanto
+`statistical_findings` permanece separado e vazio nesta etapa. O relatório não
+inclui índices nem valores de células.
+
+Esta primeira versão preserva cada coluna na unidade em que a fonte a publica;
+por isso, unidade de origem e canônica são iguais. As colunas paralelas em
+`in/s` e `mm/s`, assim como `°F` e `°C`, continuam independentes e nenhuma
+conversão ou conferência cruzada é feita. Alterar nome, posição, tipo, unidade,
+nulabilidade ou domínio exige incrementar `BANNER_CONTRACT_VERSION`, editar o
+catálogo e acrescentar ou ajustar o teste correspondente no mesmo pull request.
+
+`fault` é deliberadamente um rótulo bruto não vazio. O contrato não enumera o
+vocabulário real nem normaliza categorias; uma allowlist só é aplicada quando o
+chamador a fornece explicitamente. Para a fixture pública, os únicos rótulos
+autorizados nesse modo são `synthetic_healthy`, `synthetic_imbalance` e
+`synthetic_bearing_warning`. Essa lista é exclusivamente sintética e não
+representa, aproxima ou substitui as categorias da fonte original.
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:
