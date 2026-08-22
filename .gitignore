@@ -1,0 +1,120 @@
+# Materiais originais fornecidos para o desafio
+11 - prova prtica.pdf
+banner.csv
+Doc1.pdf
+Doc2.pdf
+Doc3.pdf
+Doc4.pdf
+Doc5.pdf
+Doc6.pdf
+
+# Dados locais e saídas de processamento
+/data/raw/
+/data/interim/
+/data/processed/
+/data/external/
+/data/cache/
+*.parquet
+*.feather
+*.arrow
+*.h5
+*.hdf5
+*.db
+*.sqlite
+*.sqlite3
+
+# Modelos, experimentos e artefatos de ML
+/artifacts/
+/checkpoints/
+/mlruns/
+/wandb/
+*.ckpt
+*.joblib
+*.onnx
+*.pkl
+*.pt
+*.pth
+*.safetensors
+
+# Segredos e configurações locais
+.env
+.env.*
+!.env.example
+!.env.template
+*.key
+*.pem
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+secrets/
+.aws/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# JavaScript e ferramentas de frontend
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.vite/
+coverage/
+
+# Builds e artefatos de runtimes
+build/
+dist/
+target/
+site/
+*.class
+*.jar
+
+# AWS e infraestrutura local
+.aws-sam/
+cdk.out/
+.serverless/
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Logs e arquivos temporários
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+
+# IDEs e sistema operacional
+.idea/
+.vscode/
+.fleet/
+*.iml
+.project
+.settings/
+.DS_Store
+Thumbs.db
+Desktop.ini

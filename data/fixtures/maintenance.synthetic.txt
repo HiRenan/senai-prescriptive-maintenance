@@ -1,0 +1,12 @@
+FIXTURE SINTÉTICA — NÃO DERIVADA DOS DOCUMENTOS ORIGINAIS
+
+Registro: MAN-SYN-001
+Ativo: MOTOR-BANCADA-SYN-01
+Data: 2099-01-01T08:30:00Z
+
+Durante uma inspeção simulada, foi observada elevação gradual da vibração no
+eixo horizontal, sem aumento equivalente de temperatura. Recomenda-se conferir
+o alinhamento do conjunto fictício, registrar uma nova medição após o ajuste e
+comparar a tendência antes de liberar o equipamento para operação simulada.
+
+Status: aguardando inspeção sintética
