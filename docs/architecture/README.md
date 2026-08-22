@@ -17,6 +17,7 @@ não abre conexão com ele.
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app` e `GET /health/live`. | A liveness verifica apenas o processo e não acessa dependências. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
+| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna importável da camada de dados, incluída na checagem estática do backend. | Não expõe API própria nem implementa leitura, contrato, validação, transformação, persistência ou visualização. |
 | `apps/api/tests/` | Contratos do pacote, da aplicação, da liveness e da configuração. | Não há testes de domínio porque não há domínio implementado. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
 | `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
@@ -28,6 +29,11 @@ não abre conexão com ele.
 | `.github/workflows/pull-request-policy.yml` | Testa e aplica a política de título, origem e integridade Git de releases. | O gate Git atua somente em `release/*` → `main`; tarefas e hotfixes recebem apenas a validação de metadados. |
 | `.github/workflows/security.yml` | CodeQL, revisão de dependências e varredura de segredos. | Revisão de dependências existe somente no evento de pull request. |
 | `.github/dependabot.yml` | Atualizações semanais agrupadas para uv, npm, GitHub Actions e Docker Compose. | Todos os pull requests gerados têm `develop` como destino. |
+
+`pandas`, `pandera` e `pyarrow` compõem as dependências de produção da camada de
+dados. `matplotlib` e `pandas-stubs` permanecem no grupo de desenvolvimento
+porque apoiam a inspeção gráfica e a tipagem estática sem ampliar as
+dependências instaladas do backend em produção.
 
 ## Execução local existente
 
