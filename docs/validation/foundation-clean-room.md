@@ -189,6 +189,48 @@ O [PR Dependabot #9](https://github.com/HiRenan/senai-prescriptive-maintenance/p
 continuava aberto, isolado em sua própria branch, com destino a `develop` e sem
 merge.
 
+### Adendo SEN-20 — limitação posterior da promoção
+
+Depois da coleta das evidências acima, uma nova tentativa de promoção expôs uma
+limitação que o primeiro resultado de árvore idêntica não demonstrava. O PR #8
+integrou `develop` em `main` por squash: a árvore de `origin/main` permaneceu
+idêntica à árvore do antigo `develop` em `f0cd01e`, mas o commit criado em
+`main` não entrou na ancestralidade de `develop`, e o ancestral comum continuou
+em `59149d`. O PR #12 direto de `develop` para `main` ficou conflitante ao
+recomparar mudanças desde esse ponto antigo. Esse comportamento corresponde à
+[limitação documentada pelo GitHub para squash de branches longas](https://docs.github.com/en/pull-requests/reference/pull-request-merges#squashing-and-merging-a-long-running-branch).
+
+O achado não altera as evidências clean-room do commit avaliado: conteúdo,
+locks, testes, segurança e árvore promovida continuavam corretos. Ele limita a
+conclusão histórica de que repetir o mesmo desenho de promoção seria seguro.
+
+A SEN-20 registra o fluxo corrigido sem reescrever o histórico:
+
+- tarefas curtas continuam entrando em `develop` por squash;
+- a promoção usa uma branch local `release/sen-<id>-<slug>` criada da
+  `origin/develop` validada e destinada somente à reconciliação com a
+  `origin/main` vigente;
+- o gate obrigatório exige que a head da release seja exatamente um merge
+  commit de dois pais, com `origin/develop` primeiro e `origin/main` segundo,
+  que contenha a `main` vigente e tenha a mesma árvore de `develop`; a
+  sincronização é provada por um merge virtual limpo e neutro, enquanto a
+  árvore atual de `main` no histórico de `develop` é o fallback restrito à
+  reparação da divergência legada;
+- o pull request parte de `release/*` para `main`, passa pelos mesmos oito
+  checks e é integrado por merge commit, sem alteração direta das branches
+  permanentes;
+- `develop` conserva histórico linear; `main` deixa de exigir histórico linear
+  somente para admitir os merge commits de release, preservando os demais
+  controles.
+
+Durante a revisão da SEN-20, o
+[PR #12](https://github.com/HiRenan/senai-prescriptive-maintenance/pull/12)
+foi fechado pelo coordenador como substituído (`superseded`) pelo fluxo
+corrigido. Naquele momento, a habilitação de merge commits, a remoção da
+exigência de histórico linear somente em `main` e a release final ainda estavam
+pendentes. Este adendo registra essa sequência temporal; não apresenta a mudança
+de configurações nem a promoção como evidências já executadas pela SEN-20.
+
 ## Correspondência com os critérios da SEN-1
 
 | Critério da Foundation | Evidência verificável |

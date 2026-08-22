@@ -41,8 +41,9 @@ A versão atual contém:
   como fronteira de integração, ainda sem interface;
 - manifesto de integridade dos materiais locais e duas fixtures públicas
   inteiramente sintéticas;
-- CI em Ubuntu e Windows, política automatizada para pull requests e verificações
-  de segurança com CodeQL, revisão de dependências e varredura de segredos;
+- CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
+  request e integridade Git de releases, além de verificações de segurança com
+  CodeQL, revisão de dependências e varredura de segredos;
 - atualizações semanais agrupadas pelo Dependabot para os ecossistemas uv, npm,
   GitHub Actions e Docker Compose, sempre direcionadas a `develop`;
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
@@ -194,8 +195,21 @@ pull requests.
 `develop` é a branch de integração e `main` contém somente baselines e releases
 estáveis. Implementações são feitas em branches curtas, dentro de worktrees
 isoladas criadas a partir do `origin/develop` atualizado, e entram por pull
-request com squash. Releases são promovidas exclusivamente por pull request de
-`develop` para `main`; hotfixes seguem a exceção rastreável descrita na política.
+request com squash. Releases usam uma branch curta `release/*` criada da
+`origin/develop` validada, que apenas reconcilia a `origin/main` vigente e deve
+preservar exatamente a árvore de `develop`; seu pull request para `main` é
+integrado por merge commit. Hotfixes entram em `main` por squash e são
+sincronizados de volta para `develop` antes da promoção seguinte.
+
+O gate obrigatório rejeita promoções diretas de `develop`, branches de tarefa e
+forks para `main`. Para uma release, ele exige um merge commit de dois pais
+exatos — `origin/develop` primeiro e `origin/main` segundo —, ancestralidade da
+`main` vigente e equivalência da árvore com a `develop` vigente. A sincronização
+é provada por um merge virtual limpo de `develop` com `main` que preserve a
+árvore de `develop`; a equivalência da árvore de `main` com um commit histórico
+de `develop` existe somente como fallback para a divergência legada causada pelo
+squash anterior. Nenhuma etapa permite alteração direta das branches
+permanentes.
 
 Nomes de branches, commits Conventional Commits e títulos de pull request são
 escritos em inglês. Documentação, ADRs, apresentações e descrições de pull

@@ -25,7 +25,7 @@ não abre conexão com ele.
 | `data/source-manifest.json` | Nomes, tamanhos e hashes dos materiais locais. | Não contém nem redistribui os arquivos originais. |
 | `data/fixtures/` | Uma fixture tabular e um relato textual, ambos sintéticos. | Não são amostras dos materiais originais nem dados de produção. |
 | `.github/workflows/ci.yml` | Qualidade completa em Ubuntu e teste/smoke essenciais em Windows. | Não faz deploy nem publica release. |
-| `.github/workflows/pull-request-policy.yml` | Testa e aplica a política de título e origem de branches. | Atua somente em pull requests para `develop` ou `main`. |
+| `.github/workflows/pull-request-policy.yml` | Testa e aplica a política de título, origem e integridade Git de releases. | O gate Git atua somente em `release/*` → `main`; tarefas e hotfixes recebem apenas a validação de metadados. |
 | `.github/workflows/security.yml` | CodeQL, revisão de dependências e varredura de segredos. | Revisão de dependências existe somente no evento de pull request. |
 | `.github/dependabot.yml` | Atualizações semanais agrupadas para uv, npm, GitHub Actions e Docker Compose. | Todos os pull requests gerados têm `develop` como destino. |
 
@@ -56,16 +56,23 @@ Os três workflows rastreados estão ativos:
   congelada;
 - **Pull Request Policy** executa quando um pull request para `develop` ou
   `main` é aberto, editado, reaberto, atualizado ou marcado como pronto para
-  revisão. Ele testa a própria regra e valida título, destino e origem;
+  revisão. Ele testa a própria regra, valida título, destino e origem e, para
+  `release/*` → `main`, busca as refs vigentes e prova ancestralidade, dois pais
+  exatos e equivalência de árvore com `origin/develop`. A sincronização de
+  `main` é comprovada por merge virtual limpo e neutro; a árvore de `main` no
+  histórico de `develop` é aceita somente como fallback da divergência legada;
 - **Security** executa em pushes e pull requests para `develop` e `main`, toda
   segunda-feira e sob acionamento manual. Ele analisa Python e
   JavaScript/TypeScript com CodeQL, bloqueia dependências novas com severidade
   alta em pull requests e usa Gitleaks para varrer conteúdo e histórico
   relevante.
 
-Todas as ações de terceiros são fixadas por SHA. Não existe workflow de deploy,
-publicação de release ou envio de cobertura para um serviço externo. As
-proteções e os checks exigidos nas branches permanentes estão registrados no
+Todas as ações de terceiros são fixadas por SHA. O checkout da política não
+persiste credenciais, e o gate invoca Git por argumentos estruturados, sem
+dependência npm adicional e com prompts do Git e do gerenciador de credenciais
+desabilitados. Não existe workflow de deploy, publicação de release ou envio de
+cobertura para um serviço externo. As proteções, os oito checks e a diferença
+intencional de histórico linear entre `develop` e `main` estão registrados no
 [ADR 0004](../adr/0004-gitflow-ci-and-releases.md).
 
 ## Fronteiras atuais

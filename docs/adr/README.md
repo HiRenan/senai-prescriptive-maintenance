@@ -12,7 +12,7 @@ ADR que substitui o anterior e atualiza o status de ambos.
 | [0001](0001-monorepo-and-modular-monolith.md) | Monorepo e monólito modular | 2026-08-22 | Aceito |
 | [0002](0002-public-repository-and-source-boundary.md) | Repositório público, ausência de licença e fronteira dos materiais | 2026-08-22 | Aceito |
 | [0003](0003-runtimes-and-workspace-tooling.md) | Python 3.13, Node.js 22, uv, pnpm e Poe | 2026-08-22 | Aceito |
-| [0004](0004-gitflow-ci-and-releases.md) | GitFlow, worktrees, CI, proteções, releases e hotfixes | 2026-08-22 | Aceito |
+| [0004](0004-gitflow-ci-and-releases.md) | GitFlow, CI e promoção repetível entre branches permanentes | 2026-08-22 | Aceito |
 
 ## Estados
 
