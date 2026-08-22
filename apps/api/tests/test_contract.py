@@ -160,6 +160,17 @@ def test_null_is_classified_separately_from_numeric_nan() -> None:
     assert report.blocking_violations[0].column == "fault"
 
 
+def test_null_in_integer_column_precedes_promoted_dtype_mismatch() -> None:
+    dataframe = _valid_dataframe()
+    dataframe.loc[0, "id"] = None
+
+    report = validate_banner_dataframe(dataframe)
+
+    assert str(dataframe["id"].dtype) == "float64"
+    assert _codes(report) == {ContractViolationCode.NULL_NOT_ALLOWED}
+    assert report.blocking_violations[0].column == "id"
+
+
 def test_nan_is_classified_deterministically() -> None:
     dataframe = _valid_dataframe()
     dataframe.loc[0, "rpm"] = float("nan")
@@ -204,8 +215,40 @@ def test_empty_fault_label_is_blocking() -> None:
     assert _codes(report) == {ContractViolationCode.EMPTY_FAULT}
 
 
-def test_invalid_timestamp_text_is_blocking_without_parsing() -> None:
-    private_synthetic_value = "2099-01-01 00:00:00"
+def test_whitespace_only_fault_label_is_blocking_without_normalization() -> None:
+    raw_synthetic_value = " \t "
+    dataframe = _valid_dataframe()
+    dataframe.loc[0, "fault"] = raw_synthetic_value
+
+    report = validate_banner_dataframe(dataframe)
+
+    assert _codes(report) == {ContractViolationCode.EMPTY_FAULT}
+    assert dataframe.loc[0, "fault"] == raw_synthetic_value
+
+
+def test_fractional_utc_timestamp_is_semantically_valid_without_coercion() -> None:
+    raw_synthetic_value = "2099-01-01T00:00:00.123456Z"
+    dataframe = _valid_dataframe()
+    dataframe.loc[0, "created_at"] = raw_synthetic_value
+
+    report = validate_banner_dataframe(dataframe)
+
+    assert report.is_valid
+    assert dataframe.loc[0, "created_at"] == raw_synthetic_value
+
+
+@pytest.mark.parametrize(
+    "private_synthetic_value",
+    (
+        "2099-01-01 00:00:00",
+        "2026-13-40T25:61:61Z",
+        "2026-02-29T00:00:00Z",
+        "2026-12-31T25:61:61Z",
+    ),
+)
+def test_invalid_timestamp_is_blocking_after_semantic_validation(
+    private_synthetic_value: str,
+) -> None:
     dataframe = _valid_dataframe()
     dataframe.loc[0, "created_at"] = private_synthetic_value
 

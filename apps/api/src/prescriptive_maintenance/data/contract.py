@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Set
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from math import isfinite
 from re import compile as compile_pattern
@@ -468,11 +469,15 @@ def validate_banner_dataframe(
     if violations:
         return _report(violations)
 
+    violations.extend(_validate_missing_values(dataframe))
+    if violations:
+        return _report(violations)
+
     violations.extend(_validate_dtypes(dataframe))
     if violations:
         return _report(violations)
 
-    violations.extend(_validate_missing_and_infinite_values(dataframe))
+    violations.extend(_validate_infinite_values(dataframe))
     if violations:
         return _report(violations)
 
@@ -555,11 +560,17 @@ def _is_finite(value: float) -> bool:
 
 
 def _is_utc_timestamp(value: str) -> bool:
-    return _UTC_TIMESTAMP_PATTERN.fullmatch(value) is not None
+    if _UTC_TIMESTAMP_PATTERN.fullmatch(value) is None:
+        return False
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _is_non_empty_fault(value: str) -> bool:
-    return bool(value)
+    return bool(value.strip())
 
 
 def _validate_structure(dataframe: pd.DataFrame) -> tuple[ContractViolation, ...]:
@@ -637,7 +648,7 @@ def _matches_logical_type(series: pd.Series[Any], logical_type: LogicalType) -> 
     return bool(is_string_dtype(series))
 
 
-def _validate_missing_and_infinite_values(
+def _validate_missing_values(
     dataframe: pd.DataFrame,
 ) -> tuple[ContractViolation, ...]:
     violations: list[ContractViolation] = []
@@ -655,17 +666,22 @@ def _validate_missing_and_infinite_values(
                 else "Column contains a null value."
             )
             violations.append(_violation(code, column.name, message))
-        if column.logical_type is LogicalType.FLOAT64 and bool(
-            series.isin((float("inf"), float("-inf"))).any()
-        ):
-            violations.append(
-                _violation(
-                    ContractViolationCode.INFINITE_NOT_ALLOWED,
-                    column.name,
-                    "Numeric column contains an infinite value.",
-                )
-            )
     return tuple(violations)
+
+
+def _validate_infinite_values(
+    dataframe: pd.DataFrame,
+) -> tuple[ContractViolation, ...]:
+    return tuple(
+        _violation(
+            ContractViolationCode.INFINITE_NOT_ALLOWED,
+            column.name,
+            "Numeric column contains an infinite value.",
+        )
+        for column in BANNER_COLUMN_CATALOG
+        if column.logical_type is LogicalType.FLOAT64
+        and bool(dataframe[column.name].isin((float("inf"), float("-inf"))).any())
+    )
 
 
 def _sanitize_schema_errors(error: SchemaErrors) -> tuple[ContractViolation, ...]:
