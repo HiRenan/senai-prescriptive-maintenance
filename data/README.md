@@ -1,8 +1,9 @@
 # Preparação dos materiais locais
 
 Os oito arquivos recebidos para o desafio são fontes locais e não devem ser
-adicionados ao Git. Este diretório mantém somente o manifesto de integridade e
-fixtures sintéticas que podem ser compartilhadas publicamente.
+adicionados ao Git. Este diretório mantém o manifesto de integridade, fixtures
+sintéticas e a exceção pública estrita dos dois artefatos agregados da baseline
+auditada descrita abaixo.
 
 ## Arquivos esperados
 
@@ -81,10 +82,13 @@ O arquivo `source-manifest.json` segue um formato JSON simples:
 O hash é representado por 64 caracteres hexadecimais em minúsculas. O tamanho é
 o número exato de bytes, sem conversão de unidade.
 
-No backend, o consumo de `banner.csv` passa exclusivamente por
-`prescriptive_maintenance.data.consume_banner_source()`. O caminho da fonte e o
-caminho deste manifesto são obrigatórios e explícitos; a validação ocorre antes
-do consumidor e é repetida no mesmo descritor binário read-only depois dele.
+No backend, o consumo de `banner.csv` passa exclusivamente pela porta segura do
+pacote `prescriptive_maintenance.data`. `consume_banner_source()` preserva a
+interface compatível e devolve somente o resultado do consumidor. O caminho da
+baseline usa `consume_banner_source_audited()`, que devolve esse resultado junto
+de um recibo imutável dos fingerprints efetivamente observados antes e depois do
+consumo. O caminho da fonte e o caminho deste manifesto são obrigatórios e
+explícitos; as duas verificações ocorrem no mesmo descritor binário read-only.
 
 Para comparar as cópias locais com o manifesto no PowerShell:
 
@@ -135,10 +139,33 @@ para gerar o manifesto; ela não concede licença para publicar esses materiais.
 Todos os valores e textos das fixtures são sintéticos e independentes dos
 materiais originais.
 
+## Baseline pública agregada
+
+A única saída derivada permitida no Git é o par exato abaixo, identificado pelo
+SHA-256 público da fonte aprovado no manifesto:
+
+- `baselines/banner/<source-sha>/baseline.v1.json`;
+- `baselines/banner/<source-sha>/summary.md`.
+
+Os dois arquivos são artefatos de auditoria agregados, determinísticos,
+sanitizados e somente leitura. `baseline.v1.json` registra apenas configuração,
+integridade pre/post, gates, reconciliações e métricas agregadas aprovadas;
+`summary.md` é derivado exclusivamente desse JSON sanitizado e não acrescenta
+fatos independentes. Nenhum deles contém linhas, valores ou timestamps
+individuais, identificadores, rótulos nominais, caminhos locais ou cópias dos
+arquivos originais.
+
+Essa exceção não autoriza outras saídas. Arquivos originais, dados brutos,
+intermediários ou processados locais e qualquer outro artefato gerado permanecem
+ignorados, proibidos de versionamento e fora do repositório público. O par da
+baseline não deve ser editado manualmente: sua validação pública é somente
+leitura e não depende de acessar a fonte local.
+
 ## Conteúdo público
 
-Somente fixtures inteiramente sintéticas e samples previamente sanitizados podem
-ser publicados. Um sample sanitizado não pode conter conteúdo proprietário,
-identificadores reais, credenciais ou trechos que permitam reconstruir os
-materiais originais; `data/raw/` e `data/processed/` permanecem exclusivamente
-locais e ignorados pelo Git.
+Somente fixtures inteiramente sintéticas, samples previamente sanitizados e o
+par agregado da baseline definido acima podem ser publicados. Um sample
+sanitizado não pode conter conteúdo proprietário, identificadores reais,
+credenciais ou trechos que permitam reconstruir os materiais originais;
+`data/raw/`, `data/processed/` e demais saídas locais permanecem exclusivamente
+locais e ignoradas pelo Git.

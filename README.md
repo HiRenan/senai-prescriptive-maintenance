@@ -39,11 +39,13 @@ A versão atual contém:
   hooks, smoke e controle do serviço local;
 - um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
   como fronteira de integração, ainda sem interface;
-- manifesto de integridade dos materiais locais e duas fixtures públicas
-  inteiramente sintéticas;
+- manifesto de integridade dos materiais locais, duas fixtures públicas
+  inteiramente sintéticas e um par versionado de artefatos agregados da baseline;
 - uma única porta tipada e somente leitura para `banner.csv`, com caminho de
-  entrada explícito, validação de tamanho e SHA-256 antes e depois do consumo e
-  recibos auditáveis com os fingerprints efetivamente observados;
+  entrada explícito, validação de tamanho e SHA-256 antes e depois do consumo;
+  `consume_banner_source_audited()` vincula a baseline aos fingerprints
+  efetivamente observados no recibo pre/post, enquanto
+  `consume_banner_source()` preserva a interface compatível;
 - um catálogo v2 das 26 colunas e um contrato Pandera estrito, ordenado e sem
   coerção implícita, acompanhado de relatórios sanitizados de violação;
 - um profiler determinístico sobre DataFrames já carregados, com indicadores
@@ -80,7 +82,7 @@ Os componentes existentes são:
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
-| `data/` | Manifesto dos materiais locais e fixtures sintéticas versionáveis. |
+| `data/` | Manifesto dos materiais locais, fixtures sintéticas versionáveis e o par público, agregado e sanitizado da baseline auditada. |
 
 O inventário detalhado está em
 [`docs/architecture/README.md`](docs/architecture/README.md), e as decisões que
@@ -94,7 +96,12 @@ sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md)
 ├── apps/
 │   ├── api/          # pacote Python instalável do backend
 │   └── web/          # fronteira de workspace, sem implementação de UI
-├── data/             # manifesto, fixtures sintéticas e dados locais ignorados
+├── data/
+│   ├── baselines/banner/<source-sha>/
+│   │   ├── baseline.v1.json # agregado determinístico e sanitizado
+│   │   └── summary.md       # resumo derivado somente do JSON
+│   ├── fixtures/            # dados públicos inteiramente sintéticos
+│   └── source-manifest.json # identidade pública dos materiais locais
 ├── docs/
 │   ├── adr/          # decisões arquiteturais
 │   └── architecture/ # inventário da arquitetura implementada
@@ -186,10 +193,20 @@ pelo Git e não podem ser redistribuídos. O arquivo rastreado
 tamanhos e hashes SHA-256 para verificação de integridade; não contém nem
 concede direitos sobre o conteúdo recebido.
 
-O repositório publica apenas as fixtures sintéticas em `data/fixtures/`. Dados
-originais devem ficar em `data/raw/original/`, e saídas intermediárias,
-processadas ou geradas permanecem nos caminhos ignorados definidos em
-`.gitignore`. As regras de preparação e conferência estão em
+Além das fixtures sintéticas em `data/fixtures/`, a única exceção rastreada para
+uma saída derivada é o par exato
+`data/baselines/banner/<source-sha>/baseline.v1.json` e `summary.md`. Esses dois
+arquivos são artefatos de auditoria agregados, determinísticos, sanitizados e
+somente leitura: não contêm linhas, valores ou timestamps individuais, rótulos
+nominais, caminhos locais nem qualquer arquivo original. O Markdown é derivado
+exclusivamente do JSON sanitizado e ambos são validados offline contra o
+manifesto rastreado.
+
+Dados originais devem ficar em `data/raw/original/`. Originais, dados brutos,
+saídas intermediárias, dados processados e quaisquer outros artefatos gerados
+continuam locais, proibidos de versionamento e cobertos pelos caminhos ignorados
+em `.gitignore`; a baseline pública acima não amplia essa exceção. As regras de
+preparação, conferência e publicação estão em
 [`data/README.md`](data/README.md).
 
 ## Segurança
