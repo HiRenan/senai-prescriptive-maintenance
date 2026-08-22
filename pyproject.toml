@@ -15,6 +15,7 @@ dependencies = [
 dev = [
   "httpx2>=2.12.0,<3.0.0",
   "poethepoet>=0.46.0,<0.47.0",
+  "pre-commit>=4.6.2,<5.0.0",
   "pyright>=1.1.411,<2.0.0",
   "pytest>=9.1.1,<10.0.0",
   "pytest-cov>=7.1.0,<8.0.0",
@@ -31,11 +32,68 @@ prescriptive-maintenance-api = { workspace = true }
 members = ["apps/api"]
 
 [tool.poe]
-executor = { type = "uv" }
+executor = { type = "uv", frozen = true }
 
-[tool.poe.tasks.check-api-import]
-help = "Confirma que o pacote instalável do backend pode ser importado."
-cmd = "python -c \"import prescriptive_maintenance\""
+# Poe 0.46 ignores free arguments on sequences unless a subtask consumes them.
+# Expanding a fixed invalid option keeps sequence interfaces closed and fail-fast.
+[tool.poe.tasks.setup]
+help = "Prepara dependências e hooks; não aceita argumentos adicionais."
+sequence = [
+  { cmd = "uv sync --all-packages --frozen ${POE_EXTRA_ARGS:+--poe-task-does-not-accept-arguments}" },
+  { cmd = "corepack pnpm install --frozen-lockfile", executor = { type = "simple" } },
+  { cmd = "pre-commit install --install-hooks" },
+]
+
+[tool.poe.tasks.format]
+help = "Aplica correções e formata com Ruff; não aceita argumentos adicionais."
+sequence = [
+  { cmd = "ruff check . --fix ${POE_EXTRA_ARGS:+--poe-task-does-not-accept-arguments}" },
+  { cmd = "ruff format ." },
+]
+
+[tool.poe.tasks.format-check]
+help = "Verifica a formatação Ruff sem alterar arquivos."
+cmd = "ruff format --check ."
+
+[tool.poe.tasks.lint]
+help = "Executa o lint Ruff sem aplicar correções."
+cmd = "ruff check ."
+
+[tool.poe.tasks.typecheck]
+help = "Executa a verificação de tipos Pyright em modo estrito."
+cmd = "pyright"
+
+[tool.poe.tasks.test]
+help = "Executa os testes Pytest com cobertura."
+cmd = "pytest"
+
+[tool.poe.tasks.check]
+help = "Executa todos os checks; não aceita argumentos adicionais."
+sequence = [
+  "format-check ${POE_EXTRA_ARGS:+--poe-task-does-not-accept-arguments}",
+  "lint",
+  "typecheck",
+  "test",
+]
+
+[tool.poe.tasks.hooks]
+help = "Executa os guardrails pre-commit em todos os arquivos."
+cmd = "pre-commit run --all-files"
+
+[tool.poe.tasks.services-up]
+help = "Inicia o PostgreSQL local e aguarda o healthcheck."
+cmd = "docker compose up --detach --wait postgres"
+
+[tool.poe.tasks.services-down]
+help = "Remove contêiner e rede locais, preservando o volume."
+cmd = "docker compose down"
+
+[tool.poe.tasks.smoke]
+help = "Valida runtimes, configuração e liveness; banco é opcional."
+script = "scripts.smoke:main(with_services, environ.get('POE_EXTRA_ARGS'))"
+args = [
+  { name = "with_services", options = ["--with-services"], type = "boolean", help = "Verifica o PostgreSQL já iniciado e o pgvector." },
+]
 
 [tool.ruff]
 line-length = 88
@@ -52,7 +110,7 @@ select = ["B", "E", "F", "I", "RUF", "S", "SIM", "UP"]
 line-ending = "lf"
 
 [tool.pyright]
-include = ["apps/api/src", "apps/api/tests"]
+include = ["apps/api/src", "apps/api/tests", "scripts"]
 extraPaths = ["apps/api/src"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"

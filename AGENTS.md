@@ -105,13 +105,25 @@ segurança, dados ou GitFlow sem uma decisão explícita do responsável pelo pr
 - Não invente comandos. Consulte `README.md`, `pyproject.toml` e `package.json` e
   atualize documentação e locks quando um comando ou dependência mudar.
 
-Comandos mínimos existentes na raiz:
+Interface canônica existente na raiz:
 
 ```powershell
-uv sync --frozen
-uv run poe check-api-import
-corepack pnpm install --frozen-lockfile
+uv run --frozen poe setup
+uv run --frozen poe format
+uv run --frozen poe format-check
+uv run --frozen poe lint
+uv run --frozen poe typecheck
+uv run --frozen poe test
+uv run --frozen poe check
+uv run --frozen poe hooks
+uv run --frozen poe services-up
+uv run --frozen poe services-down
+uv run --frozen poe smoke
+uv run --frozen poe smoke --with-services
 ```
+
+`format` é a única tarefa Poe de qualidade que reescreve código. `check` é uma
+sequência fail-fast somente leitura; `services-down` preserva o volume local.
 
 ## 8. Validação e entrega
 
