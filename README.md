@@ -11,6 +11,10 @@ Esta fundação oferece somente:
 
 - um workspace Python gerenciado por uv, com um único backend instalável em
   `apps/api`;
+- uma aplicação FastAPI mínima, inicializável pelo Uvicorn, com liveness em
+  `GET /health/live`;
+- verificações diretas de formatação, lint, tipagem estrita, testes e cobertura
+  para o backend;
 - execução de tarefas com Poe the Poet;
 - um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
   como fronteira de integração;
@@ -19,9 +23,9 @@ Esta fundação oferece somente:
 - separação explícita entre código-fonte, materiais fornecidos, fixtures
   sintéticas e artefatos gerados.
 
-Não há endpoints, regras de negócio, processamento de dados, similaridade, RAG,
-persistência, serviços locais, interface web ou infraestrutura executável nesta
-etapa.
+Além da liveness, não há regras de negócio, processamento de dados,
+similaridade, RAG, persistência, serviços locais, interface web ou
+infraestrutura executável nesta etapa.
 
 ## Runtimes e instalação
 

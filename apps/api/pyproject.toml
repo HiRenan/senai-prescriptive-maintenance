@@ -7,7 +7,10 @@ authors = [
   { name = "Renan Mocelin", email = "renanryuakame@gmail.com" },
 ]
 requires-python = ">=3.13,<3.14"
-dependencies = []
+dependencies = [
+  "fastapi>=0.141.1,<1.0.0",
+  "uvicorn>=0.52.4,<1.0.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.4,<0.10.0"]

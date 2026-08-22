@@ -13,7 +13,12 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "httpx2>=2.12.0,<3.0.0",
   "poethepoet>=0.46.0,<0.47.0",
+  "pyright>=1.1.411,<2.0.0",
+  "pytest>=9.1.1,<10.0.0",
+  "pytest-cov>=7.1.0,<8.0.0",
+  "ruff>=0.16.4,<1.0.0",
 ]
 
 [tool.uv]
@@ -31,3 +36,43 @@ executor = { type = "uv" }
 [tool.poe.tasks.check-api-import]
 help = "Confirma que o pacote instalável do backend pode ser importado."
 cmd = "python -c \"import prescriptive_maintenance\""
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "RUF", "S", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest relies on plain assertions to provide introspective failure messages.
+"apps/api/tests/**/*.py" = ["S101"]
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.pyright]
+include = ["apps/api/src", "apps/api/tests"]
+extraPaths = ["apps/api/src"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+venv = ".venv"
+venvPath = "."
+
+[tool.pytest.ini_options]
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+  "--cov=prescriptive_maintenance",
+  "--cov-report=term-missing",
+  "--cov-fail-under=80",
+]
+testpaths = ["apps/api/tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["prescriptive_maintenance"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
