@@ -13,6 +13,7 @@ sem repetir extensamente a mesma orientação.
 | [`../SECURITY.md`](../SECURITY.md) | Reporte privado, segredos, vazamentos e práticas proibidas em produção. |
 | [`adr/README.md`](adr/README.md) | Índice das decisões arquiteturais aceitas. |
 | [`architecture/README.md`](architecture/README.md) | Inventário dos componentes que realmente existem. |
+| [`data/banner-quality-policy.md`](data/banner-quality-policy.md) | Visão derivada da política de qualidade e comparação agregada com a baseline rastreada. |
 | [`validation/foundation-clean-room.md`](validation/foundation-clean-room.md) | Evidências históricas da validação da Foundation em clone público limpo e adendo sobre o fluxo de promoção. |
 | [`../data/README.md`](../data/README.md) | Preparação local, integridade e fronteira dos materiais e fixtures. |
 

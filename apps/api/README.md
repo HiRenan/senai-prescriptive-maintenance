@@ -349,6 +349,35 @@ tipos exatos, ordem, serialização canônica, números não finitos, ID, conte�
 localização somente com o inventário, manifesto e baseline públicos; nenhuma
 delas abre `banner.csv`.
 
+## Política de qualidade e outliers
+
+`data/policies/banner_quality_policy.v1.json` é a única fonte canônica das regras
+de qualidade do banner. `load_banner_quality_policy()` carrega e valida o esquema
+estrito contra o contrato v2 e as definições do profiler v1;
+`identify_banner_quality_policy()` calcula o SHA-256 da serialização JSON canônica
+de toda a semântica, sem incluir o próprio identificador. Reordenações
+equivalentes não alteram o ID, mas qualquer mudança semântica exige outro ID.
+
+As enums públicas `ReasonCode` e `Action`, a ordem total dos motivos e o índice
+imutável `rule_id` → motivo + ação permitem consulta sem duplicar regras em
+código. A ação efetiva é única na ordem `reject` > `correct_deterministically` >
+`map` > `flag` > `keep`, enquanto `resolve_quality_rules()` preserva todos os
+motivos e `QualityMatch` concorrentes. Cada match contém somente contexto
+allowlisted de coluna, relação e coluna confiável, sem valores por registro; uma
+correção unitária exige relação conhecida, alvo e contraparte confiável
+compatíveis. Depois da deduplicação exata, cada relação admite no máximo uma
+prova determinística e não pode misturá-la com um match ambíguo. A API revalida
+a política e retorna `effective_action`, sem antecipar uma disposição de ledger
+ou alterar linhas.
+
+`render_banner_quality_policy_markdown()` deriva a
+[visão humana pública](../../docs/data/banner-quality-policy.md) da política e,
+quando fornecidos explicitamente, dos bytes do JSON agregado da baseline
+rastreada. Esses bytes passam pela validação integral da API pública da baseline
+contra a identidade aprovada no manifesto antes da comparação. O módulo não
+descobre nem acessa materiais originais e não implementa limpeza, correção por
+registro, ledger ou remoção de outliers.
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:
