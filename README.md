@@ -1,84 +1,147 @@
 # Manutenção Prescritiva — Desafio SENAI
 
-Este monorepo concentra o backend, a fronteira de integração web, a
-infraestrutura, a documentação, os dados, os experimentos e os scripts do
-projeto. A organização mantém uma única fonte de verdade e prepara um monólito
-modular sem antecipar funcionalidades de etapas posteriores.
+[![CI](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/ci.yml?query=branch%3Adevelop)
+[![Pull Request Policy](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/pull-request-policy.yml/badge.svg?branch=develop)](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/pull-request-policy.yml?query=branch%3Adevelop)
+[![Security](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/security.yml?query=branch%3Adevelop)
 
-## Estado atual
+## Problema
 
-Esta fundação oferece somente:
+Ativos industriais perdem disponibilidade quando sinais de degradação são
+percebidos tarde ou analisados sem contexto. A manutenção prescritiva busca
+transformar medições, histórico e conhecimento técnico em recomendações
+justificáveis para apoiar a decisão de manutenção: o que observar, qual ação
+avaliar e por que ela merece prioridade.
 
-- um workspace Python gerenciado por uv, com um único backend instalável em
+Este repositório organiza a fundação técnica de uma solução para esse problema.
+O foco atual é oferecer uma base local reproduzível, testável e segura para que
+as capacidades de domínio sejam acrescentadas sem confundir intenção com
+funcionalidade entregue.
+
+## Visão proposta
+
+A visão de produto é uma plataforma capaz de receber dados autorizados de
+ativos, contextualizar condições observadas e apoiar recomendações de
+manutenção com evidências rastreáveis. Essa visão orienta as decisões
+arquiteturais, mas **ainda não representa o estado implementado**.
+
+## Estado implementado
+
+A versão atual contém:
+
+- um workspace Python gerenciado por uv, com um backend instalável em
   `apps/api`;
 - uma aplicação FastAPI mínima, inicializável pelo Uvicorn, com liveness em
   `GET /health/live`;
-- configuração explícita e tipada para ambiente e URL PostgreSQL;
-- um serviço local reproduzível de PostgreSQL 17 com pgvector;
-- uma interface Poe para bootstrap, formatação, lint, tipagem estrita, testes,
-  hooks, smoke e controle dos serviços locais;
+- configuração tipada e explícita para ambiente e URL PostgreSQL;
+- PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
+  Compose;
+- automação Poe para bootstrap, formatação, lint, tipagem estrita, testes,
+  hooks, smoke e controle do serviço local;
 - um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
-  como fronteira de integração;
-- versões de runtime, locks e regras de texto consistentes entre Windows e
-  Linux;
-- separação explícita entre código-fonte, materiais fornecidos, fixtures
-  sintéticas e artefatos gerados.
+  como fronteira de integração, ainda sem interface;
+- manifesto de integridade dos materiais locais e duas fixtures públicas
+  inteiramente sintéticas;
+- CI em Ubuntu e Windows, política automatizada para pull requests e verificações
+  de segurança com CodeQL, revisão de dependências e varredura de segredos;
+- atualizações semanais agrupadas pelo Dependabot para os ecossistemas uv, npm,
+  GitHub Actions e Docker Compose, sempre direcionadas a `develop`;
+- documentação de governança, segurança, arquitetura e decisões fundamentais.
 
-Além da liveness e da configuração local, não há regras de negócio,
-processamento de dados, similaridade, RAG, persistência integrada à aplicação ou
-interface web nesta etapa.
+Não há, nesta etapa, regras de negócio, ingestão de dados, análise de
+similaridade, vetores integrados à aplicação, RAG, LLM, autenticação,
+persistência integrada, readiness, infraestrutura AWS, deploy ou interface web.
 
-## Pré-requisitos e bootstrap
+## Arquitetura atual
 
-- Python `>=3.13,<3.14`, com a linha `3.13` registrada em `.python-version`;
-- Node.js `>=22,<23`, com a linha `22` registrada em `.node-version`;
-- pnpm `10.15.1`, fixado em `packageManager` para uso via Corepack;
-- uv, Git, Corepack e, para os comandos de infraestrutura, Docker Desktop ou
-  Docker Engine com Compose v2.
+O repositório é um monorepo e o backend segue um monólito modular: uma única
+aplicação implantável, com fronteiras internas que poderão receber módulos de
+domínio quando houver requisitos implementáveis. Essa escolha reduz a
+complexidade operacional da fundação sem impedir separação de responsabilidades
+no código.
 
-Na raiz do repositório, o bootstrap canônico é:
+Os componentes existentes são:
 
-```powershell
-uv run --frozen poe setup
+| Componente | Responsabilidade atual |
+| --- | --- |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness e settings. |
+| `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
+| `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
+| `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
+| `data/` | Manifesto dos materiais locais e fixtures sintéticas versionáveis. |
+
+O inventário detalhado está em
+[`docs/architecture/README.md`](docs/architecture/README.md), e as decisões que
+sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md).
+
+## Estrutura do repositório
+
+```text
+.
+├── .github/          # governança de pull requests, responsáveis e CI
+├── apps/
+│   ├── api/          # pacote Python instalável do backend
+│   └── web/          # fronteira de workspace, sem implementação de UI
+├── data/             # manifesto, fixtures sintéticas e dados locais ignorados
+├── docs/
+│   ├── adr/          # decisões arquiteturais
+│   └── architecture/ # inventário da arquitetura implementada
+├── experiments/      # estudos isolados do código de produção
+├── infra/            # PostgreSQL e pgvector para desenvolvimento local
+└── scripts/          # automação cross-platform exposta pelo Poe
 ```
 
-`setup` sincroniza todos os pacotes Python pelo lock, instala o workspace pnpm
-com lock congelado e instala os hooks pre-commit. A tarefa é idempotente e pode
-ser executada novamente sem alterar os locks.
+## Pré-requisitos
 
-O repositório mantém um único `uv.lock` e um único `pnpm-lock.yaml`, ambos na
-raiz.
+- Git;
+- Python `>=3.13,<3.14`, com a linha `3.13` registrada em
+  `.python-version`;
+- uv compatível com o lock do projeto;
+- Node.js `>=22,<23`, com a linha `22` registrada em `.node-version`;
+- Corepack e pnpm `10.15.1`;
+- Docker Desktop ou Docker Engine com Compose v2 para o smoke e os comandos de
+  infraestrutura.
 
-## Comandos locais
+## Quickstart
 
-Todas as tarefas são executadas da raiz no formato
-`uv run --frozen poe <tarefa>`.
-
-| Tarefa | Finalidade |
-| --- | --- |
-| `setup` | Sincroniza dependências e instala hooks locais. |
-| `format` | Aplica correções seguras e formata com Ruff. |
-| `format-check` | Verifica a formatação sem escrever. |
-| `lint` | Executa Ruff sem correções automáticas. |
-| `typecheck` | Executa Pyright em modo estrito. |
-| `test` | Executa Pytest com cobertura. |
-| `check` | Executa `format-check`, `lint`, `typecheck` e `test`, nessa ordem. |
-| `hooks` | Executa todos os hooks pre-commit. |
-| `services-up` | Inicia o PostgreSQL e aguarda o healthcheck. |
-| `services-down` | Remove contêiner e rede, preservando o volume. |
-| `smoke` | Valida runtimes, configuração, Compose e liveness real. |
-
-`format` é a única tarefa Poe de qualidade que reescreve código. `check` é
-fail-fast, não inicia Docker e não altera arquivos rastreados.
-
-O smoke padrão não exige banco nem arquivo `.env`:
+Clone o repositório, use a branch de integração e prepare o ambiente pela raiz:
 
 ```powershell
+git clone https://github.com/HiRenan/senai-prescriptive-maintenance.git
+Set-Location senai-prescriptive-maintenance
+git switch develop
+uv run --frozen poe setup
+uv run --frozen poe check
 uv run --frozen poe smoke
 ```
 
-Para a validação opcional do PostgreSQL e do pgvector, inicie antes o serviço e
-use a mesma flag no Windows e no Ubuntu:
+`setup` sincroniza todos os pacotes Python pelo lock, instala o workspace pnpm
+com lock congelado e instala os hooks pre-commit. O projeto mantém um único
+`uv.lock` e um único `pnpm-lock.yaml`, ambos na raiz.
+
+O smoke padrão não exige banco em execução nem cria `.env`. O Docker precisa
+estar disponível porque a validação inclui `docker compose config`.
+
+## Comandos canônicos
+
+Todas as tarefas abaixo são executadas da raiz. Somente `format` reescreve
+código; `check` é uma sequência fail-fast somente leitura.
+
+| Comando | Finalidade |
+| --- | --- |
+| `uv run --frozen poe setup` | Sincroniza dependências congeladas e instala os hooks locais. |
+| `uv run --frozen poe format` | Aplica correções seguras e formata arquivos Python com Ruff. |
+| `uv run --frozen poe format-check` | Verifica a formatação sem escrever. |
+| `uv run --frozen poe lint` | Executa Ruff sem correções automáticas. |
+| `uv run --frozen poe typecheck` | Executa Pyright em modo estrito. |
+| `uv run --frozen poe test` | Executa Pytest com cobertura mínima configurada. |
+| `uv run --frozen poe check` | Executa format-check, lint, typecheck e test, nessa ordem. |
+| `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
+| `uv run --frozen poe services-up` | Inicia o PostgreSQL local e aguarda o healthcheck. |
+| `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |
+| `uv run --frozen poe smoke` | Valida runtimes, configuração, Compose e liveness real. |
+| `uv run --frozen poe smoke --with-services` | Acrescenta a validação do PostgreSQL e do pgvector já iniciados. |
+
+Para incluir o banco no smoke:
 
 ```powershell
 uv run --frozen poe services-up
@@ -86,57 +149,90 @@ uv run --frozen poe smoke --with-services
 uv run --frozen poe services-down
 ```
 
-Se `127.0.0.1:5432` estiver ocupada, defina
-`PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT` com uma porta host livre antes de
-`services-up`. A porta interna permanece `5432`; veja os exemplos por sistema em
-[`infra/README.md`](infra/README.md). `services-down` preserva o volume e os
-dados locais por padrão.
+Se `127.0.0.1:5432` estiver ocupada, escolha uma porta host livre por
+`PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT`. A porta interna permanece
+`5432`; os exemplos para PowerShell e Bash estão em
+[`infra/README.md`](infra/README.md).
 
-A configuração tipada do backend está descrita em
-[`apps/api/README.md`](apps/api/README.md), e o PostgreSQL local está documentado
-em [`infra/README.md`](infra/README.md).
+## Configuração local
 
-Mensagens de commit são escritas em inglês no formato Conventional Commits
-`<type>(<scope opcional>): <description>`. A governança completa de contribuição
-pertence à SEN-17.
+O backend exige `PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT` e
+`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL` somente quando `Settings` é
+instanciado. A liveness não carrega essas configurações.
 
-## Estrutura
+`.env.example` contém valores obviamente fictícios e exclusivos para
+desenvolvimento local. Copie-o para `.env` apenas quando um fluxo manual
+precisar carregar settings; `.env` permanece ignorado pelo Git. Consulte
+[`apps/api/README.md`](apps/api/README.md) para o contrato completo.
 
-```text
-.
-├── apps/
-│   ├── api/          # pacote Python instalável do backend
-│   └── web/          # fronteira de workspace, sem implementação de UI
-├── data/             # manifesto, fixtures sintéticas e dados locais ignorados
-├── docs/             # convenções e documentação do projeto
-├── experiments/      # estudos isolados do código de produção
-├── infra/            # PostgreSQL e pgvector para desenvolvimento local
-└── scripts/          # fronteira reservada para automações
-```
+## Dados e materiais
 
-Os identificadores técnicos e o código são escritos em inglês. A documentação
-e as explicações destinadas ao projeto são escritas em português. As convenções
-completas estão em [`docs/README.md`](docs/README.md).
+Os oito materiais originais fornecidos para o desafio são locais, ignorados
+pelo Git e não podem ser redistribuídos. O arquivo rastreado
+[`data/source-manifest.json`](data/source-manifest.json) contém somente nomes,
+tamanhos e hashes SHA-256 para verificação de integridade; não contém nem
+concede direitos sobre o conteúdo recebido.
 
-## Materiais originais e dados
+O repositório publica apenas as fixtures sintéticas em `data/fixtures/`. Dados
+originais devem ficar em `data/raw/original/`, e saídas intermediárias,
+processadas ou geradas permanecem nos caminhos ignorados definidos em
+`.gitignore`. As regras de preparação e conferência estão em
+[`data/README.md`](data/README.md).
 
-Os oito materiais originais fornecidos para o desafio permanecem locais,
-ignorados pelo Git e fora do histórico. O arquivo
-[`data/source-manifest.json`](data/source-manifest.json) registra somente nomes,
-tamanhos e hashes SHA-256 para conferência de integridade; ele não redistribui o
-conteúdo recebido.
+## Segurança
 
-As instruções de preparação estão em [`data/README.md`](data/README.md). As
-fixtures públicas em `data/fixtures/` são pequenas, sintéticas e independentes
-dos materiais originais. Dados fornecidos devem ficar em `data/raw/original/`,
-enquanto saídas intermediárias, processadas e geradas usam os diretórios
-ignorados definidos no `.gitignore`.
+Credenciais, tokens, chaves, `.env`, dumps, volumes e dados locais nunca devem
+ser versionados. Os valores de `.env.example` e `compose.yaml` são fictícios e
+não podem ser usados em produção.
+
+Vulnerabilidades devem ser comunicadas de forma privada conforme
+[`SECURITY.md`](SECURITY.md); não publique detalhes exploráveis em issues ou
+pull requests.
+
+## Contribuição e governança
+
+`develop` é a branch de integração e `main` contém somente baselines e releases
+estáveis. Implementações são feitas em branches curtas, dentro de worktrees
+isoladas criadas a partir do `origin/develop` atualizado, e entram por pull
+request com squash. Releases são promovidas exclusivamente por pull request de
+`develop` para `main`; hotfixes seguem a exceção rastreável descrita na política.
+
+Nomes de branches, commits Conventional Commits e títulos de pull request são
+escritos em inglês. Documentação, ADRs, apresentações e descrições de pull
+request são escritos em português. O fluxo completo está em
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Limitações e próximos passos não implementados
+
+As seguintes capacidades pertencem à evolução futura e **não estão
+implementadas**:
+
+- modelo de domínio e regras prescritivas;
+- ingestão, limpeza ou pipeline de dados;
+- persistência da aplicação no PostgreSQL e uso de vetores pelo backend;
+- busca por similaridade, recuperação de contexto, RAG ou integração com LLM;
+- autenticação, autorização, readiness e observabilidade de produção;
+- frontend ou qualquer experiência de usuário;
+- infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de
+  produção.
+
+Cada capacidade deverá entrar por tarefa própria, com critérios verificáveis e
+sem enfraquecer a fronteira dos materiais locais.
+
+## Documentação
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): GitFlow, papéis e critérios de revisão;
+- [`SECURITY.md`](SECURITY.md): reporte responsável e política de segredos;
+- [`docs/README.md`](docs/README.md): índice e convenções da documentação;
+- [`docs/adr/README.md`](docs/adr/README.md): decisões arquiteturais;
+- [`docs/architecture/README.md`](docs/architecture/README.md): estado técnico
+  implementado.
 
 ## Acesso e direitos
 
-O repositório é público para permitir a leitura, o clone e a avaliação pela
-banca. Essa disponibilidade não concede autorização para copiar, modificar,
-redistribuir ou reutilizar o conteúdo.
+Este repositório é público exclusivamente para leitura, clone e avaliação pela
+banca. A disponibilidade pública não concede autorização para copiar,
+modificar, redistribuir ou reutilizar o conteúdo.
 
-Não há arquivo `LICENSE`. Todos os direitos permanecem reservados a Renan
-Mocelin.
+Não há arquivo `LICENSE`, não existe licença implícita de reutilização e todos
+os direitos permanecem reservados a Renan Mocelin.
