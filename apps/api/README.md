@@ -1,11 +1,39 @@
 # Backend Python
 
-Este diretório contém o único projeto Python instalável desta etapa. O pacote
-`prescriptive_maintenance` estabelece apenas o limite do monólito modular e
-o namespace reservado aos módulos internos.
+Este diretório contém o pacote instalável `prescriptive_maintenance` e a
+aplicação FastAPI do backend. O alvo ASGI estável é
+`prescriptive_maintenance.main:app`, e `create_app()` cria instâncias isoladas
+para execução e testes.
 
-Endpoints, regras de negócio, processamento de dados, similaridade, RAG,
-persistência e integrações serão implementados somente nas tarefas próprias.
+## Instalação
 
-A partir da raiz, use `uv sync --frozen` para sincronizar o workspace e
-`uv run poe check-api-import` para confirmar a instalação do pacote.
+A partir da raiz do repositório, sincronize todo o workspace pelo lock:
+
+```powershell
+uv sync --all-packages --frozen
+```
+
+## Execução local
+
+Inicie a aplicação em uma interface exclusivamente local:
+
+```powershell
+uv run uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --port 8000
+```
+
+`GET /health/live` responde com status HTTP `200`, conteúdo
+`application/json` e corpo `{"status":"ok"}`. A liveness verifica apenas que o
+processo está vivo e não acessa banco, arquivos, rede, configurações externas
+ou outros serviços.
+
+## Verificações
+
+Os comandos disponíveis são executados diretamente a partir da raiz:
+
+```powershell
+uv run poe check-api-import
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+```
