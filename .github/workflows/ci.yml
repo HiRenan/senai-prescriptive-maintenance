@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ubuntu-quality:
+    name: CI / Ubuntu quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: python-3.13
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Resolve pnpm store
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(corepack pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-22-pnpm-10.15.1-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Python dependencies from lock
+        run: uv sync --all-packages --frozen
+
+      - name: Install Node.js dependencies from lock
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Run quality checks
+        run: uv run --frozen poe check
+
+      - name: Run repository hooks
+        run: uv run --frozen poe hooks
+
+      - name: Run cross-platform smoke
+        run: uv run --frozen poe smoke
+
+  windows-smoke:
+    name: CI / Windows smoke
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: python-3.13
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Resolve pnpm store
+        id: pnpm-store
+        shell: pwsh
+        run: '"path=$(corepack pnpm store path --silent)" >> $env:GITHUB_OUTPUT'
+
+      - name: Restore pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-22-pnpm-10.15.1-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Python dependencies from lock
+        run: uv sync --all-packages --frozen
+
+      - name: Install Node.js dependencies from lock
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Run essential tests
+        run: uv run --frozen poe test
+
+      - name: Run cross-platform smoke
+        run: uv run --frozen poe smoke
