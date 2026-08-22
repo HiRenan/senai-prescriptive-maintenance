@@ -651,6 +651,19 @@ def render_banner_baseline_markdown(json_bytes: bytes) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def validate_banner_baseline_bytes(*, json_bytes: bytes, manifest_path: Path) -> None:
+    """Validate canonical aggregate bytes against the approved manifest identity."""
+
+    try:
+        identity = _load_manifest_identity(manifest_path)
+    except (OSError, BannerBaselineError):
+        raise BannerBaselinePrivacyError(
+            "Public baseline identity is unavailable."
+        ) from None
+    payload = _load_json_object(json_bytes)
+    _validate_approved_baseline_payload(payload, identity)
+
+
 def validate_banner_baseline_artifacts(
     *, json_path: Path, markdown_path: Path, manifest_path: Path
 ) -> None:
@@ -681,11 +694,7 @@ def validate_banner_baseline_artifacts(
         ) from None
 
     payload = _load_json_object(json_bytes)
-    _validate_public_payload(payload, expected_identity=identity)
-    if _required_string(payload, "result") != BannerBaselineStatus.PASSED:
-        raise BannerBaselinePrivacyError("Published baseline is not approved.")
-    if _blocking_failure_codes(payload):
-        raise BannerBaselinePrivacyError("Published baseline contains a blocked gate.")
+    _validate_approved_baseline_payload(payload, identity)
     if render_banner_baseline_markdown(json_bytes) != markdown_bytes:
         raise BannerBaselinePrivacyError(
             "Published Markdown does not match sanitized JSON."
@@ -1452,6 +1461,16 @@ def _validate_public_payload(
     _validate_mapping_against_schema(payload, PUBLIC_BANNER_BASELINE_SCHEMA.children)
     _validate_payload_semantics(payload, expected_identity)
     _scan_public_value(payload, path=())
+
+
+def _validate_approved_baseline_payload(
+    payload: Mapping[str, object], identity: _ManifestIdentity
+) -> None:
+    _validate_public_payload(payload, expected_identity=identity)
+    if _required_string(payload, "result") != BannerBaselineStatus.PASSED:
+        raise BannerBaselinePrivacyError("Published baseline is not approved.")
+    if _blocking_failure_codes(payload):
+        raise BannerBaselinePrivacyError("Published baseline contains a blocked gate.")
 
 
 def _validate_mapping_against_schema(

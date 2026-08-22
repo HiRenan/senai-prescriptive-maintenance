@@ -17,8 +17,8 @@ não abre conexão com ele.
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app` e `GET /health/live`. | A liveness verifica apenas o processo e não acessa dependências. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
-| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only, emitir recibos pre/post efetivos, aplicar o contrato v2 das 26 colunas, perfilar o DataFrame, executar a baseline e gerar o inventário categórico normalizado de `fault` em duas rodadas. | Exige caminhos explícitos somente no acesso à fonte; os runners só persistem artefatos aprovados após integridade, gates, reconciliações e igualdade byte a byte, e o inventário pode ser validado offline. |
-| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, configuração, fonte, 26 colunas, perfil agregado e inventário de rótulos, incluindo JSON e cenários Unicode inteiramente sintéticos. | Os testes tabulares usam somente material público sintético; não há regras prescritivas nem taxonomia semântica implementadas. |
+| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only, emitir recibos pre/post efetivos, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos somente no acesso à fonte; os runners só persistem artefatos aprovados após integridade, gates, reconciliações e igualdade byte a byte. O inventário pode ser validado offline, e a política oferece consulta imutável e resolve a ação efetiva de matches contextuais sem aplicar regras a linhas. |
+| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, configuração, fonte, 26 colunas, perfil agregado, inventário de rótulos e política de qualidade, incluindo JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes tabulares usam somente material público sintético; não há limpeza, regras prescritivas nem taxonomia semântica implementadas. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
 | `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
@@ -89,8 +89,9 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 - **Persistência:** o banco está disponível localmente, mas não existe cliente,
   repositório, migração ou persistência integrada ao backend.
 - **Web:** `apps/web` reserva o limite do workspace; não existe frontend.
-- **Dados:** manifesto, fixtures sintéticas, baseline agregada e inventário
-  categórico aprovado são públicos; originais e demais derivados permanecem
+- **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
+  categórico aprovado e visão derivada da política são públicos; originais e
+  demais derivados permanecem
   locais e ignorados.
 - **Experimentos:** `experiments/` não constitui código de produção.
 

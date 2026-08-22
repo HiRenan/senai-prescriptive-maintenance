@@ -60,6 +60,9 @@ A versão atual contém:
   rótulos brutos, frequências globais, forma normalizada, slug estável e estado
   explícito de colisão, gerado em duas rodadas pela mesma porta auditada e
   validável offline sem a fonte;
+- uma política declarativa e versionada de qualidade, validada contra contrato e
+  profiler, com identificador semântico SHA-256, precedências imutáveis e visão
+  pública derivada apenas da política e dos agregados rastreados da baseline;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -83,7 +86,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, contrato tabular, profiler agregado e inventário categórico de rótulos. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, contrato tabular, profiler agregado, inventário categórico de rótulos e política declarativa de qualidade. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
@@ -111,7 +114,8 @@ sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md)
 │   └── source-manifest.json # identidade pública dos materiais locais
 ├── docs/
 │   ├── adr/          # decisões arquiteturais
-│   └── architecture/ # inventário da arquitetura implementada
+│   ├── architecture/ # inventário da arquitetura implementada
+│   └── data/         # visões humanas derivadas de contratos de dados
 ├── experiments/      # estudos isolados do código de produção
 ├── infra/            # PostgreSQL e pgvector para desenvolvimento local
 └── scripts/          # automação cross-platform exposta pelo Poe
@@ -210,6 +214,12 @@ normalizada, slug e estado/resolução de colisão, além de versões, identidad
 fonte, recibos e reconciliações. Nenhum desses artefatos contém linha,
 identificador, medição, associação temporal, caminho local ou arquivo original;
 todos são validados offline contra o manifesto e a baseline pública.
+
+A matriz pública de regras, precedências e comparação exclusivamente agregada
+está em
+[`docs/data/banner-quality-policy.md`](docs/data/banner-quality-policy.md). A
+fonte canônica dessa visão é a política JSON validada pelo backend; o documento
+não contém valores por registro e não autoriza reprocessamento da fonte.
 
 Dados originais devem ficar em `data/raw/original/`. Originais, dados brutos,
 saídas intermediárias, dados processados e quaisquer outros artefatos gerados

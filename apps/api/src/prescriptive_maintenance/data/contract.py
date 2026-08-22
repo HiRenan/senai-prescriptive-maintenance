@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Set
+from collections.abc import Mapping, Set
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal, localcontext
@@ -10,6 +10,7 @@ from enum import StrEnum
 from math import isfinite
 from numbers import Integral, Real
 from re import compile as compile_pattern
+from types import MappingProxyType
 from typing import Any, Final, Protocol, cast
 
 import pandas as pd
@@ -452,20 +453,22 @@ _CHECK_NON_EMPTY_FAULT: Final = "non_empty_fault"
 _CHECK_ALLOWED_FAULT: Final = "allowed_fault_category"
 _CHECK_PHYSICAL_MINIMUM: Final = "physical_lower_bound"
 
-_PHYSICAL_MINIMUMS: Final[dict[str, float]] = {
-    "z_rms_velocity_in_s": 0.0,
-    "z_rms_velocity_mm_s": 0.0,
-    "temperature_f": -459.67,
-    "temperature_c": -273.15,
-    "x_rms_velocity_in_s": 0.0,
-    "x_rms_velocity_mm_s": 0.0,
-    "z_peak_vel_comp_freq_hz": 0.0,
-    "x_peak_vel_comp_freq_hz": 0.0,
-    "z_rms_acceleration_g": 0.0,
-    "x_rms_acceleration_g": 0.0,
-    "z_high_freq_rms_accel_g": 0.0,
-    "x_high_freq_rms_accel_g": 0.0,
-}
+BANNER_PHYSICAL_MINIMUMS: Final[Mapping[str, float]] = MappingProxyType(
+    {
+        "z_rms_velocity_in_s": 0.0,
+        "z_rms_velocity_mm_s": 0.0,
+        "temperature_f": -459.67,
+        "temperature_c": -273.15,
+        "x_rms_velocity_in_s": 0.0,
+        "x_rms_velocity_mm_s": 0.0,
+        "z_peak_vel_comp_freq_hz": 0.0,
+        "x_peak_vel_comp_freq_hz": 0.0,
+        "z_rms_acceleration_g": 0.0,
+        "x_rms_acceleration_g": 0.0,
+        "z_high_freq_rms_accel_g": 0.0,
+        "x_high_freq_rms_accel_g": 0.0,
+    }
+)
 _SIGNED_INT64_MIN: Final = -(2**63)
 _SIGNED_INT64_MAX: Final = 2**63 - 1
 
@@ -563,7 +566,7 @@ def banner_value_violates_domain(value: object, column: BannerColumnContract) ->
             return True
         if not isfinite(number):
             return True
-        minimum = _PHYSICAL_MINIMUMS.get(column.name)
+        minimum = BANNER_PHYSICAL_MINIMUMS.get(column.name)
         return minimum is not None and number < minimum
 
     if column.logical_type is LogicalType.UTC_TIMESTAMP_STRING:
@@ -639,7 +642,7 @@ def _build_pandera_column(
     checks: list[pa.Check] = []
     if column.logical_type is LogicalType.FLOAT64:
         checks.append(pa.Check(_is_finite, element_wise=True, name=_CHECK_FINITE))
-    if column.name in _PHYSICAL_MINIMUMS:
+    if column.name in BANNER_PHYSICAL_MINIMUMS:
         checks.append(_domain_check(column, _CHECK_PHYSICAL_MINIMUM))
     if column.logical_type is LogicalType.UTC_TIMESTAMP_STRING:
         checks.append(_domain_check(column, _CHECK_TIMESTAMP))
