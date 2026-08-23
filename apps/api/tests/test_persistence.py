@@ -10,6 +10,8 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT,
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
+    assert_persisted_scalars_are_canonical,
+    synthetic_tainted_scalar_aggregates,
 )
 from prescriptive_maintenance.contracts import AnalysisOutcome as ApiAnalysisOutcome
 from prescriptive_maintenance.domain import AnalysisOutcome
@@ -286,6 +288,28 @@ def test_in_memory_rebuilds_subclasses_without_forbidden_payloads() -> None:
     )
     assert all(not hasattr(node, "raw_content") for node in recovered_nodes)
     assert all(_FORBIDDEN_PAYLOAD not in repr(node) for node in recovered_nodes)
+
+
+def test_in_memory_canonicalizes_every_nested_scalar_value() -> None:
+    tainted_document, tainted_analysis = synthetic_tainted_scalar_aggregates()
+    store = InMemoryStore()
+    with InMemoryUnitOfWork(store) as transaction:
+        transaction.documents.add(tainted_document)
+        transaction.analyses.add(tainted_analysis)
+        transaction.commit()
+
+    with InMemoryUnitOfWork(store) as query:
+        recovered_document = query.documents.get(tainted_document.document_id)
+        recovered_analysis = query.analyses.get(tainted_analysis.analysis_id)
+
+    assert recovered_document == tainted_document
+    assert recovered_analysis == tainted_analysis
+    assert recovered_document is not None
+    assert recovered_analysis is not None
+    assert_persisted_scalars_are_canonical(
+        recovered_document,
+        recovered_analysis,
+    )
 
 
 def test_document_rejects_a_chunk_identifier_reused_across_versions() -> None:

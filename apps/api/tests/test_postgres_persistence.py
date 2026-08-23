@@ -18,6 +18,8 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT,
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
+    assert_persisted_scalars_are_canonical,
+    synthetic_tainted_scalar_aggregates,
 )
 from prescriptive_maintenance.domain import AnalysisOutcome
 from prescriptive_maintenance.persistence import (
@@ -421,6 +423,35 @@ def test_postgres_round_trip_and_exact_replay_idempotency(
         conflict.analyses.add(conflicting)
 
 
+def test_postgres_canonicalizes_every_nested_scalar_value(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    tainted_document, tainted_analysis = synthetic_tainted_scalar_aggregates()
+    with PostgresUnitOfWork(postgres_connection_factory) as transaction:
+        transaction.documents.add(tainted_document)
+        transaction.analyses.add(tainted_analysis)
+        transaction.commit()
+
+    with PostgresUnitOfWork(postgres_connection_factory) as query:
+        recovered_document = query.documents.get(tainted_document.document_id)
+        recovered_analysis = query.analyses.get(tainted_analysis.analysis_id)
+
+    assert recovered_document == tainted_document
+    assert recovered_analysis == tainted_analysis
+    assert recovered_document is not None
+    assert recovered_analysis is not None
+    assert_persisted_scalars_are_canonical(
+        recovered_document,
+        recovered_analysis,
+    )
+
+
 def test_postgres_adds_a_version_idempotently_without_rewriting_history(
     postgres_connection_factory: PostgresConnectionFactory,
 ) -> None:
@@ -630,10 +661,85 @@ def test_unit_of_work_rejects_an_external_transaction_without_touching_it(
             is not None
         )
     finally:
-        external.rollback()
+        if not external.closed:
+            external.rollback()
         observer.rollback()
         external.close()
         observer.close()
+
+
+def test_unit_of_work_preserves_an_explicit_autocommit_transaction_on_entry_failure(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    external = postgres_connection_factory()
+    observer = postgres_connection_factory()
+    external.autocommit = True
+    unit_of_work = PostgresUnitOfWork(lambda: external)
+    try:
+        external.execute("BEGIN")
+        external.execute(
+            "INSERT INTO documents (document_id, created_at) VALUES (%s, %s)",
+            ("doc_synthetic_external_autocommit", SYNTHETIC_DOCUMENT.created_at),
+        )
+        assert external.info.transaction_status is TransactionStatus.INTRANS
+
+        with pytest.raises(UnitOfWorkStateError, match="idle connection"):
+            unit_of_work.__enter__()
+
+        assert not external.closed
+        assert external.info.transaction_status is TransactionStatus.INTRANS
+        assert (
+            external.execute(
+                "SELECT document_id FROM documents WHERE document_id = %s",
+                ("doc_synthetic_external_autocommit",),
+            ).fetchone()
+            is not None
+        )
+        assert (
+            observer.execute(
+                "SELECT document_id FROM documents WHERE document_id = %s",
+                ("doc_synthetic_external_autocommit",),
+            ).fetchone()
+            is None
+        )
+        with pytest.raises(UnitOfWorkStateError, match="not active"):
+            _ = unit_of_work.analyses
+
+        external.commit()
+        assert (
+            observer.execute(
+                "SELECT document_id FROM documents WHERE document_id = %s",
+                ("doc_synthetic_external_autocommit",),
+            ).fetchone()
+            is not None
+        )
+    finally:
+        if not external.closed:
+            external.rollback()
+        observer.rollback()
+        external.close()
+        observer.close()
+
+
+def test_unit_of_work_closes_an_idle_autocommit_connection_on_entry_failure(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    external = postgres_connection_factory()
+    external.autocommit = True
+    unit_of_work = PostgresUnitOfWork(lambda: external)
+
+    with pytest.raises(UnitOfWorkStateError, match="autocommit"):
+        unit_of_work.__enter__()
+
+    assert external.closed
+    with pytest.raises(UnitOfWorkStateError, match="not active"):
+        _ = unit_of_work.documents
 
 
 def test_invalid_reference_and_failure_roll_back_entire_postgres_transaction(

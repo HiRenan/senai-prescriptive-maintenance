@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Final
 
 from prescriptive_maintenance.domain import AnalysisOutcome
@@ -29,6 +29,30 @@ def _validate_identifier(value: str, pattern: re.Pattern[str], label: str) -> No
 def _validate_aware_datetime(value: datetime, label: str) -> None:
     if value.utcoffset() is None:
         raise ValueError(f"{label} must be timezone-aware.")
+
+
+def _base_text(value: str) -> str:
+    """Materialize an exact ``str`` without subtype conversion hooks."""
+
+    return str.__add__("", value)
+
+
+def _base_utc_datetime(value: datetime) -> datetime:
+    """Preserve an aware instant in an exact UTC ``datetime``."""
+
+    _validate_aware_datetime(value, "created_at")
+    base_value = datetime(
+        value.year,
+        value.month,
+        value.day,
+        value.hour,
+        value.minute,
+        value.second,
+        value.microsecond,
+        tzinfo=value.tzinfo,
+        fold=value.fold,
+    )
+    return base_value.astimezone(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,9 +216,9 @@ class AnalysisMetadata:
 
 def _canonical_chunk_reference(reference: ChunkReference) -> ChunkReference:
     return ChunkReference(
-        chunk_ref=reference.chunk_ref,
-        document_id=reference.document_id,
-        document_version_id=reference.document_version_id,
+        chunk_ref=_base_text(reference.chunk_ref),
+        document_id=_base_text(reference.document_id),
+        document_version_id=_base_text(reference.document_version_id),
         page_number=reference.page_number,
     )
 
@@ -205,10 +229,10 @@ def canonical_document_version(
     """Rebuild one version using only its governed metadata fields."""
 
     return DocumentVersionMetadata(
-        document_version_id=version.document_version_id,
-        document_id=version.document_id,
-        source_sha256=version.source_sha256,
-        created_at=version.created_at,
+        document_version_id=_base_text(version.document_version_id),
+        document_id=_base_text(version.document_id),
+        source_sha256=_base_text(version.source_sha256),
+        created_at=_base_utc_datetime(version.created_at),
         chunks=tuple(_canonical_chunk_reference(chunk) for chunk in version.chunks),
     )
 
@@ -217,8 +241,8 @@ def canonical_document(document: DocumentMetadata) -> DocumentMetadata:
     """Rebuild one document without retaining caller-owned subclasses."""
 
     return DocumentMetadata(
-        document_id=document.document_id,
-        created_at=document.created_at,
+        document_id=_base_text(document.document_id),
+        created_at=_base_utc_datetime(document.created_at),
         versions=tuple(
             canonical_document_version(version) for version in document.versions
         ),
@@ -227,10 +251,10 @@ def canonical_document(document: DocumentMetadata) -> DocumentMetadata:
 
 def _canonical_evidence_reference(reference: EvidenceReference) -> EvidenceReference:
     return EvidenceReference(
-        evidence_id=reference.evidence_id,
-        document_id=reference.document_id,
-        document_version_id=reference.document_version_id,
-        chunk_ref=reference.chunk_ref,
+        evidence_id=_base_text(reference.evidence_id),
+        document_id=_base_text(reference.document_id),
+        document_version_id=_base_text(reference.document_version_id),
+        chunk_ref=_base_text(reference.chunk_ref),
         ordinal=reference.ordinal,
     )
 
@@ -239,13 +263,13 @@ def canonical_analysis(analysis: AnalysisMetadata) -> AnalysisMetadata:
     """Rebuild one analysis using the closed, minimal persistence shape."""
 
     return AnalysisMetadata(
-        analysis_id=analysis.analysis_id,
+        analysis_id=_base_text(analysis.analysis_id),
         outcome=analysis.outcome,
-        dataset_id=analysis.dataset_id,
-        model_id=analysis.model_id,
-        prompt_id=analysis.prompt_id,
-        configuration_id=analysis.configuration_id,
-        created_at=analysis.created_at,
+        dataset_id=_base_text(analysis.dataset_id),
+        model_id=_base_text(analysis.model_id),
+        prompt_id=_base_text(analysis.prompt_id),
+        configuration_id=_base_text(analysis.configuration_id),
+        created_at=_base_utc_datetime(analysis.created_at),
         evidence_references=tuple(
             _canonical_evidence_reference(reference)
             for reference in analysis.evidence_references

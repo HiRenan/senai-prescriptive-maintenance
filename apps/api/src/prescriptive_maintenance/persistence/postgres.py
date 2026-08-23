@@ -211,10 +211,12 @@ class PostgresDocumentRepository(DocumentRepository):
             )
             for row in version_rows
         )
-        return DocumentMetadata(
-            document_id=cast(str, document_row["document_id"]),
-            created_at=cast(datetime, document_row["created_at"]),
-            versions=versions,
+        return canonical_document(
+            DocumentMetadata(
+                document_id=cast(str, document_row["document_id"]),
+                created_at=cast(datetime, document_row["created_at"]),
+                versions=versions,
+            )
         )
 
 
@@ -332,15 +334,17 @@ class PostgresAnalysisRepository(AnalysisRepository):
             )
             for row in evidence_rows
         )
-        return AnalysisMetadata(
-            analysis_id=cast(str, analysis_row["analysis_id"]),
-            outcome=AnalysisOutcome(cast(str, analysis_row["outcome"])),
-            dataset_id=cast(str, analysis_row["dataset_id"]),
-            model_id=cast(str, analysis_row["model_id"]),
-            prompt_id=cast(str, analysis_row["prompt_id"]),
-            configuration_id=cast(str, analysis_row["configuration_id"]),
-            created_at=cast(datetime, analysis_row["created_at"]),
-            evidence_references=references,
+        return canonical_analysis(
+            AnalysisMetadata(
+                analysis_id=cast(str, analysis_row["analysis_id"]),
+                outcome=AnalysisOutcome(cast(str, analysis_row["outcome"])),
+                dataset_id=cast(str, analysis_row["dataset_id"]),
+                model_id=cast(str, analysis_row["model_id"]),
+                prompt_id=cast(str, analysis_row["prompt_id"]),
+                configuration_id=cast(str, analysis_row["configuration_id"]),
+                created_at=cast(datetime, analysis_row["created_at"]),
+                evidence_references=references,
+            )
         )
 
 
@@ -393,14 +397,14 @@ class PostgresUnitOfWork:
         if self._connection is not None:
             raise UnitOfWorkStateError("The unit of work is already active.")
         connection = self._connection_factory()
+        if connection.info.transaction_status is not TransactionStatus.IDLE:
+            raise UnitOfWorkStateError(
+                "PostgreSQL units of work require an idle connection."
+            )
         if connection.autocommit:
             connection.close()
             raise UnitOfWorkStateError(
                 "PostgreSQL units of work require autocommit to be disabled."
-            )
-        if connection.info.transaction_status is not TransactionStatus.IDLE:
-            raise UnitOfWorkStateError(
-                "PostgreSQL units of work require an idle connection."
             )
         transaction_state = _PostgresTransactionState()
         self._connection = connection
