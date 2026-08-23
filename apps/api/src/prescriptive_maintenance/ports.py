@@ -37,11 +37,20 @@ class ModelDisposition(StrEnum):
     OUT_OF_DISTRIBUTION = "out_of_distribution"
 
 
+class ModelAbstentionReason(StrEnum):
+    """Stable model-level reasons that prevent a diagnostic decision."""
+
+    DISTANCE_OUT_OF_DISTRIBUTION = "distance_out_of_distribution"
+    INCONCLUSIVE_VOTE = "inconclusive_vote"
+    RARE_CLASS_SUPPORT = "rare_class_support"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelPrediction:
     """Model disposition with non-calibrated support and opaque k-NN neighbors."""
 
     disposition: ModelDisposition
+    abstention_reason: ModelAbstentionReason | None
     diagnosis: Diagnosis | None
     support_score: float
     model_id: str

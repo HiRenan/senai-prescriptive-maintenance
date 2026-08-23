@@ -32,6 +32,7 @@ from prescriptive_maintenance.contracts import (
 from prescriptive_maintenance.ports import (
     DocumentEvidence,
     GenerationPort,
+    ModelAbstentionReason,
     ModelDisposition,
     ModelPort,
     ModelPrediction,
@@ -107,6 +108,7 @@ class SyntheticModelPort(ModelPort):
         if scenario == 1300:
             return ModelPrediction(
                 disposition=ModelDisposition.OUT_OF_DISTRIBUTION,
+                abstention_reason=(ModelAbstentionReason.DISTANCE_OUT_OF_DISTRIBUTION),
                 diagnosis=None,
                 support_score=0.05,
                 model_id="model_synthetic_v1",
@@ -145,6 +147,7 @@ class SyntheticModelPort(ModelPort):
 
         return ModelPrediction(
             disposition=disposition,
+            abstention_reason=None,
             diagnosis=Diagnosis(
                 code=code,
                 summary=summary,

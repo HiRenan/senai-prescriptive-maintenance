@@ -101,8 +101,10 @@ A versão atual contém:
   estatísticas IQR ajustadas somente em treino;
 - uma baseline k-NN local e determinística sobre as mesmas 18 features, com
   `StandardScaler` ajustado somente no treino, distância euclidiana, desempates
-  totais, adapter da porta de modelo e artefato NumPy/JSON versionado, íntegro e
-  sem desserialização executável;
+  totais, suporte heurístico de votos e distância, thresholds calibrados sem o
+  teste, abstenção tipada para distância, votação ou classe rara, adapter da
+  porta de modelo e artefato NumPy/JSON versionado, íntegro e sem
+  desserialização executável;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;

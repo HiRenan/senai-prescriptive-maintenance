@@ -1,12 +1,18 @@
 """Deterministic local model implementations."""
 
 from prescriptive_maintenance.modeling.knn import (
+    KNN_ABSTENTION_POLICY_VERSION,
     KNN_ARTIFACT_FILENAMES,
     KNN_ARTIFACT_SCHEMA_VERSION,
+    KNN_CALIBRATION_SAMPLE_LIMIT,
+    KNN_DISTANCE_QUANTILE,
     KNN_METRIC,
+    KNN_MINIMUM_CLASS_COUNT,
     KNN_MODEL_VERSION,
     KNN_SUPPORT_HEURISTIC,
+    KNN_VOTE_MARGIN_QUANTILE,
     InMemoryKnnModel,
+    KnnAbstentionPolicy,
     KnnArtifactError,
     KnnCandidate,
     KnnCandidateNeighbor,
@@ -23,12 +29,18 @@ from prescriptive_maintenance.modeling.knn import (
 )
 
 __all__ = [
+    "KNN_ABSTENTION_POLICY_VERSION",
     "KNN_ARTIFACT_FILENAMES",
     "KNN_ARTIFACT_SCHEMA_VERSION",
+    "KNN_CALIBRATION_SAMPLE_LIMIT",
+    "KNN_DISTANCE_QUANTILE",
     "KNN_METRIC",
+    "KNN_MINIMUM_CLASS_COUNT",
     "KNN_MODEL_VERSION",
     "KNN_SUPPORT_HEURISTIC",
+    "KNN_VOTE_MARGIN_QUANTILE",
     "InMemoryKnnModel",
+    "KnnAbstentionPolicy",
     "KnnArtifactError",
     "KnnCandidate",
     "KnnCandidateNeighbor",

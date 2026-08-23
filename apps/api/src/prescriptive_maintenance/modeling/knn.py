@@ -13,7 +13,7 @@ import tempfile
 import unicodedata
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import fsum, isfinite
 from pathlib import Path
@@ -44,14 +44,20 @@ from prescriptive_maintenance.data import (
     load_canonical_pipeline_config,
 )
 from prescriptive_maintenance.ports import (
+    ModelAbstentionReason,
     ModelDisposition,
     ModelPrediction,
 )
 
-KNN_ARTIFACT_SCHEMA_VERSION: Final = 1
-KNN_MODEL_VERSION: Final = 1
+KNN_ARTIFACT_SCHEMA_VERSION: Final = 2
+KNN_MODEL_VERSION: Final = 2
 KNN_METRIC: Final = "euclidean"
-KNN_SUPPORT_HEURISTIC: Final = "winning_top_k_vote_share"
+KNN_SUPPORT_HEURISTIC: Final = "vote_share_times_inverse_distance_ratio"
+KNN_ABSTENTION_POLICY_VERSION: Final = 1
+KNN_DISTANCE_QUANTILE: Final = 0.95
+KNN_VOTE_MARGIN_QUANTILE: Final = 0.10
+KNN_MINIMUM_CLASS_COUNT: Final = 2
+KNN_CALIBRATION_SAMPLE_LIMIT: Final = 512
 KNN_ARTIFACT_FILENAMES: Final[tuple[str, ...]] = (
     "manifest.json",
     "training_vectors.npy",
@@ -66,7 +72,8 @@ _DISTANCE_TIE_BREAK: Final = "neighbor_ref_ascending"
 _CLASS_TIE_BREAK: Final = (
     "vote_count_descending_then_distance_sum_ascending_then_target_slug_ascending"
 )
-_MODEL_ID_PREFIX: Final = "model_knn_v1_"
+_MODEL_ID_PREFIX: Final = "model_knn_v2_"
+_CALIBRATION_SAMPLING: Final = "evenly_spaced_input_order"
 _FAULT_CODE_PREFIX: Final = "fault_"
 _NEIGHBOR_REF_PREFIX: Final = "neighbor_"
 _HASH_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -135,6 +142,22 @@ class KnnPreprocessorState:
 
 
 @dataclass(frozen=True, slots=True)
+class KnnAbstentionPolicy:
+    """Frozen thresholds fitted without consulting the test partition."""
+
+    version: int
+    distance_threshold: float
+    vote_margin_threshold: float
+    minimum_class_count: int
+    calibration_partition: str
+    calibration_partition_sha256: str
+    calibration_sample_count: int
+    distance_quantile: float
+    vote_margin_quantile: float
+    sampling: str
+
+
+@dataclass(frozen=True, slots=True)
 class KnnCandidateNeighbor:
     """Internal neighbor reference without a row, feature, or source identifier."""
 
@@ -150,6 +173,10 @@ class KnnCandidate:
 
     target_slug: str
     support_score: float
+    winning_vote_share: float
+    vote_margin: float
+    nearest_distance: float
+    abstention_reason: ModelAbstentionReason | None
     neighbors: tuple[KnnCandidateNeighbor, ...]
 
 
@@ -163,13 +190,20 @@ class InMemoryKnnModel:
         labels: tuple[KnnLabel, ...],
         normal_target_labels: tuple[str, ...],
         default_top_k: int,
+        training_partition_sha256: str,
+        abstention_policy: KnnAbstentionPolicy,
         preprocessor: _StandardScaler,
         training_vectors: FloatMatrix,
         target_indices: TargetIndexVector,
         neighbor_refs: TextVector,
     ) -> None:
         _require_sha256(dataset_id, KnnConfigurationError)
+        _require_sha256(training_partition_sha256, KnnConfigurationError)
         _validate_top_k(default_top_k, KnnConfigurationError)
+        if type(abstention_policy) is not KnnAbstentionPolicy:
+            raise KnnConfigurationError("Abstention policy type is incompatible.")
+        safe_policy = replace(abstention_policy)
+        _validate_abstention_policy(safe_policy, KnnConfigurationError)
         _validate_label_table(labels, normal_target_labels, KnnConfigurationError)
         state = _preprocessor_state(preprocessor, len(training_vectors))
         _validate_training_arrays(
@@ -177,6 +211,12 @@ class InMemoryKnnModel:
             target_indices,
             neighbor_refs,
             label_count=len(labels),
+            error_type=KnnConfigurationError,
+        )
+        _validate_abstention_policy_binding(
+            safe_policy,
+            training_partition_sha256=training_partition_sha256,
+            training_sample_count=len(training_vectors),
             error_type=KnnConfigurationError,
         )
 
@@ -196,11 +236,16 @@ class InMemoryKnnModel:
         self._labels = labels
         self._normal_target_labels = normal_target_labels
         self._default_top_k = default_top_k
+        self._training_partition_sha256 = training_partition_sha256
+        self._abstention_policy = safe_policy
         self._preprocessor = preprocessor
         self._preprocessor_state = state
         self._training_vectors = vectors
         self._target_indices = indices
         self._neighbor_refs = refs
+        self._class_counts = tuple(
+            int(np.count_nonzero(indices == index)) for index in range(len(labels))
+        )
         self._array_identities = _array_identities(vectors, indices, refs)
         self._content_sha256 = _content_sha256(self)
         self._model_id = f"{_MODEL_ID_PREFIX}{self._content_sha256[:32]}"
@@ -234,6 +279,14 @@ class InMemoryKnnModel:
         return self._default_top_k
 
     @property
+    def training_partition_sha256(self) -> str:
+        return self._training_partition_sha256
+
+    @property
+    def abstention_policy(self) -> KnnAbstentionPolicy:
+        return replace(self._abstention_policy)
+
+    @property
     def sample_count(self) -> int:
         return len(self._training_vectors)
 
@@ -262,27 +315,43 @@ class InMemoryKnnModel:
         ):
             raise KnnInputError("Inference preprocessing produced invalid values.")
 
-        with np.errstate(over="ignore", invalid="ignore"):
-            differences = self._training_vectors - transformed[0]
-            distances = cast(FloatVector, np.linalg.norm(differences, axis=1))
-        if distances.shape != (self.sample_count,) or not np.isfinite(distances).all():
-            raise KnnInputError("Inference distance calculation failed.")
-        order = np.lexsort((self._neighbor_refs, distances))
-        selected = order[: min(requested_top_k, self.sample_count)]
-        neighbors = tuple(
-            KnnCandidateNeighbor(
-                neighbor_ref=str(self._neighbor_refs[index]),
-                rank=rank,
-                target_slug=self._labels[int(self._target_indices[index])].target_slug,
-                distance=float(distances[index]),
-            )
-            for rank, index in enumerate(selected, start=1)
+        neighbors = _nearest_neighbors(
+            transformed[0],
+            training_vectors=self._training_vectors,
+            target_indices=self._target_indices,
+            neighbor_refs=self._neighbor_refs,
+            labels=self._labels,
+            top_k=max(self._default_top_k, requested_top_k),
+            error_type=KnnInputError,
         )
-        target_slug, support_score = _select_candidate(neighbors)
+        decision_neighbors = neighbors[: min(self._default_top_k, len(neighbors))]
+        target_slug, winning_vote_share, vote_margin = _select_candidate(
+            decision_neighbors
+        )
+        nearest_distance = decision_neighbors[0].distance
+        label_index = next(
+            index
+            for index, label in enumerate(self._labels)
+            if label.target_slug == target_slug
+        )
+        abstention_reason = _abstention_reason(
+            policy=self._abstention_policy,
+            nearest_distance=nearest_distance,
+            vote_margin=vote_margin,
+            class_count=self._class_counts[label_index],
+        )
         return KnnCandidate(
             target_slug=target_slug,
-            support_score=support_score,
-            neighbors=neighbors,
+            support_score=_support_score(
+                winning_vote_share=winning_vote_share,
+                nearest_distance=nearest_distance,
+                distance_threshold=self._abstention_policy.distance_threshold,
+            ),
+            winning_vote_share=winning_vote_share,
+            vote_margin=vote_margin,
+            nearest_distance=nearest_distance,
+            abstention_reason=abstention_reason,
+            neighbors=neighbors[: min(requested_top_k, len(neighbors))],
         )
 
     def label_for_target(self, target_slug: str) -> KnnLabel:
@@ -321,21 +390,33 @@ class KnnModelPortAdapter:
             for neighbor in candidate.neighbors
         )
         is_normal = candidate_label.is_normal
+        is_abstained = candidate.abstention_reason is not None
         return ModelPrediction(
             disposition=(
-                ModelDisposition.NORMAL if is_normal else ModelDisposition.FAULT
+                ModelDisposition.OUT_OF_DISTRIBUTION
+                if is_abstained
+                else ModelDisposition.NORMAL
+                if is_normal
+                else ModelDisposition.FAULT
             ),
-            diagnosis=Diagnosis(
-                code=candidate_label.fault_code,
-                summary=(
-                    "Classe candidata da baseline k-NN; o suporte é uma "
-                    "heurística de votos, não uma probabilidade."
-                ),
+            abstention_reason=candidate.abstention_reason,
+            diagnosis=(
+                None
+                if is_abstained
+                else Diagnosis(
+                    code=candidate_label.fault_code,
+                    summary=(
+                        "Classe candidata da baseline k-NN; o suporte combina "
+                        "votos e distância como heurística, não probabilidade."
+                    ),
+                )
             ),
             support_score=candidate.support_score,
             model_id=self._model.model_id,
             neighbors=public_neighbors,
-            retrieval_key=None if is_normal else candidate.target_slug,
+            retrieval_key=(
+                None if is_abstained or is_normal else candidate.target_slug
+            ),
         )
 
 
@@ -343,19 +424,46 @@ def fit_knn_model(
     training_frame: pd.DataFrame,
     *,
     dataset_id: str,
+    training_partition_sha256: str,
+    validation_frame: pd.DataFrame | None = None,
+    validation_partition_sha256: str | None = None,
     normal_target_labels: Sequence[str] = (),
     default_top_k: int = DEFAULT_TOP_K,
+    distance_quantile: float = KNN_DISTANCE_QUANTILE,
+    vote_margin_quantile: float = KNN_VOTE_MARGIN_QUANTILE,
+    minimum_class_count: int = KNN_MINIMUM_CLASS_COUNT,
 ) -> InMemoryKnnModel:
-    """Fit ``StandardScaler`` exclusively on one canonical train partition."""
+    """Fit train-only preprocessing and a test-blind abstention policy."""
 
     _validate_feature_contract()
     _require_sha256(dataset_id, KnnTrainingError)
+    _require_sha256(training_partition_sha256, KnnTrainingError)
     _validate_top_k(default_top_k, KnnTrainingError)
+    _validate_policy_configuration(
+        distance_quantile=distance_quantile,
+        vote_margin_quantile=vote_margin_quantile,
+        minimum_class_count=minimum_class_count,
+        error_type=KnnTrainingError,
+    )
+    if (validation_frame is None) != (validation_partition_sha256 is None):
+        raise KnnTrainingError(
+            "Validation calibration requires both a frame and its SHA-256."
+        )
+    if validation_partition_sha256 is not None:
+        _require_sha256(validation_partition_sha256, KnnTrainingError)
+        if validation_partition_sha256 == training_partition_sha256:
+            raise KnnTrainingError(
+                "Train and validation partition identities must be distinct."
+            )
     expected_columns = (*ANALYSIS_FEATURE_NAMES, "y")
     if tuple(training_frame.columns) != expected_columns:
         raise KnnTrainingError("Training columns do not match the canonical order.")
     if training_frame.empty:
         raise KnnTrainingError("Training data cannot be empty.")
+    if validation_frame is None and len(training_frame) < 2:
+        raise KnnTrainingError(
+            "Leave-one-out calibration requires at least two training samples."
+        )
     if any(
         str(training_frame[name].dtype).lower() != "float64"
         for name in ANALYSIS_FEATURE_NAMES
@@ -394,11 +502,52 @@ def fit_knn_model(
     if transformed.shape != matrix.shape or not np.isfinite(transformed).all():
         raise KnnTrainingError("Training preprocessing produced invalid values.")
 
+    if validation_frame is None:
+        calibration_vectors = transformed
+        calibration_partition = "train_leave_one_out"
+        calibration_partition_sha256 = training_partition_sha256
+        calibration_neighbor_refs: TextVector | None = neighbor_refs
+    else:
+        calibration_matrix = _calibration_feature_matrix(validation_frame)
+        try:
+            calibration_vectors = np.asarray(
+                preprocessor.transform(calibration_matrix),
+                dtype=_VECTOR_DTYPE,
+                order="C",
+            )
+        except (TypeError, ValueError):
+            raise KnnTrainingError("Validation preprocessing failed.") from None
+        if (
+            calibration_vectors.shape != calibration_matrix.shape
+            or not np.isfinite(calibration_vectors).all()
+        ):
+            raise KnnTrainingError("Validation preprocessing produced invalid values.")
+        calibration_partition = "validation"
+        calibration_partition_sha256 = cast(str, validation_partition_sha256)
+        calibration_neighbor_refs = None
+
+    abstention_policy = _fit_abstention_policy(
+        calibration_vectors=calibration_vectors,
+        calibration_neighbor_refs=calibration_neighbor_refs,
+        calibration_partition=calibration_partition,
+        calibration_partition_sha256=calibration_partition_sha256,
+        training_vectors=transformed,
+        target_indices=target_indices,
+        neighbor_refs=neighbor_refs,
+        labels=labels,
+        top_k=default_top_k,
+        distance_quantile=distance_quantile,
+        vote_margin_quantile=vote_margin_quantile,
+        minimum_class_count=minimum_class_count,
+    )
+
     return InMemoryKnnModel(
         dataset_id=dataset_id,
         labels=labels,
         normal_target_labels=normal,
         default_top_k=default_top_k,
+        training_partition_sha256=training_partition_sha256,
+        abstention_policy=abstention_policy,
         preprocessor=preprocessor,
         training_vectors=transformed,
         target_indices=target_indices,
@@ -515,6 +664,9 @@ def load_knn_model(
         )
     )
     configuration = _mapping(manifest["configuration"], "configuration")
+    abstention_policy = _policy_from_manifest(
+        _mapping(manifest["abstention_policy"], "abstention_policy")
+    )
     normal = tuple(
         _text(item, "normal_target_labels")
         for item in _sequence(
@@ -528,6 +680,11 @@ def load_knn_model(
         labels=labels,
         normal_target_labels=normal,
         default_top_k=_integer(configuration["default_top_k"], "default_top_k"),
+        training_partition_sha256=_require_sha256(
+            _mapping(manifest["training"], "training")["partition_sha256"],
+            KnnArtifactError,
+        ),
+        abstention_policy=abstention_policy,
         preprocessor=preprocessor,
         training_vectors=vectors,
         target_indices=target_indices,
@@ -569,6 +726,140 @@ def _ordered_feature_vector(features: Mapping[str, float]) -> FloatVector:
             raise KnnInputError("Inference features must be finite numbers.")
         values.append(number)
     return np.asarray(values, dtype=_VECTOR_DTYPE)
+
+
+def _calibration_feature_matrix(frame: pd.DataFrame) -> FloatMatrix:
+    expected_columns = (*ANALYSIS_FEATURE_NAMES, "y")
+    if tuple(frame.columns) != expected_columns or frame.empty:
+        raise KnnTrainingError(
+            "Validation columns must match the non-empty canonical partition."
+        )
+    if any(
+        str(frame[name].dtype).lower() != "float64" for name in ANALYSIS_FEATURE_NAMES
+    ):
+        raise KnnTrainingError("Validation feature dtypes are incompatible.")
+    try:
+        matrix = np.asarray(
+            frame.loc[:, list(ANALYSIS_FEATURE_NAMES)].to_numpy(copy=True),
+            dtype=_VECTOR_DTYPE,
+            order="C",
+        )
+    except (TypeError, ValueError):
+        raise KnnTrainingError("Validation features are invalid.") from None
+    if (
+        matrix.shape != (len(frame), ANALYSIS_FEATURE_COUNT)
+        or not np.isfinite(matrix).all()
+    ):
+        raise KnnTrainingError("Validation features must be finite and canonical.")
+    return matrix
+
+
+def _fit_abstention_policy(
+    *,
+    calibration_vectors: FloatMatrix,
+    calibration_neighbor_refs: TextVector | None,
+    calibration_partition: str,
+    calibration_partition_sha256: str,
+    training_vectors: FloatMatrix,
+    target_indices: TargetIndexVector,
+    neighbor_refs: TextVector,
+    labels: tuple[KnnLabel, ...],
+    top_k: int,
+    distance_quantile: float,
+    vote_margin_quantile: float,
+    minimum_class_count: int,
+) -> KnnAbstentionPolicy:
+    if calibration_vectors.ndim != 2 or len(calibration_vectors) <= 0:
+        raise KnnTrainingError("Abstention calibration partition is empty.")
+    sample_indices = _calibration_indices(len(calibration_vectors))
+    nearest_distances: list[float] = []
+    vote_margins: list[float] = []
+    for index in sample_indices:
+        excluded_ref = (
+            None
+            if calibration_neighbor_refs is None
+            else str(calibration_neighbor_refs[index])
+        )
+        neighbors = _nearest_neighbors(
+            calibration_vectors[index],
+            training_vectors=training_vectors,
+            target_indices=target_indices,
+            neighbor_refs=neighbor_refs,
+            labels=labels,
+            top_k=top_k,
+            error_type=KnnTrainingError,
+            excluded_neighbor_ref=excluded_ref,
+        )
+        _target, _share, margin = _select_candidate(neighbors)
+        nearest_distances.append(neighbors[0].distance)
+        vote_margins.append(margin)
+
+    fitted_margin = float(
+        np.quantile(vote_margins, vote_margin_quantile, method="lower")
+    )
+    policy = KnnAbstentionPolicy(
+        version=KNN_ABSTENTION_POLICY_VERSION,
+        distance_threshold=float(
+            np.quantile(nearest_distances, distance_quantile, method="higher")
+        ),
+        vote_margin_threshold=(
+            float(np.nextafter(1.0, 0.0)) if fitted_margin == 1.0 else fitted_margin
+        ),
+        minimum_class_count=minimum_class_count,
+        calibration_partition=calibration_partition,
+        calibration_partition_sha256=calibration_partition_sha256,
+        calibration_sample_count=len(sample_indices),
+        distance_quantile=distance_quantile,
+        vote_margin_quantile=vote_margin_quantile,
+        sampling=_CALIBRATION_SAMPLING,
+    )
+    _validate_abstention_policy(policy, KnnTrainingError)
+    return policy
+
+
+def _calibration_indices(row_count: int) -> tuple[int, ...]:
+    sample_count = min(row_count, KNN_CALIBRATION_SAMPLE_LIMIT)
+    if sample_count == 1:
+        return (0,)
+    return tuple(
+        index * (row_count - 1) // (sample_count - 1) for index in range(sample_count)
+    )
+
+
+def _nearest_neighbors(
+    transformed: FloatVector,
+    *,
+    training_vectors: FloatMatrix,
+    target_indices: TargetIndexVector,
+    neighbor_refs: TextVector,
+    labels: tuple[KnnLabel, ...],
+    top_k: int,
+    error_type: type[KnnError],
+    excluded_neighbor_ref: str | None = None,
+) -> tuple[KnnCandidateNeighbor, ...]:
+    with np.errstate(over="ignore", invalid="ignore"):
+        differences = training_vectors - transformed
+        distances = np.linalg.norm(differences, axis=1)
+    if distances.shape != (len(training_vectors),) or not np.isfinite(distances).all():
+        raise error_type("Inference distance calculation failed.")
+    order = np.lexsort((neighbor_refs, distances))
+    selected = [
+        int(index)
+        for index in order
+        if excluded_neighbor_ref is None
+        or str(neighbor_refs[index]) != excluded_neighbor_ref
+    ][: min(top_k, len(training_vectors))]
+    if not selected:
+        raise error_type("Model has no eligible calibration neighbors.")
+    return tuple(
+        KnnCandidateNeighbor(
+            neighbor_ref=str(neighbor_refs[index]),
+            rank=rank,
+            target_slug=labels[int(target_indices[index])].target_slug,
+            distance=float(distances[index]),
+        )
+        for rank, index in enumerate(selected, start=1)
+    )
 
 
 def _training_targets(series: pd.Series) -> tuple[str, ...]:
@@ -632,7 +923,7 @@ def _build_neighbor_refs(dataset_id: str, targets: tuple[str, ...]) -> TextVecto
 
 def _select_candidate(
     neighbors: tuple[KnnCandidateNeighbor, ...],
-) -> tuple[str, float]:
+) -> tuple[str, float, float]:
     if not neighbors:
         raise KnnConfigurationError("Model has no neighbors.")
     counts = Counter(item.target_slug for item in neighbors)
@@ -647,7 +938,45 @@ def _select_candidate(
             target,
         ),
     )
-    return winner, counts[winner] / len(neighbors)
+    winning_count = counts[winner]
+    runner_up_count = max(
+        (count for target, count in counts.items() if target != winner),
+        default=0,
+    )
+    return (
+        winner,
+        winning_count / len(neighbors),
+        (winning_count - runner_up_count) / len(neighbors),
+    )
+
+
+def _abstention_reason(
+    *,
+    policy: KnnAbstentionPolicy,
+    nearest_distance: float,
+    vote_margin: float,
+    class_count: int,
+) -> ModelAbstentionReason | None:
+    if nearest_distance > policy.distance_threshold:
+        return ModelAbstentionReason.DISTANCE_OUT_OF_DISTRIBUTION
+    if class_count < policy.minimum_class_count:
+        return ModelAbstentionReason.RARE_CLASS_SUPPORT
+    if vote_margin <= policy.vote_margin_threshold:
+        return ModelAbstentionReason.INCONCLUSIVE_VOTE
+    return None
+
+
+def _support_score(
+    *,
+    winning_vote_share: float,
+    nearest_distance: float,
+    distance_threshold: float,
+) -> float:
+    if distance_threshold == 0.0:
+        distance_component = 1.0 if nearest_distance == 0.0 else 0.0
+    else:
+        distance_component = 1.0 / (1.0 + nearest_distance / distance_threshold)
+    return round(winning_vote_share * distance_component, 12)
 
 
 def _validate_label_table(
@@ -698,6 +1027,83 @@ def _validate_top_k(value: object, error_type: type[KnnError]) -> int:
     if type(value) is not int or not 1 <= value <= MAX_TOP_K:
         raise error_type("top_k must be an integer within the public limit.")
     return value
+
+
+def _validate_policy_configuration(
+    *,
+    distance_quantile: object,
+    vote_margin_quantile: object,
+    minimum_class_count: object,
+    error_type: type[KnnError],
+) -> None:
+    if (
+        type(distance_quantile) not in {int, float}
+        or not isfinite(float(cast(int | float, distance_quantile)))
+        or not 0.0 < float(cast(int | float, distance_quantile)) < 1.0
+        or type(vote_margin_quantile) not in {int, float}
+        or not isfinite(float(cast(int | float, vote_margin_quantile)))
+        or not 0.0 < float(cast(int | float, vote_margin_quantile)) < 1.0
+        or type(minimum_class_count) is not int
+        or minimum_class_count <= 0
+    ):
+        raise error_type("Abstention policy configuration is invalid.")
+
+
+def _validate_abstention_policy(
+    policy: KnnAbstentionPolicy,
+    error_type: type[KnnError],
+) -> None:
+    if type(policy) is not KnnAbstentionPolicy:
+        raise error_type("Abstention policy type is incompatible.")
+    _validate_policy_configuration(
+        distance_quantile=policy.distance_quantile,
+        vote_margin_quantile=policy.vote_margin_quantile,
+        minimum_class_count=policy.minimum_class_count,
+        error_type=error_type,
+    )
+    _require_sha256(policy.calibration_partition_sha256, error_type)
+    if (
+        type(policy.version) is not int
+        or policy.version != KNN_ABSTENTION_POLICY_VERSION
+        or type(policy.distance_threshold) is not float
+        or not isfinite(policy.distance_threshold)
+        or policy.distance_threshold < 0.0
+        or type(policy.vote_margin_threshold) is not float
+        or not isfinite(policy.vote_margin_threshold)
+        or not 0.0 <= policy.vote_margin_threshold <= 1.0
+        or type(policy.calibration_partition) is not str
+        or policy.calibration_partition not in {"train_leave_one_out", "validation"}
+        or type(policy.calibration_sample_count) is not int
+        or not 1 <= policy.calibration_sample_count <= KNN_CALIBRATION_SAMPLE_LIMIT
+        or type(policy.sampling) is not str
+        or policy.sampling != _CALIBRATION_SAMPLING
+    ):
+        raise error_type("Abstention policy is incompatible.")
+
+
+def _validate_abstention_policy_binding(
+    policy: KnnAbstentionPolicy,
+    *,
+    training_partition_sha256: str,
+    training_sample_count: int,
+    error_type: type[KnnError],
+) -> None:
+    _require_sha256(training_partition_sha256, error_type)
+    if type(training_sample_count) is not int or training_sample_count <= 0:
+        raise error_type("Abstention policy binding is incompatible.")
+    if policy.calibration_partition == "train_leave_one_out":
+        expected_sample_count = min(
+            training_sample_count,
+            KNN_CALIBRATION_SAMPLE_LIMIT,
+        )
+        if (
+            training_sample_count < 2
+            or policy.calibration_partition_sha256 != training_partition_sha256
+            or policy.calibration_sample_count != expected_sample_count
+        ):
+            raise error_type("Abstention policy binding is incompatible.")
+    elif policy.calibration_partition_sha256 == training_partition_sha256:
+        raise error_type("Abstention policy binding is incompatible.")
 
 
 def _preprocessor_state(
@@ -826,11 +1232,18 @@ def _configuration(model: InMemoryKnnModel) -> dict[str, object]:
         "metric": KNN_METRIC,
         "default_top_k": model.default_top_k,
         "max_top_k": MAX_TOP_K,
+        "decision_top_k_source": "default_top_k",
+        "requested_top_k_role": "evidence_only",
         "distance_order": "distance_ascending",
         "distance_tie_break": _DISTANCE_TIE_BREAK,
         "class_tie_break": _CLASS_TIE_BREAK,
         "support_heuristic": KNN_SUPPORT_HEURISTIC,
+        "support_components": ["winning_vote_share", "nearest_neighbor_distance"],
         "support_is_probability": False,
+        "distance_abstention_boundary": "greater_than_threshold",
+        "vote_margin_abstention_boundary": "less_than_or_equal_to_threshold",
+        "rare_class_abstention_boundary": "less_than_minimum_class_count",
+        "test_partition_usage": "forbidden",
         "preprocessor": _PREPROCESSOR,
         "preprocessor_fit_partition": "train",
         "imputation": _IMPUTATION,
@@ -844,6 +1257,21 @@ def _preprocessor_payload(state: KnnPreprocessorState) -> dict[str, object]:
         "scale": list(state.scale),
         "variance": list(state.variance),
         "sample_count": state.sample_count,
+    }
+
+
+def _abstention_policy_payload(policy: KnnAbstentionPolicy) -> dict[str, object]:
+    return {
+        "version": policy.version,
+        "distance_threshold": policy.distance_threshold,
+        "vote_margin_threshold": policy.vote_margin_threshold,
+        "minimum_class_count": policy.minimum_class_count,
+        "calibration_partition": policy.calibration_partition,
+        "calibration_partition_sha256": policy.calibration_partition_sha256,
+        "calibration_sample_count": policy.calibration_sample_count,
+        "distance_quantile": policy.distance_quantile,
+        "vote_margin_quantile": policy.vote_margin_quantile,
+        "sampling": policy.sampling,
     }
 
 
@@ -866,9 +1294,11 @@ def _identity(model: InMemoryKnnModel) -> dict[str, object]:
         "dataset_id": model.dataset_id,
         "compatibility": _compatibility(),
         "configuration": _configuration(model),
+        "abstention_policy": _abstention_policy_payload(model.abstention_policy),
         "preprocessor": _preprocessor_payload(model.preprocessor_state),
         "labels": _label_payload(model.labels),
         "training": {
+            "partition_sha256": model.training_partition_sha256,
             "sample_count": model.sample_count,
             "feature_count": ANALYSIS_FEATURE_COUNT,
             "array_logical_sha256": dict(
@@ -918,9 +1348,11 @@ def _manifest(
         "dataset_id": model.dataset_id,
         "compatibility": _compatibility(),
         "configuration": _configuration(model),
+        "abstention_policy": _abstention_policy_payload(model.abstention_policy),
         "preprocessor": _preprocessor_payload(model.preprocessor_state),
         "labels": _label_payload(model.labels),
         "training": {
+            "partition_sha256": model.training_partition_sha256,
             "sample_count": model.sample_count,
             "feature_count": ANALYSIS_FEATURE_COUNT,
             "arrays": array_entries,
@@ -952,6 +1384,58 @@ def _state_from_manifest(value: Mapping[str, object]) -> KnnPreprocessorState:
     return state
 
 
+def _policy_from_manifest(value: Mapping[str, object]) -> KnnAbstentionPolicy:
+    _exact_keys(
+        value,
+        (
+            "version",
+            "distance_threshold",
+            "vote_margin_threshold",
+            "minimum_class_count",
+            "calibration_partition",
+            "calibration_partition_sha256",
+            "calibration_sample_count",
+            "distance_quantile",
+            "vote_margin_quantile",
+            "sampling",
+        ),
+    )
+    policy = KnnAbstentionPolicy(
+        version=_integer(value["version"], "abstention_policy.version"),
+        distance_threshold=_finite_float(
+            value["distance_threshold"], "abstention_policy.distance_threshold"
+        ),
+        vote_margin_threshold=_finite_float(
+            value["vote_margin_threshold"],
+            "abstention_policy.vote_margin_threshold",
+        ),
+        minimum_class_count=_integer(
+            value["minimum_class_count"], "abstention_policy.minimum_class_count"
+        ),
+        calibration_partition=_text(
+            value["calibration_partition"],
+            "abstention_policy.calibration_partition",
+        ),
+        calibration_partition_sha256=_require_sha256(
+            value["calibration_partition_sha256"], KnnArtifactError
+        ),
+        calibration_sample_count=_integer(
+            value["calibration_sample_count"],
+            "abstention_policy.calibration_sample_count",
+        ),
+        distance_quantile=_finite_float(
+            value["distance_quantile"], "abstention_policy.distance_quantile"
+        ),
+        vote_margin_quantile=_finite_float(
+            value["vote_margin_quantile"],
+            "abstention_policy.vote_margin_quantile",
+        ),
+        sampling=_text(value["sampling"], "abstention_policy.sampling"),
+    )
+    _validate_abstention_policy(policy, KnnArtifactError)
+    return policy
+
+
 def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
     _exact_keys(
         manifest,
@@ -964,6 +1448,7 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
             "dataset_id",
             "compatibility",
             "configuration",
+            "abstention_policy",
             "preprocessor",
             "labels",
             "training",
@@ -994,11 +1479,18 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
             "metric",
             "default_top_k",
             "max_top_k",
+            "decision_top_k_source",
+            "requested_top_k_role",
             "distance_order",
             "distance_tie_break",
             "class_tie_break",
             "support_heuristic",
+            "support_components",
             "support_is_probability",
+            "distance_abstention_boundary",
+            "vote_margin_abstention_boundary",
+            "rare_class_abstention_boundary",
+            "test_partition_usage",
             "preprocessor",
             "preprocessor_fit_partition",
             "imputation",
@@ -1008,17 +1500,30 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
     if (
         configuration["metric"] != KNN_METRIC
         or configuration["max_top_k"] != MAX_TOP_K
+        or configuration["decision_top_k_source"] != "default_top_k"
+        or configuration["requested_top_k_role"] != "evidence_only"
         or configuration["distance_order"] != "distance_ascending"
         or configuration["distance_tie_break"] != _DISTANCE_TIE_BREAK
         or configuration["class_tie_break"] != _CLASS_TIE_BREAK
         or configuration["support_heuristic"] != KNN_SUPPORT_HEURISTIC
+        or configuration["support_components"]
+        != ["winning_vote_share", "nearest_neighbor_distance"]
         or configuration["support_is_probability"] is not False
+        or configuration["distance_abstention_boundary"] != "greater_than_threshold"
+        or configuration["vote_margin_abstention_boundary"]
+        != "less_than_or_equal_to_threshold"
+        or configuration["rare_class_abstention_boundary"]
+        != "less_than_minimum_class_count"
+        or configuration["test_partition_usage"] != "forbidden"
         or configuration["preprocessor"] != _PREPROCESSOR
         or configuration["preprocessor_fit_partition"] != "train"
         or configuration["imputation"] != _IMPUTATION
     ):
         raise KnnArtifactError("Model configuration is incompatible.")
     _validate_top_k(configuration["default_top_k"], KnnArtifactError)
+    policy = _policy_from_manifest(
+        _mapping(manifest["abstention_policy"], "abstention_policy")
+    )
 
     labels = _sequence(manifest["labels"], "labels")
     if not labels:
@@ -1028,10 +1533,22 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
         _exact_keys(label, ("target_slug", "fault_code", "is_normal"))
 
     training = _mapping(manifest["training"], "training")
-    _exact_keys(training, ("sample_count", "feature_count", "arrays"))
+    _exact_keys(
+        training,
+        ("partition_sha256", "sample_count", "feature_count", "arrays"),
+    )
+    training_partition_sha256 = _require_sha256(
+        training["partition_sha256"], KnnArtifactError
+    )
     sample_count = _integer(training["sample_count"], "sample_count")
     if sample_count <= 0 or training["feature_count"] != ANALYSIS_FEATURE_COUNT:
         raise KnnArtifactError("Model training metadata is invalid.")
+    _validate_abstention_policy_binding(
+        policy,
+        training_partition_sha256=training_partition_sha256,
+        training_sample_count=sample_count,
+        error_type=KnnArtifactError,
+    )
     arrays = tuple(
         _mapping(item, "array") for item in _sequence(training["arrays"], "arrays")
     )
