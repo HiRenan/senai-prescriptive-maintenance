@@ -1,0 +1,7 @@
+aws_account_id          = "000000000000"
+frontend_domain_name    = "demo.example.invalid"
+frontend_certificate_arn = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-4000-8000-000000000000"
+api_desired_count       = 2
+api_image_digest        = "latest"
+budget_alert_email      = "not-an-email"
+monthly_budget_usd      = 17

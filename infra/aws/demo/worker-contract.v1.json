@@ -1,0 +1,63 @@
+{
+  "$id": "urn:senai:prescriptive-maintenance:worker-message:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_prefix": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "document": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "maxLength": 63,
+          "minLength": 3,
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "version_id": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "bucket",
+        "key",
+        "version_id",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "enqueued_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "job_id": {
+      "pattern": "^job_[a-z0-9]{12,64}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "worker-message.v1"
+    }
+  },
+  "required": [
+    "schema_version",
+    "job_id",
+    "enqueued_at",
+    "document",
+    "artifact_prefix"
+  ],
+  "title": "Prescriptive maintenance demo worker message",
+  "type": "object"
+}

@@ -1,0 +1,5 @@
+bucket       = "senai-pm-tfstate-example-000000000000"
+key          = "demo/sen-67/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true
