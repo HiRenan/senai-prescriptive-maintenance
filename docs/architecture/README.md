@@ -92,7 +92,7 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 - **Contrato de análise:** schemas, portas e orquestração são executáveis, mas os
   resultados vêm somente de fakes sintéticos; vizinhos pertencem ao modelo e
   citações pertencem à evidência documental, com referências opacas de documento,
-  versão e chunk, sem texto bruto.
+  versão e chunk e página positiva, sem título, caminho ou texto bruto.
 - **Persistência:** o banco está disponível localmente, mas não existe cliente,
   repositório, migração ou persistência integrada ao backend.
 - **Web:** `apps/web` reserva o limite do workspace; não existe frontend.

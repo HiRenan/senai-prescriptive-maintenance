@@ -275,22 +275,19 @@
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_01",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 1"
+                          "page_number": 1
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_02",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 2"
+                          "page_number": 2
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_03",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 3"
+                          "page_number": 3
                         }
                       ],
                       "warnings": []
@@ -433,22 +430,19 @@
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_01",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 1"
+                          "page_number": 1
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_02",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 2"
+                          "page_number": 2
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_03",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 3"
+                          "page_number": 3
                         }
                       ],
                       "warnings": [
@@ -602,22 +596,19 @@
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_01",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 1"
+                          "page_number": 1
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_02",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 2"
+                          "page_number": 2
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_03",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 3"
+                          "page_number": 3
                         }
                       ],
                       "warnings": []
@@ -760,22 +751,19 @@
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_01",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 1"
+                          "page_number": 1
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_02",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 2"
+                          "page_number": 2
                         },
                         {
                           "document_id": "doc_synthetic_manual",
                           "document_version": "docver_synthetic_manual_v1",
                           "chunk": "chunk_synthetic_manual_03",
-                          "title": "Manual sintético de manutenção",
-                          "locator": "Seção sintética 3"
+                          "page_number": 3
                         }
                       ],
                       "warnings": [
@@ -1275,35 +1263,6 @@
   },
   "components": {
     "schemas": {
-      "Abstention": {
-        "properties": {
-          "reason": {
-            "$ref": "#/components/schemas/AbstentionReason"
-          },
-          "message": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Message"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "reason",
-          "message"
-        ],
-        "title": "Abstention"
-      },
-      "AbstentionReason": {
-        "type": "string",
-        "enum": [
-          "undocumented_fault",
-          "out_of_distribution",
-          "dependency_unavailable"
-        ],
-        "title": "AbstentionReason"
-      },
       "AnalysisFeatures": {
         "properties": {
           "z_rms_velocity_mm_s": {
@@ -1607,17 +1566,10 @@
             "pattern": "^chunk_[a-z0-9_]{3,64}$",
             "title": "Chunk"
           },
-          "title": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Title"
-          },
-          "locator": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Locator"
+          "page_number": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page Number"
           }
         },
         "additionalProperties": false,
@@ -1626,11 +1578,10 @@
           "document_id",
           "document_version",
           "chunk",
-          "title",
-          "locator"
+          "page_number"
         ],
         "title": "Citation",
-        "description": "Auditable opaque location without source paths or raw document text."
+        "description": "Auditable structured location without paths, titles, or raw text."
       },
       "DegradedAnalysisResult": {
         "properties": {
@@ -1651,7 +1602,7 @@
             "$ref": "#/components/schemas/SufficientSupport"
           },
           "abstention": {
-            "$ref": "#/components/schemas/Abstention"
+            "$ref": "#/components/schemas/DependencyUnavailableAbstention"
           },
           "model_id": {
             "type": "string",
@@ -1702,6 +1653,28 @@
           "warnings"
         ],
         "title": "DegradedAnalysisResult"
+      },
+      "DependencyUnavailableAbstention": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "const": "dependency_unavailable",
+            "title": "Reason"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "message"
+        ],
+        "title": "DependencyUnavailableAbstention"
       },
       "Diagnosis": {
         "properties": {
@@ -2159,6 +2132,28 @@
         "title": "OpaqueNeighbor",
         "description": "Ranked model neighbor without row, timestamp, measurement, or vector data."
       },
+      "OutOfDistributionAbstention": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "const": "out_of_distribution",
+            "title": "Reason"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "message"
+        ],
+        "title": "OutOfDistributionAbstention"
+      },
       "OutOfDistributionAnalysisResult": {
         "properties": {
           "analysis_id": {
@@ -2179,7 +2174,7 @@
             "$ref": "#/components/schemas/InsufficientSupport"
           },
           "abstention": {
-            "$ref": "#/components/schemas/Abstention"
+            "$ref": "#/components/schemas/OutOfDistributionAbstention"
           },
           "model_id": {
             "type": "string",
@@ -2713,6 +2708,28 @@
         ],
         "title": "SupersededDocument"
       },
+      "UndocumentedFaultAbstention": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "const": "undocumented_fault",
+            "title": "Reason"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "message"
+        ],
+        "title": "UndocumentedFaultAbstention"
+      },
       "UndocumentedFaultAnalysisResult": {
         "properties": {
           "analysis_id": {
@@ -2732,7 +2749,7 @@
             "$ref": "#/components/schemas/SufficientSupport"
           },
           "abstention": {
-            "$ref": "#/components/schemas/Abstention"
+            "$ref": "#/components/schemas/UndocumentedFaultAbstention"
           },
           "model_id": {
             "type": "string",

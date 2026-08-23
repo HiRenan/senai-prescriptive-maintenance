@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, cast
 
 from prescriptive_maintenance.contracts import (
     AnalysisFeatures,
@@ -17,6 +17,18 @@ from prescriptive_maintenance.contracts import (
 
 class PortUnavailableError(Exception):
     """A sanitized signal that an internal port cannot serve the request."""
+
+
+class PortContractError(Exception):
+    """A sanitized signal that an internal port returned unsafe evidence."""
+
+
+def _validate_citations(value: object) -> None:
+    if not isinstance(value, tuple) or any(
+        not isinstance(citation, Citation)
+        for citation in cast(tuple[object, ...], value)
+    ):
+        raise PortContractError("Retrieval evidence violates the internal contract.")
 
 
 class ModelDisposition(StrEnum):
@@ -39,10 +51,13 @@ class ModelPrediction:
 
 @dataclass(frozen=True, slots=True)
 class DocumentEvidence:
-    """Governed documentary support and citations, never model neighbors."""
+    """Governed structured citations, never paths, titles, text, or neighbors."""
 
     support_score: float
     citations: tuple[Citation, ...]
+
+    def __post_init__(self) -> None:
+        _validate_citations(self.citations)
 
 
 class ModelPort(Protocol):

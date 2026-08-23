@@ -180,8 +180,7 @@ class SyntheticRetrievalPort(RetrievalPort):
                 document_id="doc_synthetic_manual",
                 document_version="docver_synthetic_manual_v1",
                 chunk=f"chunk_synthetic_manual_{rank:02d}",
-                title="Manual sintético de manutenção",
-                locator=f"Seção sintética {rank}",
+                page_number=rank,
             )
             for rank in range(1, top_k + 1)
         )

@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 from prescriptive_maintenance.contracts import (
-    Abstention,
     AbstentionReason,
     AnalysisOutcome,
     AnalysisRequest,
@@ -17,6 +16,7 @@ from prescriptive_maintenance.contracts import (
     ApprovedDocument,
     ApproveDocumentRequest,
     DegradedAnalysisResult,
+    DependencyUnavailableAbstention,
     Document,
     DocumentedFaultAnalysisResult,
     DocumentListResponse,
@@ -24,6 +24,7 @@ from prescriptive_maintenance.contracts import (
     DocumentStatus,
     InsufficientSupport,
     NormalAnalysisResult,
+    OutOfDistributionAbstention,
     OutOfDistributionAnalysisResult,
     ProcessingDocument,
     ReceivedDocument,
@@ -31,6 +32,7 @@ from prescriptive_maintenance.contracts import (
     RejectDocumentRequest,
     RejectedDocument,
     SufficientSupport,
+    UndocumentedFaultAbstention,
     UndocumentedFaultAnalysisResult,
 )
 from prescriptive_maintenance.ports import (
@@ -39,6 +41,7 @@ from prescriptive_maintenance.ports import (
     ModelDisposition,
     ModelPort,
     ModelPrediction,
+    PortContractError,
     PortUnavailableError,
     RetrievalPort,
 )
@@ -136,7 +139,7 @@ class AnalysisService:
                     level="insufficient",
                     support_score=prediction.support_score,
                 ),
-                abstention=Abstention(
+                abstention=OutOfDistributionAbstention(
                     reason=AbstentionReason.OUT_OF_DISTRIBUTION,
                     message=(
                         "A entrada sintética está fora da distribuição suportada."
@@ -185,7 +188,7 @@ class AnalysisService:
 
         try:
             evidence = self._retrieval.retrieve(retrieval_key, top_k=top_k)
-        except PortUnavailableError:
+        except (PortUnavailableError, PortContractError):
             return self._degraded_result(prediction, evidence=None, top_k=top_k)
 
         if not evidence.citations:
@@ -197,7 +200,7 @@ class AnalysisService:
                     level="sufficient",
                     support_score=prediction.support_score,
                 ),
-                abstention=Abstention(
+                abstention=UndocumentedFaultAbstention(
                     reason=AbstentionReason.UNDOCUMENTED_FAULT,
                     message="Não há documentação suficiente para prescrever uma ação.",
                 ),
@@ -262,7 +265,7 @@ class AnalysisService:
                 level="sufficient",
                 support_score=prediction.support_score,
             ),
-            abstention=Abstention(
+            abstention=DependencyUnavailableAbstention(
                 reason=AbstentionReason.DEPENDENCY_UNAVAILABLE,
                 message="A análise parcial não permite uma prescrição segura.",
             ),

@@ -42,7 +42,7 @@ em qualquer resultado quando disponíveis e expõem somente referência, posiç�
 código normalizado da falha e distância padronizada finita não negativa, sem
 limite unitário. Evidências documentais carregam apenas seu suporte documental e
 citações governadas; cada citação identifica documento, versão e chunk por
-referências opacas, mantém um localizador legível e nunca inclui texto bruto.
+referências opacas e uma página positiva, sem título, caminho ou texto bruto.
 `support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
 medida de confiança.
 

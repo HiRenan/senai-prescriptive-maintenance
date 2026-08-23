@@ -15,6 +15,7 @@ from prescriptive_maintenance.contracts import (
     AnalysisFeatures,
     AnalysisRequest,
     AnalysisResponse,
+    Citation,
     Diagnosis,
     DocumentResponse,
     DocumentStatus,
@@ -28,6 +29,7 @@ from prescriptive_maintenance.fakes import (
     SyntheticDocumentService,
     SyntheticGenerationPort,
     SyntheticModelPort,
+    build_synthetic_analysis_service,
 )
 from prescriptive_maintenance.main import create_app
 from prescriptive_maintenance.ports import (
@@ -73,6 +75,18 @@ RESULT_FIELDS = {
 
 def _request_payload(outcome: str) -> dict[str, Any]:
     return SYNTHETIC_ANALYSIS_REQUESTS[outcome].model_dump(mode="json")
+
+
+def _analysis_response_payload(outcome: str) -> dict[str, Any]:
+    return (
+        build_synthetic_analysis_service()
+        .analyze(SYNTHETIC_ANALYSIS_REQUESTS[outcome])
+        .model_dump(mode="json")
+    )
+
+
+def _echo_analysis_response(payload: AnalysisResponse) -> AnalysisResponse:
+    return payload
 
 
 def test_analysis_feature_contract_is_the_single_ordered_source() -> None:
@@ -151,6 +165,41 @@ def test_analysis_outcome_invariants_and_top_k_are_enforced() -> None:
     assert degraded["citations"]
     assert degraded["prescription"] is None
     assert degraded["warnings"]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "crossed_reason"),
+    (
+        ("undocumented_fault", "out_of_distribution"),
+        ("undocumented_fault", "dependency_unavailable"),
+        ("out_of_distribution", "undocumented_fault"),
+        ("out_of_distribution", "dependency_unavailable"),
+        ("degraded", "undocumented_fault"),
+        ("degraded", "out_of_distribution"),
+    ),
+)
+def test_abstention_variants_reject_every_crossed_reason_in_models_and_http(
+    outcome: str,
+    crossed_reason: str,
+) -> None:
+    payload = _analysis_response_payload(outcome)
+    cast(dict[str, Any], payload["abstention"])["reason"] = crossed_reason
+
+    with pytest.raises(ValueError):
+        AnalysisResponse.model_validate(payload)
+
+    application = create_app()
+    application.add_api_route(
+        "/test/analysis-contract",
+        _echo_analysis_response,
+        methods=["POST"],
+        response_model=AnalysisResponse,
+    )
+    with TestClient(application) as client:
+        response = client.post("/test/analysis-contract", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"
 
 
 class NeverCalledPorts:
@@ -279,6 +328,25 @@ class UnavailableRetrievalPort:
         raise PortUnavailableError("synthetic retrieval outage")
 
 
+class UnsafeLocalPathRetrievalPort:
+    def retrieve(self, retrieval_key: str, *, top_k: int) -> DocumentEvidence:
+        del retrieval_key, top_k
+        unsafe_citation = cast(
+            Citation,
+            {
+                "document_id": "doc_synthetic_manual",
+                "document_version": "docver_synthetic_manual_v1",
+                "chunk": "chunk_synthetic_manual_01",
+                "page_number": 1,
+                "local_path": r"C:\private\manual.pdf",
+            },
+        )
+        return DocumentEvidence(
+            support_score=0.88,
+            citations=(unsafe_citation,),
+        )
+
+
 def test_retrieval_unavailability_preserves_model_support_and_neighbors() -> None:
     service = AnalysisService(
         model=SyntheticModelPort(),
@@ -300,6 +368,27 @@ def test_retrieval_unavailability_preserves_model_support_and_neighbors() -> Non
     assert payload["citations"] == []
     assert payload["prescription"] is None
     assert "synthetic retrieval outage" not in response.text
+
+
+def test_retrieval_evidence_with_local_path_is_rejected_and_never_propagated() -> None:
+    service = AnalysisService(
+        model=SyntheticModelPort(),
+        retrieval=UnsafeLocalPathRetrievalPort(),
+        generation=SyntheticGenerationPort(),
+    )
+
+    with TestClient(create_app(analysis_service=service)) as client:
+        response = client.post(
+            "/analysis",
+            json=_request_payload("documented_fault"),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "degraded"
+    assert response.json()["citations"] == []
+    assert "local_path" not in response.text
+    assert "private" not in response.text
+    assert "manual.pdf" not in response.text
 
 
 def test_analysis_query_returns_created_result_and_404_for_unknown_id() -> None:
@@ -376,13 +465,32 @@ def test_public_citations_are_auditable_without_raw_document_content() -> None:
         "document_id",
         "document_version",
         "chunk",
-        "title",
-        "locator",
+        "page_number",
     }
     assert citation["document_version"] == "docver_synthetic_manual_v1"
     assert citation["chunk"] == "chunk_synthetic_manual_01"
-    forbidden = ("text", "content", "source", "path", "embedding", "measurement")
+    assert citation["page_number"] == 1
+    forbidden = (
+        "title",
+        "locator",
+        "text",
+        "content",
+        "source",
+        "path",
+        "embedding",
+        "measurement",
+    )
     assert not any(token in key for token in forbidden for key in citation)
+
+
+def test_citation_page_number_must_be_positive() -> None:
+    with pytest.raises(ValueError):
+        Citation(
+            document_id="doc_synthetic_manual",
+            document_version="docver_synthetic_manual_v1",
+            chunk="chunk_synthetic_manual_01",
+            page_number=0,
+        )
 
 
 def test_document_lifecycle_is_complete_and_registration_is_never_approved() -> None:

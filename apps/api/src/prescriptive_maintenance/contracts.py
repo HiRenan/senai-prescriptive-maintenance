@@ -136,8 +136,18 @@ class AbstentionReason(StrEnum):
     DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
 
 
-class Abstention(ContractModel):
-    reason: AbstentionReason
+class UndocumentedFaultAbstention(ContractModel):
+    reason: Literal[AbstentionReason.UNDOCUMENTED_FAULT]
+    message: Annotated[str, Field(min_length=1, max_length=500)]
+
+
+class OutOfDistributionAbstention(ContractModel):
+    reason: Literal[AbstentionReason.OUT_OF_DISTRIBUTION]
+    message: Annotated[str, Field(min_length=1, max_length=500)]
+
+
+class DependencyUnavailableAbstention(ContractModel):
+    reason: Literal[AbstentionReason.DEPENDENCY_UNAVAILABLE]
     message: Annotated[str, Field(min_length=1, max_length=500)]
 
 
@@ -183,13 +193,12 @@ class Prescription(ContractModel):
 
 
 class Citation(ContractModel):
-    """Auditable opaque location without source paths or raw document text."""
+    """Auditable structured location without paths, titles, or raw text."""
 
     document_id: DocumentId
     document_version: DocumentVersionRef
     chunk: ChunkRef
-    title: Annotated[str, Field(min_length=1, max_length=200)]
-    locator: Annotated[str, Field(min_length=1, max_length=200)]
+    page_number: Annotated[int, Field(ge=1)]
 
 
 class AnalysisWarning(ContractModel):
@@ -234,7 +243,7 @@ class UndocumentedFaultAnalysisResult(ContractModel):
     outcome: Literal[AnalysisOutcome.UNDOCUMENTED_FAULT]
     diagnosis: Diagnosis
     support: SufficientSupport
-    abstention: Abstention
+    abstention: UndocumentedFaultAbstention
     model_id: ModelId
     neighbors: tuple[OpaqueNeighbor, ...] = Field(
         min_length=1,
@@ -250,7 +259,7 @@ class OutOfDistributionAnalysisResult(ContractModel):
     outcome: Literal[AnalysisOutcome.OUT_OF_DISTRIBUTION]
     diagnosis: None = Field(...)
     support: InsufficientSupport
-    abstention: Abstention
+    abstention: OutOfDistributionAbstention
     model_id: ModelId
     neighbors: tuple[OpaqueNeighbor, ...] = Field(max_length=MAX_TOP_K)
     prescription: None = Field(...)
@@ -263,7 +272,7 @@ class DegradedAnalysisResult(ContractModel):
     outcome: Literal[AnalysisOutcome.DEGRADED]
     diagnosis: Diagnosis
     support: SufficientSupport
-    abstention: Abstention
+    abstention: DependencyUnavailableAbstention
     model_id: ModelId
     neighbors: tuple[OpaqueNeighbor, ...] = Field(max_length=MAX_TOP_K)
     prescription: None = Field(...)

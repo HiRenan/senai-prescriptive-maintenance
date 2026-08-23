@@ -115,12 +115,50 @@ def test_openapi_requires_opaque_auditable_citation_references() -> None:
         "document_id",
         "document_version",
         "chunk",
-        "title",
-        "locator",
+        "page_number",
     )
     assert citation["properties"]["document_version"]["pattern"].startswith("^docver_")
     assert citation["properties"]["chunk"]["pattern"].startswith("^chunk_")
-    assert not {"text", "content", "source_path"} & set(citation["properties"])
+    assert citation["properties"]["page_number"]["minimum"] == 1
+    assert citation["additionalProperties"] is False
+    assert not {
+        "title",
+        "locator",
+        "section_ref",
+        "text",
+        "content",
+        "path",
+        "source_path",
+    } & set(citation["properties"])
+
+
+def test_openapi_specializes_abstention_reason_for_each_variant() -> None:
+    schema = json.loads(openapi_bytes())
+    components = schema["components"]["schemas"]
+    expected = {
+        "UndocumentedFaultAnalysisResult": (
+            "UndocumentedFaultAbstention",
+            "undocumented_fault",
+        ),
+        "OutOfDistributionAnalysisResult": (
+            "OutOfDistributionAbstention",
+            "out_of_distribution",
+        ),
+        "DegradedAnalysisResult": (
+            "DependencyUnavailableAbstention",
+            "dependency_unavailable",
+        ),
+    }
+
+    for result_name, (abstention_name, reason) in expected.items():
+        abstention_reference = components[result_name]["properties"]["abstention"]
+        assert abstention_reference["$ref"] == (
+            f"#/components/schemas/{abstention_name}"
+        )
+        abstention = components[abstention_name]
+        assert tuple(abstention["required"]) == ("reason", "message")
+        assert abstention["properties"]["reason"]["const"] == reason
+        assert abstention["additionalProperties"] is False
 
 
 def test_openapi_examples_cover_five_outcomes_and_document_states() -> None:
