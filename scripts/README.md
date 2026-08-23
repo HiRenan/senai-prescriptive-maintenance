@@ -4,6 +4,17 @@ Este diretório contém a automação cross-platform usada pela interface Poe. O
 módulos usam argumentos estruturados e subprocessos sem shell, portanto mantêm
 a mesma invocação no Windows e no Ubuntu.
 
+`public_repository_audit.py` compara os basenames e SHA-256 dos blobs do índice
+e do histórico público alcançável com as identidades protegidas do manifesto.
+Ele exige histórico completo, não percorre arquivos ignorados e emite somente
+contagens ou códigos sanitizados. A matriz SEN-66 agrega esse gate às regressões
+de falha segura existentes:
+
+```powershell
+uv run --frozen poe public-repository-audit
+uv run --frozen poe failure-matrix
+```
+
 `container_audit.py` exporta pelo BuildKit os targets `context-audit` da API e
 da web, compara cada arquivo com sua allowlist esperada e executa os targets
 `builder-audit` sem cache. Assim, a auditoria cobre o contexto real enviado ao

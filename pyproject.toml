@@ -82,6 +82,17 @@ sequence = [
 help = "Executa o golden set sintético dos cinco estados e do ciclo documental."
 script = "scripts.product_golden:main()"
 
+[tool.poe.tasks.public-repository-audit]
+help = "Audita nomes e fingerprints protegidos somente nos objetos Git públicos."
+cmd = "python -m scripts.public_repository_audit ${POE_EXTRA_ARGS:+--poe-task-does-not-accept-arguments}"
+
+[tool.poe.tasks.failure-matrix]
+help = "Executa a matriz SEN-66 e a auditoria sanitizada do repositório público."
+sequence = [
+  { cmd = "pytest --no-cov -m failure_matrix ${POE_EXTRA_ARGS:+--poe-task-does-not-accept-arguments}" },
+  "public-repository-audit",
+]
+
 [tool.poe.tasks.data-build]
 help = "Constrói o dataset canônico local em destino explícito."
 cmd = "python -m prescriptive_maintenance.data.cli build --input ${input} --manifest ${manifest} --inventory ${inventory} --baseline-json ${baseline_json} --baseline-markdown ${baseline_markdown} --lock ${lock} --output ${output}"
@@ -168,6 +179,9 @@ addopts = [
   "--cov=prescriptive_maintenance",
   "--cov-report=term-missing",
   "--cov-fail-under=80",
+]
+markers = [
+  "failure_matrix: regressões P0/P1 da matriz de falha segura SEN-66",
 ]
 testpaths = ["apps/api/tests"]
 

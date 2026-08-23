@@ -444,6 +444,8 @@ sem enfraquecer a fronteira dos materiais locais.
   arquitetura, inventário, custo e evidências offline sanitizadas da SEN-69.
 - [`docs/validation/product-golden-e2e.md`](docs/validation/product-golden-e2e.md):
   golden set, jornadas, gates e métricas determinísticas da SEN-48.
+- [`docs/validation/safe-failure-matrix.md`](docs/validation/safe-failure-matrix.md):
+  falhas seguras, auditoria Git sanitizada e protocolo clean-room da SEN-66.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 - [`infra/aws/demo/delivery/README.md`](infra/aws/demo/delivery/README.md):

@@ -90,6 +90,7 @@ def test_default_engine_uses_error_log_level(monkeypatch: pytest.MonkeyPatch) ->
     assert captured_params == {"Global.log_level": "error"}
 
 
+@pytest.mark.failure_matrix
 def test_sanitizes_engine_failures() -> None:
     class _FailingEngine:
         def __call__(self, image: object) -> object:
