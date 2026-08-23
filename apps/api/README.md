@@ -681,6 +681,40 @@ As saídas do CLI são somente agregados sanitizados. Testes e CI exercitam o
 pipeline exclusivamente com dados sintéticos; derivados reais permanecem
 locais e ignorados.
 
+## Baseline k-NN local
+
+`prescriptive_maintenance.modeling` implementa a baseline determinística da
+SEN-42. `fit_knn_model()` aceita somente uma partição com as 18 features na ordem
+canônica e `y`; qualquer coluna, ordem, tipo ou número não finito divergente é
+recusado. O contrato canônico não admite ausências, portanto a baseline não
+imputa. `StandardScaler` é ajustado exclusivamente no DataFrame de treino
+recebido, e o mesmo estado serializado transforma toda inferência.
+
+A busca exata em memória usa apenas distância euclidiana no espaço padronizado.
+`top_k` respeita o limite público de 1 a 10 e a quantidade de linhas disponível;
+distâncias empatadas usam a referência opaca e votos empatados usam soma de
+distâncias e depois o target canônico. O suporte é somente a proporção de votos
+da classe vencedora no top-k, explicitamente não probabilística.
+
+O núcleo preserva `target_slug` internamente. `KnnModelPortAdapter` traduz cada
+classe por uma tabela bijetiva de `fault_code` seguro, construída no fit,
+validada contra colisões e serializada. `normal_target_labels` é configuração
+explícita e deve ser subconjunto das classes de treino. O adapter produz apenas
+`NORMAL` ou `FAULT`; não implementa abstenção ou `OUT_OF_DISTRIBUTION`.
+
+`save_knn_model()` grava somente `manifest.json` e três arrays `.npy`, sempre em
+destino ignorado quando está dentro de uma worktree. O manifesto fixa schema,
+compatibilidade, configuração, labels, estado completo do `StandardScaler`,
+hashes e `model_id`. `load_knn_model()` usa `allow_pickle=False`, rejeita arquivo
+ausente ou extra, bytes alterados, campos duplicados, versões incompatíveis,
+arrays inválidos e identidade divergente. Os arrays reais contêm derivados por
+registro e nunca devem ser versionados ou publicados.
+
+A aplicação HTTP continua injetando fakes sintéticos; a baseline e seu adapter
+não são conectados às rotas nesta tarefa. As decisões e métricas temporais
+sanitizadas estão em
+[`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md).
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:

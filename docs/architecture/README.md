@@ -17,13 +17,14 @@ ainda não abre conexão com ele.
 | Área | Implementação comprovável | Limite atual |
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live` e rotas do contrato HTTP v1. | A liveness verifica apenas o processo; as demais rotas usam fakes sintéticos injetáveis. |
-| `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | Não contém adapters de modelo, recuperação, geração ou persistência reais. |
+| `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | A aplicação continua injetando fakes; não conecta a baseline nem adapters de recuperação, geração ou persistência reais. |
 | `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates monotônicos de extração/indexação, auditoria append-only com texto seguro, replay semântico exato, relógio UTC injetável e repositório em memória cujo CAS valida o comando e o agregado completos. | Não processa bytes ou chunks, não implementa adapter PostgreSQL e não altera os endpoints do contrato v1. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v1, validação da saída, porta neutra, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não recupera contexto, não faz chamada automática, não lê credenciais, não valida suporte semântico das citações e não contém SDK ou configuração de infraestrutura AWS. |
-| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados e geração, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
+| `apps/api/src/prescriptive_maintenance/modeling/` | Baseline k-NN em memória sobre 18 features, `StandardScaler` de treino, distância euclidiana, adapter `ModelPort` e artefato NumPy/JSON íntegro e versionado. | Não está ligada às rotas, não calibra probabilidade, não se abstém, não faz tuning e não usa banco, pgvector ou GPU. |
+| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados, geração e modelo, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
 | `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da liveness. | Não inclui dependências de desenvolvimento nem integra persistência. |
 | `apps/web` | Workspace privado, servidor HTTP sem dependências, Dockerfile multi-stage e `GET /health/live`. | Não contém UI, framework, componentes, estilos, assets ou comportamento visual. |
 | `.dockerignore` e `apps/*/Dockerfile.dockerignore` | União segura na raiz e allowlists específicas dos manifests, locks e fontes necessários a cada build. | Excluem todo o restante do monorepo dos contextos; a API inclui somente o README exigido pelos metadados Python. |
@@ -38,8 +39,9 @@ ainda não abre conexão com ele.
 | `.github/workflows/security.yml` | CodeQL, revisão de dependências e varredura de segredos. | Revisão de dependências existe somente no evento de pull request. |
 | `.github/dependabot.yml` | Atualizações semanais agrupadas para uv, npm, GitHub Actions e Docker Compose. | Todos os pull requests gerados têm `develop` como destino. |
 
-`pandas`, `pandera`, `pyarrow`, `pypdfium2`, `rapidocr` e `onnxruntime` compõem
-as dependências de produção da camada de dados. PDFium cobre parse, texto nativo
+`pandas`, `pandera`, `pyarrow`, `pypdfium2`, `rapidocr`, `onnxruntime` e
+`scikit-learn` compõem as dependências de produção das camadas de dados e
+modelo. PDFium cobre parse, texto nativo
 e rasterização; o adapter RapidOCR inicializa o engine ONNX local somente quando
 uma página exige OCR, sem serviço ou binário OCR do sistema. `matplotlib` e
 `pandas-stubs` permanecem no grupo de desenvolvimento porque apoiam a inspeção
@@ -113,6 +115,9 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
   resultados vêm somente de fakes sintéticos; vizinhos pertencem ao modelo e
   citações pertencem à evidência documental, com referências opacas de documento,
   versão e chunk e página positiva, sem título, caminho ou texto bruto.
+- **Modelo:** a baseline e o adapter são executáveis e carregáveis localmente,
+  mas a aplicação HTTP não os instancia; seus artefatos reais permanecem
+  ignorados e somente as métricas agregadas sanitizadas são públicas.
 - **Persistência:** há repositórios locais em memória para o ciclo documental
   com CAS e para chunks, além de contrato de escrita pgvector injetável para
   chunks; não existe cliente, SQL, migração ou persistência integrada ao banco
@@ -134,9 +139,10 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou pipeline de transformação tabular da aplicação;
 - esquema da aplicação, migrações e persistência integrada;
-- adapters reais de modelo ou recuperação, embedding semântico, conexão
-  pgvector da aplicação, busca por similaridade, recuperação governada de
-  contexto, execução RAG integrada ou configuração operacional de LLM;
+- integração operacional do adapter de modelo, adapters reais de recuperação,
+  embedding semântico, índice vetorial, conexão pgvector e uso de vetores pela
+  aplicação, busca por similaridade, recuperação governada de contexto,
+  execução RAG integrada ou configuração operacional de LLM;
 - autenticação, autorização e endpoint de readiness;
 - frontend, experiência de usuário ou assets visuais;
 - recursos AWS, deploy, ambiente de produção ou observabilidade operacional.

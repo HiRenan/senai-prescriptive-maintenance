@@ -88,6 +88,10 @@ A versão atual contém:
   de inferência, ledger completo de disposições, agrupamento temporal de
   ocorrências independente do target, partições cronológicas com purga e
   estatísticas IQR ajustadas somente em treino;
+- uma baseline k-NN local e determinística sobre as mesmas 18 features, com
+  `StandardScaler` ajustado somente no treino, distância euclidiana, desempates
+  totais, adapter da porta de modelo e artefato NumPy/JSON versionado, íntegro e
+  sem desserialização executável;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -96,8 +100,8 @@ A versão atual contém:
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, execução de modelo ou busca real por vizinhos, vetores integrados
-à aplicação, recuperação de contexto, execução RAG integrada, chamada
+aplicação, integração da baseline ao fluxo HTTP, índice vetorial, vetores
+integrados à aplicação, recuperação de contexto, execução RAG integrada, chamada
 automática a LLM, autenticação, persistência integrada, readiness,
 infraestrutura AWS, deploy ou interface web.
 
@@ -338,8 +342,9 @@ implementadas**:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou orquestração do pipeline pela aplicação;
 - persistência da aplicação no PostgreSQL e uso de vetores pelo backend;
-- busca por similaridade, recuperação governada de contexto, execução RAG
-  integrada ou configuração operacional de LLM;
+- integração da busca por similaridade ao fluxo HTTP, índice vetorial,
+  recuperação governada de contexto, execução RAG integrada ou configuração
+  operacional de LLM;
 - autenticação, autorização, readiness e observabilidade de produção;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de
