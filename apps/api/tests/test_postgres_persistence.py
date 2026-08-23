@@ -31,6 +31,20 @@ from persistence_samples import (
     synthetic_offset_datetime_document,
     synthetic_tainted_scalar_aggregates,
 )
+from prescriptive_maintenance.contracts import (
+    ApprovedDocument,
+    ApproveDocumentRequest,
+    ReceivedDocument,
+    RegisterDocumentRequest,
+)
+from prescriptive_maintenance.document_lifecycle import (
+    DocumentGovernanceService,
+    ProcessingStep,
+    SystemUtcClock,
+)
+from prescriptive_maintenance.document_registry import (
+    GovernedDocumentLifecycleService,
+)
 from prescriptive_maintenance.domain import AnalysisOutcome
 from prescriptive_maintenance.persistence import (
     LATEST_MIGRATION_VERSION,
@@ -41,6 +55,7 @@ from prescriptive_maintenance.persistence import (
     PersistenceConflictError,
     PersistenceIntegrityError,
     PostgresConnectionFactory,
+    PostgresDocumentRegistryRepository,
     PostgresDocumentRepository,
     PostgresUnitOfWork,
     TransactionRollbackOnlyError,
@@ -49,9 +64,14 @@ from prescriptive_maintenance.persistence import (
     downgrade,
     upgrade,
 )
+from prescriptive_maintenance.persistence import document_registry as registry_adapter
 from prescriptive_maintenance.persistence.migrations import (
     PostgresConnection,
     PostgresRow,
+)
+from prescriptive_maintenance.services import (
+    DocumentConflictError,
+    DocumentServiceUnavailableError,
 )
 from psycopg import Connection, sql
 from psycopg.errors import CheckViolation
@@ -67,6 +87,9 @@ _APPLICATION_TABLES: Final = {
     "document_versions",
     "chunk_references",
     "evidence_references",
+    "document_lifecycle_registries",
+    "document_lifecycle_versions",
+    "document_lifecycle_events",
 }
 _EXPECTED_COLUMNS: Final = {
     "analyses": {
@@ -98,6 +121,44 @@ _EXPECTED_COLUMNS: Final = {
         "document_version_id",
         "chunk_ref",
         "ordinal",
+    },
+    "document_lifecycle_registries": {
+        "logical_document_id",
+        "canonical_filename",
+        "display_filename",
+        "revision",
+        "current_version",
+    },
+    "document_lifecycle_versions": {
+        "logical_document_id",
+        "version_number",
+        "document_id",
+        "document_version_id",
+        "media_type",
+        "size_bytes",
+        "status",
+        "extraction_status",
+        "indexing_status",
+        "updated_at",
+        "failure_step",
+        "failure_code",
+        "failure_reason",
+        "failure_actor",
+        "failure_occurred_at",
+        "superseded_by_version",
+    },
+    "document_lifecycle_events": {
+        "logical_document_id",
+        "sequence",
+        "version_number",
+        "action",
+        "source_status",
+        "target_status",
+        "occurred_at",
+        "actor",
+        "reason",
+        "step",
+        "failure_code",
     },
 }
 
@@ -953,3 +1014,229 @@ def test_invalid_reference_and_failure_roll_back_entire_postgres_transaction(
 def test_standard_memory_adapter_does_not_require_postgres() -> None:
     with InMemoryUnitOfWork() as unit_of_work:
         assert unit_of_work.analyses.get("ana_synthetic_absent") is None
+
+
+def _registry_request(
+    *,
+    filename: str = "registry.synthetic.pdf",
+    sha256: str = "d" * 64,
+) -> RegisterDocumentRequest:
+    return RegisterDocumentRequest(
+        filename=filename,
+        media_type="application/pdf",
+        size_bytes=768,
+        sha256=sha256,
+    )
+
+
+def _postgres_registry_service(
+    connection_factory: PostgresConnectionFactory,
+) -> tuple[
+    GovernedDocumentLifecycleService,
+    PostgresDocumentRegistryRepository,
+    SystemUtcClock,
+]:
+    repository = PostgresDocumentRegistryRepository(connection_factory)
+    clock = SystemUtcClock()
+    return (
+        GovernedDocumentLifecycleService(repository=repository, clock=clock),
+        repository,
+        clock,
+    )
+
+
+def _upgrade_registry_schema(
+    connection_factory: PostgresConnectionFactory,
+) -> None:
+    connection = connection_factory()
+    try:
+        upgrade(connection)
+    finally:
+        connection.close()
+
+
+def _registry_row_counts(
+    connection_factory: PostgresConnectionFactory,
+) -> tuple[int, int, int, int, int]:
+    connection = connection_factory()
+    try:
+        with connection.transaction():
+            values: list[int] = []
+            for table_name in (
+                "documents",
+                "document_versions",
+                "document_lifecycle_registries",
+                "document_lifecycle_versions",
+                "document_lifecycle_events",
+            ):
+                row = connection.execute(
+                    sql.SQL("SELECT count(*) AS count FROM {}").format(
+                        sql.Identifier(table_name)
+                    )
+                ).fetchone()
+                assert row is not None
+                values.append(cast(int, row["count"]))
+        return cast(tuple[int, int, int, int, int], tuple(values))
+    finally:
+        connection.close()
+
+
+def test_postgres_registry_reconstructs_exact_replay_after_repository_restart(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    _upgrade_registry_schema(postgres_connection_factory)
+    first_service, _, _ = _postgres_registry_service(postgres_connection_factory)
+    registered = first_service.register(_registry_request())
+
+    restarted_service, restarted_repository, _ = _postgres_registry_service(
+        postgres_connection_factory
+    )
+    replay = restarted_service.register(
+        _registry_request(filename="REGISTRY.SYNTHETIC.PDF")
+    )
+
+    assert replay == registered
+    assert restarted_service.get(registered.document_id).root == registered
+    assert restarted_service.list().items == (registered,)
+    snapshot = restarted_repository.list_registrations()[0]
+    assert snapshot.revision == 1
+    assert len(snapshot.registration.document.history) == 1
+    assert _registry_row_counts(postgres_connection_factory) == (1, 1, 1, 1, 1)
+
+
+def test_postgres_registry_rolls_back_traceability_rows_on_write_failure(
+    postgres_connection_factory: PostgresConnectionFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _upgrade_registry_schema(postgres_connection_factory)
+    service, _, _ = _postgres_registry_service(postgres_connection_factory)
+    private_marker = "private-registry-token C:\\private\\document.pdf"
+
+    def fail_after_traceability_write(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RuntimeError(private_marker)
+
+    monkeypatch.setattr(
+        registry_adapter,
+        "_write_registration",
+        fail_after_traceability_write,
+    )
+
+    with pytest.raises(DocumentServiceUnavailableError) as error_info:
+        service.register(_registry_request())
+
+    assert private_marker not in repr(error_info.value)
+    assert _registry_row_counts(postgres_connection_factory) == (0, 0, 0, 0, 0)
+
+
+def test_postgres_registry_fails_closed_when_audit_rows_are_inconsistent(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    _upgrade_registry_schema(postgres_connection_factory)
+    service, _, _ = _postgres_registry_service(postgres_connection_factory)
+    registered = service.register(_registry_request())
+
+    connection = postgres_connection_factory()
+    try:
+        with connection.transaction():
+            connection.execute(
+                """
+                UPDATE document_lifecycle_events
+                SET target_status = 'processing'
+                WHERE sequence = 1
+                """
+            )
+    finally:
+        connection.close()
+
+    restarted_service, _, _ = _postgres_registry_service(postgres_connection_factory)
+    with pytest.raises(DocumentServiceUnavailableError):
+        restarted_service.get(registered.document_id)
+
+
+def test_postgres_registry_serializes_exact_registration_and_approval_replays(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    _upgrade_registry_schema(postgres_connection_factory)
+    service, repository, clock = _postgres_registry_service(postgres_connection_factory)
+    request = _registry_request()
+
+    def replay_registration(_: int) -> ReceivedDocument:
+        return service.register(request)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        registrations = tuple(executor.map(replay_registration, range(16)))
+
+    assert {item.document_id for item in registrations} == {
+        registrations[0].document_id
+    }
+    snapshot = repository.list_registrations()[0]
+    governance = DocumentGovernanceService(repository=repository, clock=clock)
+    snapshot = repository.get(snapshot.registration.document.identity)
+    assert snapshot is not None
+    snapshot = governance.start_processing(
+        identity=snapshot.document.identity,
+        version=1,
+        actor="processor.synthetic",
+        expected_revision=snapshot.revision,
+    )
+    for step in (ProcessingStep.EXTRACTION, ProcessingStep.INDEXING):
+        snapshot = governance.record_step_succeeded(
+            identity=snapshot.document.identity,
+            version=1,
+            step=step,
+            actor="processor.synthetic",
+            expected_revision=snapshot.revision,
+        )
+
+    command = ApproveDocumentRequest(note="Aprovação sintética persistida.")
+
+    def replay_approval(_: int) -> ApprovedDocument:
+        return service.approve(registrations[0].document_id, command)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        approvals = tuple(executor.map(replay_approval, range(16)))
+
+    assert len(set(approvals)) == 1
+    counts_before_replay = _registry_row_counts(postgres_connection_factory)
+    assert service.register(request) == registrations[0]
+    assert _registry_row_counts(postgres_connection_factory) == counts_before_replay
+    assert service.get(registrations[0].document_id).root == approvals[0]
+    restarted_service, restarted_repository, _ = _postgres_registry_service(
+        postgres_connection_factory
+    )
+    persisted = restarted_repository.list_registrations()[0]
+    assert len(persisted.registration.document.history) == 5
+    assert restarted_service.get(registrations[0].document_id).root == approvals[0]
+    assert _registry_row_counts(postgres_connection_factory) == (1, 1, 1, 1, 5)
+
+
+def test_postgres_registry_allows_only_one_divergent_concurrent_registration(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    _upgrade_registry_schema(postgres_connection_factory)
+    service, repository, _ = _postgres_registry_service(postgres_connection_factory)
+    barrier = Barrier(2)
+
+    def register(sha256: str) -> str:
+        barrier.wait(timeout=10)
+        return service.register(_registry_request(sha256=sha256)).document_id
+
+    outcomes: list[str] = []
+    errors: list[Exception] = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = tuple(
+            executor.submit(register, digest) for digest in ("d" * 64, "e" * 64)
+        )
+        for future in futures:
+            try:
+                outcomes.append(future.result(timeout=10))
+            except Exception as error:
+                errors.append(error)
+
+    assert len(outcomes) == 1
+    assert len(errors) == 1
+    assert type(errors[0]) is DocumentConflictError
+    persisted = repository.list_registrations()[0]
+    assert len(persisted.registration.versions) == 1
+    assert _registry_row_counts(postgres_connection_factory) == (1, 1, 1, 1, 1)

@@ -17,12 +17,23 @@ from prescriptive_maintenance.contracts import (
     AnalysisResponse,
     Citation,
     Diagnosis,
+    DocumentListResponse,
     DocumentResponse,
     DocumentStatus,
     OpaqueNeighbor,
     Prescription,
     ReceivedDocument,
     RegisterDocumentRequest,
+)
+from prescriptive_maintenance.document_lifecycle import (
+    DocumentGovernanceService,
+    ProcessingStep,
+)
+from prescriptive_maintenance.document_registry import (
+    GovernedDocumentLifecycleService,
+    InMemoryDocumentRegistryRepository,
+    canonical_pdf_filename,
+    logical_document_id,
 )
 from prescriptive_maintenance.fakes import (
     SYNTHETIC_ANALYSIS_REQUESTS,
@@ -39,7 +50,10 @@ from prescriptive_maintenance.ports import (
     PortContractError,
     PortUnavailableError,
 )
-from prescriptive_maintenance.services import AnalysisService
+from prescriptive_maintenance.services import (
+    AnalysisService,
+    DocumentServiceUnavailableError,
+)
 
 EXPECTED_FEATURES = (
     "z_rms_velocity_mm_s",
@@ -564,7 +578,7 @@ def test_citation_page_number_must_be_positive() -> None:
 
 def test_document_lifecycle_is_complete_and_registration_is_never_approved() -> None:
     with TestClient(create_app()) as client:
-        listed = client.get("/documents")
+        initially_listed = client.get("/documents")
         registered = client.post(
             "/documents",
             json={
@@ -574,31 +588,69 @@ def test_document_lifecycle_is_complete_and_registration_is_never_approved() -> 
                 "sha256": "c" * 64,
             },
         )
+        listed = client.get("/documents")
+        fetched = client.get(f"/documents/{registered.json()['document_id']}")
 
-    assert listed.status_code == 200
-    statuses = {item["status"] for item in listed.json()["items"]}
-    assert statuses == {
-        "received",
-        "processing",
-        "pending_approval",
-        "approved",
-        "rejected",
-        "failed",
-        "superseded",
-    }
+    assert initially_listed.status_code == 200
+    assert initially_listed.json() == {"items": []}
     assert registered.status_code == 201
     assert registered.json()["status"] == "received"
     assert registered.json()["decision_note"] is None
+    assert listed.json()["items"] == [registered.json()]
+    assert fetched.json() == registered.json()
+
+
+class ApiDocumentClock:
+    def __init__(self) -> None:
+        self._next = datetime(2035, 1, 2, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        value = self._next
+        self._next += timedelta(seconds=1)
+        return value
+
+
+def _pending_document_service() -> tuple[GovernedDocumentLifecycleService, str]:
+    repository = InMemoryDocumentRegistryRepository()
+    clock = ApiDocumentClock()
+    service = GovernedDocumentLifecycleService(repository=repository, clock=clock)
+    request = RegisterDocumentRequest(
+        filename="pending.synthetic.pdf",
+        media_type="application/pdf",
+        size_bytes=512,
+        sha256="c" * 64,
+    )
+    document_id = service.register(request).document_id
+    identity = logical_document_id(canonical_pdf_filename(request.filename))
+    governance = DocumentGovernanceService(repository=repository, clock=clock)
+    snapshot = repository.get(identity)
+    assert snapshot is not None
+    snapshot = governance.start_processing(
+        identity=identity,
+        version=1,
+        actor="processor.synthetic",
+        expected_revision=snapshot.revision,
+    )
+    for step in (ProcessingStep.EXTRACTION, ProcessingStep.INDEXING):
+        snapshot = governance.record_step_succeeded(
+            identity=identity,
+            version=1,
+            step=step,
+            actor="processor.synthetic",
+            expected_revision=snapshot.revision,
+        )
+    return service, document_id
 
 
 def test_document_actions_enforce_state_transitions() -> None:
-    with TestClient(create_app()) as client:
+    documents, document_id = _pending_document_service()
+    with TestClient(create_app(document_service=documents)) as client:
         approved = client.post(
-            "/documents/doc_synthetic_pending/approve",
+            f"/documents/{document_id}/approve",
             json={"note": "Aprovação sintética."},
         )
         invalid = client.post(
-            "/documents/doc_synthetic_manual/reprocess",
+            f"/documents/{document_id}/reprocess",
         )
 
     assert approved.status_code == 200
@@ -609,13 +661,14 @@ def test_document_actions_enforce_state_transitions() -> None:
 
 
 def test_document_reject_reprocess_and_not_found_contracts() -> None:
-    with TestClient(create_app()) as client:
+    documents, document_id = _pending_document_service()
+    with TestClient(create_app(document_service=documents)) as client:
         rejected = client.post(
-            "/documents/doc_synthetic_pending/reject",
+            f"/documents/{document_id}/reject",
             json={"reason": "Motivo sintético."},
         )
         reprocessed = client.post(
-            "/documents/doc_synthetic_failed/reprocess",
+            f"/documents/{document_id}/reprocess",
         )
         missing = client.get("/documents/doc_synthetic_missing")
 
@@ -623,6 +676,86 @@ def test_document_reject_reprocess_and_not_found_contracts() -> None:
     assert reprocessed.json()["status"] == "processing"
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "document_not_found"
+
+
+def test_document_conflict_and_domain_validation_errors_are_sanitized() -> None:
+    registration_payload = {
+        "filename": "conflict.synthetic.pdf",
+        "media_type": "application/pdf",
+        "size_bytes": 512,
+        "sha256": "e" * 64,
+    }
+    with TestClient(create_app()) as client:
+        assert client.post("/documents", json=registration_payload).status_code == 201
+        conflict = client.post(
+            "/documents",
+            json={**registration_payload, "size_bytes": 513},
+        )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["error"] == {
+        "code": "document_conflict",
+        "message": "O comando documental conflita com o estado armazenado.",
+        "issues": [],
+    }
+    assert "conflict.synthetic.pdf" not in conflict.text
+    assert "e" * 64 not in conflict.text
+
+    documents, document_id = _pending_document_service()
+    current_before_replay = documents.get(document_id)
+    with TestClient(create_app(document_service=documents)) as client:
+        transitioned_replay = client.post(
+            "/documents",
+            json={
+                "filename": "PENDING.SYNTHETIC.PDF",
+                "media_type": "application/pdf",
+                "size_bytes": 512,
+                "sha256": "c" * 64,
+            },
+        )
+        current_after_replay = client.get(f"/documents/{document_id}")
+
+    assert transitioned_replay.status_code == 201
+    assert transitioned_replay.json()["document_id"] == document_id
+    assert transitioned_replay.json()["status"] == "received"
+    assert current_after_replay.status_code == 200
+    assert current_after_replay.json()["status"] == "pending_approval"
+    assert documents.get(document_id) == current_before_replay
+
+    private_marker = "private-note\x00C:\\private\\manual.pdf"
+    with TestClient(create_app(document_service=documents)) as client:
+        invalid = client.post(
+            f"/documents/{document_id}/approve",
+            json={"note": private_marker},
+        )
+
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "invalid_request"
+    assert "private-note" not in invalid.text
+    assert "private" not in invalid.text
+
+
+class UnavailableDocumentService(SyntheticDocumentService):
+    def list(self) -> DocumentListResponse:
+        raise DocumentServiceUnavailableError(
+            "token=private-document-token path=C:\\private\\manual.pdf"
+        )
+
+
+def test_document_repository_failure_returns_sanitized_503() -> None:
+    with TestClient(
+        create_app(document_service=UnavailableDocumentService())
+    ) as client:
+        response = client.get("/documents")
+
+    assert response.status_code == 503
+    assert response.json()["error"] == {
+        "code": "document_service_unavailable",
+        "message": "O ciclo documental está temporariamente indisponível.",
+        "issues": [],
+    }
+    assert "private-document-token" not in response.text
+    assert "private" not in response.text
 
 
 class TrackingDocumentService(SyntheticDocumentService):
@@ -640,6 +773,7 @@ class TrackingDocumentService(SyntheticDocumentService):
     (
         ("../manual.pdf", "application/pdf"),
         (r"folder\manual.pdf", "application/pdf"),
+        ("månual.pdf", "application/pdf"),
         ("manual.txt", "application/pdf"),
         ("manual.pdf", "text/plain"),
     ),

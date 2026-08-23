@@ -35,16 +35,17 @@ A versão atual contém:
   correlation ID por requisição e logs JSON sanitizados;
 - um contrato OpenAPI v1 congelado para análise com 18 features e cinco
   resultados fechados, ciclo documental mínimo, portas internas tipadas e fakes
-  inteiramente sintéticos, com snapshot determinístico para futura geração de
-  cliente;
-- um domínio documental em memória com os sete estados governados, versões
-  idempotentes por identidade, número e SHA-256, auditoria imutável, relógio UTC
-  injetável e controle otimista de revisão por compare-and-swap;
+  de análise inteiramente sintéticos, com snapshot determinístico para futura
+  geração de cliente;
+- um registro HTTP de metadados documentais ligado ao domínio dos sete estados,
+  com adapters em memória e PostgreSQL, versões idempotentes, auditoria
+  imutável, IDs opacos e controle otimista de revisão por compare-and-swap;
 - configuração tipada e fail-fast para os perfis `local`, `offline` e `aws`,
   com backend `memory` ou `postgres` obrigatório e dependências coerentes;
 - persistência mínima e transacional de metadados rastreáveis de análise,
-  documentos, versões, chunks e evidências, com adapter em memória, adapter
-  PostgreSQL, evolução idempotente de versões e migração inicial reversível;
+  documentos, versões, ciclo, eventos, chunks e evidências, com adapter em
+  memória, adapter PostgreSQL, evolução idempotente de versões e migrações
+  reversíveis;
 - PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
   Compose;
 - imagens multi-stage da API e da fronteira web, construídas por bases fixadas
@@ -129,10 +130,11 @@ A versão atual contém:
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, integração da baseline, do índice de similaridade, da composição RAG
-ou dos adapters persistentes ao fluxo HTTP, busca semântica real por vizinhos,
-vetores integrados à aplicação, configuração operacional ou chamada automática
-a LLM, autenticação, infraestrutura AWS aplicada, deploy ou interface web.
+aplicação, upload ou armazenamento de bytes documentais, integração da baseline,
+do índice de similaridade, da composição RAG ou da persistência de análises ao
+fluxo HTTP, busca semântica real por vizinhos, vetores integrados à aplicação,
+configuração operacional ou chamada automática a LLM, autenticação,
+infraestrutura AWS aplicada, deploy ou interface web.
 
 ## Arquitetura atual
 
@@ -146,7 +148,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima com adapters em memória/PostgreSQL, baseline e recuperação de vizinhos em memória/pgvector, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1, análise sintética injetável, registro documental governado com adapters em memória/PostgreSQL, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima, baseline e recuperação de vizinhos em memória/pgvector, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
@@ -379,9 +381,13 @@ implementadas**:
 
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou orquestração do pipeline canônico pela aplicação;
-- integração das rotas HTTP com a persistência, a baseline e o uso de vetores;
-- busca semântica real por similaridade, integração operacional da composição
-  RAG com modelo, adapters reais e API ou configuração operacional de LLM;
+- upload multipart/streaming, validação de hash/tamanho contra bytes e
+  armazenamento documental local ou S3;
+- integração das rotas de análise com a persistência, a baseline e o uso de
+  vetores;
+- busca semântica real por similaridade, integração operacional do índice e da
+  composição RAG com modelo, adapters reais e API ou configuração operacional
+  de LLM;
 - autenticação, autorização, métricas e exportação de telemetria;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS aplicada, pipeline de deploy, release publicada ou

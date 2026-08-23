@@ -63,6 +63,18 @@ class InvalidDocumentTransitionError(Exception):
     """Raised when a lifecycle action is invalid for the current state."""
 
 
+class DocumentConflictError(Exception):
+    """Raised when an idempotent document command materially diverges."""
+
+
+class InvalidDocumentRequestError(Exception):
+    """Raised when document input is unsafe beyond the transport schema."""
+
+
+class DocumentServiceUnavailableError(Exception):
+    """Raised when the configured document repository cannot respond safely."""
+
+
 class DocumentLifecycleService(Protocol):
     def register(self, request: RegisterDocumentRequest) -> ReceivedDocument: ...
 
