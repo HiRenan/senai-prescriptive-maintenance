@@ -48,6 +48,7 @@ aplicado.
 | `.github/workflows/ci.yml` | Qualidade completa em Ubuntu e teste/smoke essenciais em Windows. | Não faz deploy nem publica release. |
 | `.github/workflows/pull-request-policy.yml` | Testa e aplica a política de título, origem e integridade Git de releases. | O gate Git atua somente em `release/*` → `main`; tarefas e hotfixes recebem apenas a validação de metadados. |
 | `.github/workflows/security.yml` | CodeQL, revisão de dependências e varredura de segredos. | Revisão de dependências existe somente no evento de pull request. |
+| `.github/workflows/aws-demo-*.yml` | Validação AWS inteiramente offline em pull request e workflows manuais protegidos para plan, fundação/runtime, smoke e teardown, com contrato OIDC/IAM e inventário pós-destroy. | OIDC, roles, environments, backend, domínio, certificado, identidade de smoke e toda execução AWS continuam externos e não comprovados live. |
 | `.github/dependabot.yml` | Atualizações semanais agrupadas para uv, npm, GitHub Actions e Docker Compose. | Todos os pull requests gerados têm `develop` como destino. |
 
 `pandas`, `pandera`, `pyarrow`, `pypdfium2`, `rapidocr`, `onnxruntime` e
@@ -92,7 +93,8 @@ dados em volume local.
 
 ## Integração contínua existente
 
-Os três workflows rastreados estão ativos:
+Os sete workflows rastreados se dividem entre três gates gerais e quatro fluxos
+AWS:
 
 - **CI** executa em pushes e pull requests para `develop` e `main`. Em Ubuntu,
   instala os dois workspaces pelos locks, executa `poe check`, `poe hooks` e
@@ -109,15 +111,24 @@ Os três workflows rastreados estão ativos:
   segunda-feira e sob acionamento manual. Ele analisa Python e
   JavaScript/TypeScript com CodeQL, bloqueia dependências novas com severidade
   alta em pull requests e usa Gitleaks para varrer conteúdo e histórico
-  relevante.
+  relevante;
+- **AWS demo offline validation** executa em pull requests para `develop` que
+  alteram o perfil ou seus workflows, sem environment, segredo ou OIDC. Ele
+  valida e planeja somente com placeholders isolados e executa as políticas de
+  segurança e entrega;
+- **AWS demo plan, deploy e teardown** são três workflows exclusivamente
+  manuais, limitados ao HEAD atual de `main`, com confirmação literal,
+  environments e roles OIDC independentes. Eles existem como operação
+  protegida versionada; nenhum deles foi executado na AWS.
 
-Todas as ações de terceiros são fixadas por SHA. O checkout da política não
+Todas as actions de terceiros são fixadas por SHA. O checkout da política não
 persiste credenciais, e o gate invoca Git por argumentos estruturados, sem
 dependência npm adicional e com prompts do Git e do gerenciador de credenciais
-desabilitados. Não existe workflow de deploy, publicação de release ou envio de
-cobertura para um serviço externo. As proteções, os oito checks e a diferença
-intencional de histórico linear entre `develop` e `main` estão registrados no
-[ADR 0004](../adr/0004-gitflow-ci-and-releases.md).
+desabilitados. Não existe deploy automático, publicação de release ou envio de
+cobertura para um serviço externo. A validação e os limites AWS estão registrados
+na [evidência SEN-69](../validation/aws-demo-evidence.md); as proteções, os oito
+checks e a diferença intencional de histórico linear entre `develop` e `main`
+estão registrados no [ADR 0004](../adr/0004-gitflow-ci-and-releases.md).
 
 ## Fronteiras atuais
 
