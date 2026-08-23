@@ -74,6 +74,10 @@ A versão atual contém:
 - contratos v1 de geração para diagnóstico imutável de entrada, evidências,
   avaliação de suporte, prescrições, citações e warnings, com prompt versionado,
   provider fake determinístico e adaptador Bedrock desabilitável;
+- um pipeline canônico local e determinístico para `banner.csv`, com 18 features
+  de inferência, ledger completo de disposições, agrupamento temporal de
+  ocorrências independente do target, partições cronológicas com purga e
+  estatísticas IQR ajustadas somente em treino;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -99,11 +103,11 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, settings, camada de dados com extração local rastreável dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, settings, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração local rastreável dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
-| `data/` | Manifesto dos materiais locais, fixtures sintéticas e artefatos públicos aprovados da baseline agregada e do inventário categórico. |
+| `data/` | Manifesto dos materiais locais, fixtures sintéticas, artefatos públicos aprovados e destinos ignorados para derivados canônicos locais. |
 
 O inventário detalhado está em
 [`docs/architecture/README.md`](docs/architecture/README.md), e as decisões que
@@ -179,6 +183,8 @@ código; `check` é uma sequência fail-fast somente leitura.
 | `uv run --frozen poe typecheck` | Executa Pyright em modo estrito. |
 | `uv run --frozen poe test` | Executa Pytest com cobertura mínima configurada. |
 | `uv run --frozen poe check` | Executa format-check, lint, typecheck e test, nessa ordem. |
+| `uv run --frozen poe data-build --help` | Exibe os caminhos explícitos exigidos para construir derivados canônicos locais. |
+| `uv run --frozen poe data-check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
 | `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
 | `uv run --frozen poe services-up` | Inicia o PostgreSQL local e aguarda o healthcheck. |
 | `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |
@@ -234,6 +240,13 @@ está em
 fonte canônica dessa visão é a política JSON validada pelo backend; o documento
 não contém valores por registro e não autoriza reprocessamento da fonte.
 
+O pipeline canônico consome a fonte somente pela porta auditada e grava seus seis
+artefatos exclusivamente em um destino local explicitamente informado e já
+ignorado pelo Git. `manifest.json` registra IDs, hashes físicos e lógicos,
+reconciliações, contagens e gates; os Parquets por partição contêm somente as 18
+features ordenadas e o target pós-partição como `y`. Consulte
+[`apps/api/README.md`](apps/api/README.md) para os contratos e comandos.
+
 Dados originais devem ficar em `data/raw/original/`. Originais, dados brutos,
 saídas intermediárias, dados processados e quaisquer outros artefatos gerados
 continuam locais, proibidos de versionamento e cobertos pelos caminhos ignorados
@@ -283,7 +296,7 @@ As seguintes capacidades pertencem à evolução futura e **não estão
 implementadas**:
 
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
-- ingestão contínua, limpeza tabular ou pipeline de transformação da aplicação;
+- ingestão contínua ou orquestração do pipeline pela aplicação;
 - persistência da aplicação no PostgreSQL e uso de vetores pelo backend;
 - busca por similaridade, recuperação governada de contexto, execução RAG
   integrada ou configuração operacional de LLM;
