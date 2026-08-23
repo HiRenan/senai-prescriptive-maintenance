@@ -211,6 +211,7 @@ def test_offline_profile_never_calls_database_or_aws(
     assert probe.calls == 0
 
 
+@pytest.mark.failure_matrix
 def test_required_dependency_failure_changes_only_readiness_and_is_sanitized(
     request_log_capture: pytest.LogCaptureFixture,
 ) -> None:
@@ -257,6 +258,7 @@ def test_required_dependency_failure_changes_only_readiness_and_is_sanitized(
         assert private_value not in serialized_logs
 
 
+@pytest.mark.failure_matrix
 def test_readiness_timeout_is_bounded_and_returns_stable_503() -> None:
     probe = BlockingProbe()
 

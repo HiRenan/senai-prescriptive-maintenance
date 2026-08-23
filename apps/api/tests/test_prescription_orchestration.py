@@ -694,6 +694,7 @@ def test_insufficient_output_keeps_usage_but_not_provider_narrative() -> None:
     assert provider.call_count == 1
 
 
+@pytest.mark.failure_matrix
 def test_provider_exception_degrades_without_leaking_or_retrying() -> None:
     marker = "SYNTHETIC_TOKEN_PATH_C:\\private\\credential"
     provider = _RecordingProvider(failure=RuntimeError(marker))
@@ -940,6 +941,7 @@ def test_finite_clock_values_with_nonfinite_latency_fail_closed(
     assert provider.call_count == 1
 
 
+@pytest.mark.failure_matrix
 def test_timeout_busy_late_completion_and_slot_release_are_bounded() -> None:
     provider = _BlockingProvider()
     service = _service(

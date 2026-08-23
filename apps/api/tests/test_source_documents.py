@@ -805,6 +805,7 @@ def test_low_minimum_ocr_confidence_is_suspect_even_when_mean_passes(
     assert quality["signals"] == ["ocr.low_minimum_confidence"]
 
 
+@pytest.mark.failure_matrix
 def test_malformed_ocr_text_is_a_sanitized_page_failure(tmp_path: Path) -> None:
     source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
         tmp_path,
@@ -902,6 +903,39 @@ def test_hash_mismatch_is_sanitized_and_does_not_extract_the_source(
     assert changed.failure_code == "document.source_hash_mismatch"
     assert changed.artifact_path is None
     assert str(source_directory) not in cast(str, changed.failure_code)
+
+
+@pytest.mark.failure_matrix
+def test_unreadable_pdf_is_rejected_without_publishing_its_content(
+    tmp_path: Path,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path
+    )
+    manifest = _load_json(manifest_path)
+    first_entry = cast(dict[str, object], cast(list[object], manifest["files"])[0])
+    source_name = cast(str, first_entry["name"])
+    unreadable_path = source_directory / source_name
+    private_payload = b"entirely synthetic unreadable document payload"
+    unreadable_path.write_bytes(private_payload)
+    _replace_manifest_fingerprint(
+        manifest_path,
+        name=source_name,
+        source_path=unreadable_path,
+    )
+
+    result = extract_source_documents(
+        source_directory=source_directory,
+        manifest_path=manifest_path,
+        output_directory=output_directory,
+    )
+
+    failed = result.documents[0]
+    assert failed.status is DocumentExtractionStatus.FAILED
+    assert failed.failure_code == "document.pdf_unreadable"
+    assert failed.artifact_path is not None
+    assert private_payload not in failed.artifact_path.read_bytes()
+    assert private_payload not in result.inventory_path.read_bytes()
 
 
 def test_source_changed_overrides_initial_integrity_failure(

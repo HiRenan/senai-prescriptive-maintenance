@@ -258,6 +258,7 @@ class NeverCalledPorts:
 
 
 @pytest.mark.parametrize("top_k", (0, MAX_TOP_K + 1, 1.2, True, "5"))
+@pytest.mark.failure_matrix
 def test_invalid_top_k_returns_sanitized_422_before_internal_ports(
     top_k: object,
 ) -> None:
@@ -295,6 +296,7 @@ def test_extra_feature_returns_422_before_internal_ports() -> None:
     "case",
     ("nan", "infinity", "boolean", "numeric_string", "missing"),
 )
+@pytest.mark.failure_matrix
 def test_invalid_feature_values_return_422_before_internal_ports(case: str) -> None:
     ports = NeverCalledPorts()
     service = AnalysisService(model=ports, retrieval=ports, generation=ports)

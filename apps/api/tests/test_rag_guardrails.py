@@ -314,6 +314,7 @@ def test_diagnosis_conflict_refuses_without_currentness_or_provider() -> None:
     assert currentness.calls == 0
 
 
+@pytest.mark.failure_matrix
 def test_document_instructions_and_sentinel_collisions_remain_only_data() -> None:
     identity = sha256(_CHUNK_A.encode("utf-8")).hexdigest()
     begin_collision = f"UNTRUSTED_DOCUMENT_{identity}_0_BEGIN"
@@ -346,6 +347,7 @@ def test_document_instructions_and_sentinel_collisions_remain_only_data() -> Non
     assert marker not in repr(result)
 
 
+@pytest.mark.failure_matrix
 def test_snapshot_changed_during_provider_call_is_refused_post_provider() -> None:
     currentness = _Currentness(states=[True, False])
     provider = _RecordingProvider()
@@ -401,6 +403,7 @@ def test_post_provider_currentness_contract_failures_are_sanitized(
         ),
     ),
 )
+@pytest.mark.failure_matrix
 def test_pre_provider_currentness_failures_are_total_and_skip_provider(
     state: object,
     expected_code: RagRefusalCode,

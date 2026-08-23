@@ -66,6 +66,7 @@ def test_document_registration_approval_and_rejection_use_real_boundaries(
     )
 
 
+@pytest.mark.failure_matrix
 def test_fake_provider_is_blocked_without_current_approved_evidence(
     golden_report: dict[str, object],
 ) -> None:

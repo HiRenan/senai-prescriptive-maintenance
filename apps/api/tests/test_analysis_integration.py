@@ -1190,6 +1190,7 @@ def test_metadata_failure_stops_before_persistence(
         assert transaction.analyses.get("ana_synthetic_integrated_1") is None
 
 
+@pytest.mark.failure_matrix
 def test_persistence_failure_is_classified_and_never_publishes_cache(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
