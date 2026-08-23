@@ -150,6 +150,10 @@ confirme a proteção do destino:
 git check-ignore -v data/processed/documents/inventory.v1.json
 ```
 
+Essa proteção também é aplicada pela porta antes de cada escrita quando o
+destino pertence a uma worktree Git. Destinos rastreáveis, symlinks, escapes e
+erros de verificação são rejeitados sem criar o artefato.
+
 O inventário contém metadados e estados por documento; cada artefato de
 extração contém o texto derivado e as métricas por página. Ambos permanecem
 locais e ignorados. Não use `git add -f`, não publique esses JSON e não copie

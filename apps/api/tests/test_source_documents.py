@@ -4,19 +4,24 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Mapping, Sequence
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
+from shutil import which
+from typing import BinaryIO, NoReturn, cast
 
 import pytest
 from prescriptive_maintenance.data import (
     SOURCE_DOCUMENT_NAMES,
     DocumentExtractionStatus,
     OcrPageResult,
+    SourceDocumentError,
+    SourceDocumentFingerprint,
     SourceDocumentInventoryStatus,
     SourceDocumentManifestError,
+    SourceDocumentOutputError,
     extract_source_documents,
 )
 
@@ -150,6 +155,72 @@ def _load_json(path: Path) -> dict[str, object]:
     return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
 
 
+def _initialize_synthetic_git_worktree(tmp_path: Path) -> Path:
+    worktree = tmp_path / "synthetic-git-worktree"
+    worktree.mkdir()
+    git_executable = which("git")
+    assert git_executable is not None
+    subprocess.run(  # noqa: S603
+        [git_executable, "init", "--quiet", str(worktree)],
+        check=True,
+        capture_output=True,
+    )
+    (worktree / ".gitignore").write_text("/data/processed/\n", encoding="utf-8")
+    return worktree
+
+
+def _replace_manifest_fingerprint(
+    manifest_path: Path, *, name: str, source_path: Path
+) -> None:
+    payload = _load_json(manifest_path)
+    entries = cast(list[dict[str, object]], payload["files"])
+    entry = next(candidate for candidate in entries if candidate["name"] == name)
+    content = source_path.read_bytes()
+    entry["size_bytes"] = len(content)
+    entry["sha256"] = sha256(content).hexdigest()
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _stream_fingerprint(source: BinaryIO) -> SourceDocumentFingerprint:
+    source.seek(0)
+    content = source.read()
+    source.seek(0)
+    return SourceDocumentFingerprint(
+        size_bytes=len(content),
+        sha256=sha256(content).hexdigest(),
+    )
+
+
+def _changed_fingerprint(
+    fingerprint: SourceDocumentFingerprint,
+) -> SourceDocumentFingerprint:
+    replacement = "0" if fingerprint.sha256[0] != "0" else "1"
+    return SourceDocumentFingerprint(
+        size_bytes=fingerprint.size_bytes,
+        sha256=replacement + fingerprint.sha256[1:],
+    )
+
+
+def _change_on_second_fingerprint() -> tuple[
+    Callable[[BinaryIO], SourceDocumentFingerprint], list[BinaryIO]
+]:
+    observed_target_calls: list[BinaryIO] = []
+    target: BinaryIO | None = None
+
+    def fingerprint(source: BinaryIO) -> SourceDocumentFingerprint:
+        nonlocal target
+        measured = _stream_fingerprint(source)
+        if target is None:
+            target = source
+        if source is target:
+            observed_target_calls.append(source)
+            if len(observed_target_calls) == 2:
+                return _changed_fingerprint(measured)
+        return measured
+
+    return fingerprint, observed_target_calls
+
+
 def _document_entry(inventory: Mapping[str, object], name: str) -> dict[str, object]:
     documents = cast(list[dict[str, object]], inventory["documents"])
     return next(document for document in documents if document["name"] == name)
@@ -161,6 +232,93 @@ def test_paths_are_explicit_required_keywords() -> None:
     for name in ("source_directory", "manifest_path", "output_directory"):
         assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
         assert parameters[name].default is inspect.Parameter.empty
+
+
+def test_allows_ignored_data_processed_output_inside_git_worktree(
+    tmp_path: Path,
+) -> None:
+    source_directory, manifest_path, _ = _prepare_synthetic_sources(tmp_path)
+    worktree = _initialize_synthetic_git_worktree(tmp_path)
+    output_directory = worktree / "data" / "processed" / "documents"
+
+    result = extract_source_documents(
+        source_directory=source_directory,
+        manifest_path=manifest_path,
+        output_directory=output_directory,
+    )
+
+    assert result.status is SourceDocumentInventoryStatus.COMPLETED
+    assert result.inventory_path == output_directory.resolve() / "inventory.v1.json"
+
+
+def test_rejects_unignored_apps_api_docs_output_inside_git_worktree(
+    tmp_path: Path,
+) -> None:
+    source_directory, manifest_path, _ = _prepare_synthetic_sources(tmp_path)
+    worktree = _initialize_synthetic_git_worktree(tmp_path)
+    output_directory = worktree / "apps" / "api" / "docs"
+
+    with pytest.raises(SourceDocumentOutputError) as raised:
+        extract_source_documents(
+            source_directory=source_directory,
+            manifest_path=manifest_path,
+            output_directory=output_directory,
+        )
+
+    assert str(raised.value) == "Local output artifact is not ignored by Git."
+    assert not output_directory.exists()
+
+
+def test_fails_closed_when_git_ignore_verification_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory, manifest_path, _ = _prepare_synthetic_sources(tmp_path)
+    worktree = _initialize_synthetic_git_worktree(tmp_path)
+    output_directory = worktree / "data" / "processed" / "documents"
+
+    def fail_git(*args: object, **kwargs: object) -> NoReturn:
+        raise OSError
+
+    monkeypatch.setattr(
+        "prescriptive_maintenance.data.source_documents.subprocess.run",
+        fail_git,
+    )
+
+    with pytest.raises(SourceDocumentOutputError) as raised:
+        extract_source_documents(
+            source_directory=source_directory,
+            manifest_path=manifest_path,
+            output_directory=output_directory,
+        )
+
+    assert str(raised.value) == ("Local output Git protection could not be verified.")
+    assert not output_directory.exists()
+
+
+def test_rejects_symlinked_output_before_writing(tmp_path: Path) -> None:
+    source_directory, manifest_path, _ = _prepare_synthetic_sources(tmp_path)
+    worktree = _initialize_synthetic_git_worktree(tmp_path)
+    escaped_directory = tmp_path / "synthetic-escaped-output"
+    escaped_directory.mkdir()
+    (worktree / "data").mkdir()
+    try:
+        (worktree / "data" / "processed").symlink_to(
+            escaped_directory,
+            target_is_directory=True,
+        )
+    except OSError:
+        pytest.skip("Directory symlinks are unavailable in this environment.")
+
+    with pytest.raises(SourceDocumentOutputError) as raised:
+        extract_source_documents(
+            source_directory=source_directory,
+            manifest_path=manifest_path,
+            output_directory=worktree / "data" / "processed" / "documents",
+        )
+
+    assert str(raised.value) == "Local output path is unsafe."
+    assert list(escaped_directory.iterdir()) == []
 
 
 def test_extracts_six_native_documents_without_modifying_sources(
@@ -199,7 +357,9 @@ def test_extracts_six_native_documents_without_modifying_sources(
     assert inventory["document_count"] == 6
     assert len(cast(list[object], inventory["documents"])) == 6
     first_artifact = cast(Path, result.documents[0].artifact_path)
-    page = cast(list[dict[str, object]], _load_json(first_artifact)["pages"])[0]
+    first_payload = _load_json(first_artifact)
+    assert first_payload["extractor_version"] == 2
+    page = cast(list[dict[str, object]], first_payload["pages"])[0]
     assert page["method"] == "native"
     assert page["status"] == "extracted"
     assert page["text"] == _SYNTHETIC_NATIVE_TEXT
@@ -391,8 +551,35 @@ def test_low_ocr_confidence_marks_page_and_inventory_as_suspect(
     page = cast(list[dict[str, object]], artifact["pages"])[0]
     assert page["status"] == "suspect"
     assert cast(dict[str, object], page["quality"])["signals"] == [
-        "ocr.low_mean_confidence"
+        "ocr.low_mean_confidence",
+        "ocr.low_minimum_confidence",
     ]
+
+
+def test_low_minimum_ocr_confidence_is_suspect_even_when_mean_passes(
+    tmp_path: Path,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path,
+        doc1_pages=(None,),
+    )
+
+    result = extract_source_documents(
+        source_directory=source_directory,
+        manifest_path=manifest_path,
+        output_directory=output_directory,
+        ocr_adapter=_SyntheticOcrAdapter(confidences=(1, 1, 1, 1, 0)),
+    )
+
+    assert result.status is SourceDocumentInventoryStatus.ATTENTION_REQUIRED
+    assert result.documents[0].status is DocumentExtractionStatus.ATTENTION_REQUIRED
+    artifact = _load_json(cast(Path, result.documents[0].artifact_path))
+    page = cast(list[dict[str, object]], artifact["pages"])[0]
+    quality = cast(dict[str, object], page["quality"])
+    assert page["status"] == "suspect"
+    assert quality["mean_ocr_confidence"] == 0.8
+    assert quality["minimum_ocr_confidence"] == 0.0
+    assert quality["signals"] == ["ocr.low_minimum_confidence"]
 
 
 def test_malformed_ocr_text_is_a_sanitized_page_failure(tmp_path: Path) -> None:
@@ -421,6 +608,27 @@ def test_malformed_ocr_text_is_a_sanitized_page_failure(tmp_path: Path) -> None:
     assert page["status"] == "failed"
     assert page["text"] is None
     assert page["failure_code"] == "page.ocr_invalid_result"
+
+
+def test_non_textual_adapter_identity_is_a_sanitized_source_error(
+    tmp_path: Path,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path
+    )
+    adapter = _SyntheticOcrAdapter()
+    adapter.name = cast(str, 42)
+
+    with pytest.raises(SourceDocumentError) as raised:
+        extract_source_documents(
+            source_directory=source_directory,
+            manifest_path=manifest_path,
+            output_directory=output_directory,
+            ocr_adapter=adapter,
+        )
+
+    assert str(raised.value) == "OCR adapter identity is invalid."
+    assert not output_directory.exists()
 
 
 def test_missing_document_does_not_hide_other_document_results(tmp_path: Path) -> None:
@@ -471,6 +679,97 @@ def test_hash_mismatch_is_sanitized_and_does_not_extract_the_source(
     assert changed.failure_code == "document.source_hash_mismatch"
     assert changed.artifact_path is None
     assert str(source_directory) not in cast(str, changed.failure_code)
+
+
+def test_source_changed_overrides_initial_integrity_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path
+    )
+    changed_path = source_directory / "Doc1.pdf"
+    changed_content = bytearray(changed_path.read_bytes())
+    changed_content[20] = ord("X")
+    changed_path.write_bytes(changed_content)
+    fingerprint, observed_calls = _change_on_second_fingerprint()
+    monkeypatch.setattr(
+        "prescriptive_maintenance.data.source_documents._fingerprint",
+        fingerprint,
+    )
+
+    result = extract_source_documents(
+        source_directory=source_directory,
+        manifest_path=manifest_path,
+        output_directory=output_directory,
+    )
+
+    assert result.documents[0].failure_code == "document.source_changed"
+    assert len(observed_calls) == 2
+    assert observed_calls[0] is observed_calls[1]
+
+
+def test_source_changed_overrides_unreadable_pdf_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path
+    )
+    unreadable_path = source_directory / "Doc1.pdf"
+    unreadable_path.write_bytes(b"entirely synthetic invalid PDF")
+    _replace_manifest_fingerprint(
+        manifest_path,
+        name="Doc1.pdf",
+        source_path=unreadable_path,
+    )
+    fingerprint, observed_calls = _change_on_second_fingerprint()
+    monkeypatch.setattr(
+        "prescriptive_maintenance.data.source_documents._fingerprint",
+        fingerprint,
+    )
+
+    result = extract_source_documents(
+        source_directory=source_directory,
+        manifest_path=manifest_path,
+        output_directory=output_directory,
+    )
+
+    assert result.documents[0].failure_code == "document.source_changed"
+    assert len(observed_calls) == 2
+    assert observed_calls[0] is observed_calls[1]
+
+
+def test_source_changed_overrides_pdf_processing_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path
+    )
+    fingerprint, observed_calls = _change_on_second_fingerprint()
+
+    def fail_page_processing(**kwargs: object) -> NoReturn:
+        raise RuntimeError("synthetic processing failure")
+
+    monkeypatch.setattr(
+        "prescriptive_maintenance.data.source_documents._fingerprint",
+        fingerprint,
+    )
+    monkeypatch.setattr(
+        "prescriptive_maintenance.data.source_documents._extract_page",
+        fail_page_processing,
+    )
+
+    result = extract_source_documents(
+        source_directory=source_directory,
+        manifest_path=manifest_path,
+        output_directory=output_directory,
+    )
+
+    assert result.documents[0].failure_code == "document.source_changed"
+    assert len(observed_calls) == 2
+    assert observed_calls[0] is observed_calls[1]
 
 
 def test_rejects_manifest_missing_an_authorized_document(tmp_path: Path) -> None:

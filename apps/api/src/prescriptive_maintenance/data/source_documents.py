@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import tempfile
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
@@ -15,6 +16,7 @@ from hashlib import sha256
 from importlib.metadata import version as package_version
 from math import isfinite
 from pathlib import Path
+from shutil import which
 from typing import Any, BinaryIO, Final, Protocol, cast
 from unicodedata import category as unicode_category
 
@@ -23,7 +25,7 @@ import pypdfium2 as pdfium  # pyright: ignore[reportMissingTypeStubs]
 SOURCE_DOCUMENT_NAMES: Final = tuple(f"Doc{number}.pdf" for number in range(1, 7))
 SOURCE_DOCUMENT_INVENTORY_SCHEMA_VERSION: Final = 1
 SOURCE_DOCUMENT_EXTRACTION_SCHEMA_VERSION: Final = 1
-SOURCE_DOCUMENT_EXTRACTOR_VERSION: Final = 1
+SOURCE_DOCUMENT_EXTRACTOR_VERSION: Final = 2
 
 _SUPPORTED_MANIFEST_SCHEMA_VERSION: Final = 1
 _SUPPORTED_HASH_ALGORITHM: Final = "sha256"
@@ -34,10 +36,12 @@ _OCR_RENDER_SCALE: Final = 300 / 72
 _MINIMUM_ALPHANUMERIC_CHARACTERS: Final = 12
 _MINIMUM_ALPHANUMERIC_RATIO: Final = 0.5
 _MINIMUM_MEAN_OCR_CONFIDENCE: Final = 0.8
+_MINIMUM_POINT_OCR_CONFIDENCE: Final = 0.6
 _SAFE_ADAPTER_VALUE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
 _NATIVE_REVIEW_ONLY_SIGNALS: Final = frozenset(
     {"text.too_short", "text.low_alphanumeric_ratio"}
 )
+_GIT_COMMAND_TIMEOUT_SECONDS: Final = 10
 
 
 class SourceDocumentError(Exception):
@@ -202,7 +206,7 @@ def extract_source_documents(
 
     manifest = _load_manifest(manifest_path)
     adapter_identity = _validate_adapter(ocr_adapter)
-    _prepare_output_directory(output_directory)
+    safe_output_directory = _prepare_output_directory(output_directory)
 
     extracted_documents: list[_DocumentExtraction] = []
     for name in SOURCE_DOCUMENT_NAMES:
@@ -213,7 +217,7 @@ def extract_source_documents(
         )
         if extracted.fingerprint is not None:
             artifact_path = _document_artifact_path(
-                output_directory=output_directory,
+                output_directory=safe_output_directory,
                 document_name=name,
                 source_sha256=extracted.fingerprint.sha256,
             )
@@ -224,11 +228,11 @@ def extract_source_documents(
 
     documents = tuple(extracted_documents)
     inventory_status = _inventory_status(documents)
-    inventory_path = output_directory / _INVENTORY_FILENAME
+    inventory_path = safe_output_directory / _INVENTORY_FILENAME
     inventory_payload = _inventory_payload(
         status=inventory_status,
         documents=documents,
-        output_directory=output_directory,
+        output_directory=safe_output_directory,
         adapter_identity=adapter_identity,
     )
     _write_json_if_changed(inventory_path, inventory_payload)
@@ -308,30 +312,148 @@ def _validate_adapter(
     if ocr_adapter is None:
         return None
     try:
-        name = ocr_adapter.name
-        version = ocr_adapter.version
+        name = cast(object, ocr_adapter.name)
+        version = cast(object, ocr_adapter.version)
     except Exception:
         raise SourceDocumentError("OCR adapter identity is invalid.") from None
     if (
-        _SAFE_ADAPTER_VALUE.fullmatch(name) is None
+        not isinstance(name, str)
+        or not isinstance(version, str)
+        or _SAFE_ADAPTER_VALUE.fullmatch(name) is None
         or _SAFE_ADAPTER_VALUE.fullmatch(version) is None
     ):
         raise SourceDocumentError("OCR adapter identity is invalid.")
     return name, version
 
 
-def _prepare_output_directory(output_directory: Path) -> None:
+def _prepare_output_directory(output_directory: Path) -> Path:
+    safe_output_directory = _safe_output_path(output_directory)
+    _require_git_ignored(safe_output_directory / _INVENTORY_FILENAME)
     try:
-        if output_directory.is_symlink():
-            raise SourceDocumentOutputError("Local output directory is unsafe.")
-        output_directory.mkdir(parents=True, exist_ok=True)
-        if not output_directory.is_dir():
+        safe_output_directory.mkdir(parents=True, exist_ok=True)
+        if not safe_output_directory.is_dir():
             raise SourceDocumentOutputError("Local output directory is unavailable.")
     except SourceDocumentOutputError:
         raise
     except OSError:
         raise SourceDocumentOutputError(
             "Local output directory is unavailable."
+        ) from None
+    return safe_output_directory
+
+
+def _safe_output_path(path: Path) -> Path:
+    if ".." in path.parts:
+        raise SourceDocumentOutputError("Local output path is unsafe.")
+    try:
+        absolute_path = path if path.is_absolute() else Path.cwd() / path
+        current = Path(absolute_path.anchor)
+        for part in absolute_path.parts[1:]:
+            current /= part
+            if current.is_symlink():
+                raise SourceDocumentOutputError("Local output path is unsafe.")
+        return absolute_path.resolve(strict=False)
+    except SourceDocumentOutputError:
+        raise
+    except (OSError, RuntimeError):
+        raise SourceDocumentOutputError("Local output path is unsafe.") from None
+
+
+def _require_git_ignored(artifact_path: Path) -> None:
+    safe_artifact_path = _safe_output_path(artifact_path)
+    worktree_root = _git_worktree_root(safe_artifact_path.parent)
+    if worktree_root is None:
+        return
+    try:
+        relative_path = safe_artifact_path.relative_to(worktree_root)
+    except ValueError:
+        raise SourceDocumentOutputError(
+            "Local output Git protection could not be verified."
+        ) from None
+    if relative_path.parts and relative_path.parts[0] == ".git":
+        raise SourceDocumentOutputError("Local output path is unsafe.")
+
+    result = _run_git(
+        worktree_root,
+        "check-ignore",
+        "--quiet",
+        "--",
+        relative_path.as_posix(),
+    )
+    if result.returncode == 0:
+        return
+    if result.returncode == 1:
+        raise SourceDocumentOutputError("Local output artifact is not ignored by Git.")
+    raise SourceDocumentOutputError(
+        "Local output Git protection could not be verified."
+    )
+
+
+def _git_worktree_root(path: Path) -> Path | None:
+    probe = path
+    try:
+        while not probe.exists():
+            if probe.parent == probe:
+                return None
+            probe = probe.parent
+        if not probe.is_dir():
+            probe = probe.parent
+    except OSError:
+        raise SourceDocumentOutputError(
+            "Local output Git protection could not be verified."
+        ) from None
+
+    marker_directory: Path | None = None
+    for candidate in (probe, *probe.parents):
+        try:
+            os.lstat(candidate / ".git")
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise SourceDocumentOutputError(
+                "Local output Git protection could not be verified."
+            ) from None
+        marker_directory = candidate
+        break
+    if marker_directory is None:
+        return None
+
+    result = _run_git(marker_directory, "rev-parse", "--show-toplevel")
+    if result.returncode != 0 or not result.stdout.strip():
+        raise SourceDocumentOutputError(
+            "Local output Git protection could not be verified."
+        )
+    try:
+        worktree_root = Path(result.stdout.strip()).resolve(strict=True)
+        path.relative_to(worktree_root)
+    except (OSError, RuntimeError, ValueError):
+        raise SourceDocumentOutputError(
+            "Local output Git protection could not be verified."
+        ) from None
+    return worktree_root
+
+
+def _run_git(worktree_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    git_executable = which("git")
+    if git_executable is None:
+        raise SourceDocumentOutputError(
+            "Local output Git protection could not be verified."
+        )
+    try:
+        return subprocess.run(  # noqa: S603
+            [git_executable, *arguments],
+            cwd=worktree_root,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_GIT_COMMAND_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise SourceDocumentOutputError(
+            "Local output Git protection could not be verified."
         ) from None
 
 
@@ -344,42 +466,12 @@ def _extract_document(
     try:
         with _open_source_read_only(source_path) as source:
             before = _fingerprint(source)
-            integrity_failure = _initial_integrity_failure(
-                actual=before,
-                expected=manifest_entry.fingerprint,
+            extracted = _extract_open_document(
+                source=source,
+                manifest_entry=manifest_entry,
+                fingerprint=before,
+                ocr_adapter=ocr_adapter,
             )
-            if integrity_failure is not None:
-                return _failed_document(manifest_entry.name, integrity_failure)
-
-            try:
-                source.seek(0)
-                document = pdfium.PdfDocument(source, autoclose=False)
-            except Exception:
-                return _failed_document(
-                    manifest_entry.name,
-                    "document.pdf_unreadable",
-                    fingerprint=before,
-                )
-
-            try:
-                with document:
-                    pdf_version = _pdf_version(document.get_version())
-                    page_count = len(document)
-                    pages = tuple(
-                        _extract_page(
-                            document=document,
-                            page_index=page_index,
-                            ocr_adapter=ocr_adapter,
-                        )
-                        for page_index in range(page_count)
-                    )
-            except Exception:
-                return _failed_document(
-                    manifest_entry.name,
-                    "document.pdf_processing_failed",
-                    fingerprint=before,
-                )
-
             after = _fingerprint(source)
             if after != before:
                 return _failed_document(
@@ -388,11 +480,56 @@ def _extract_document(
                 )
     except _SourceAccessFailure as error:
         return _failed_document(manifest_entry.name, error.code)
+    return extracted
+
+
+def _extract_open_document(
+    *,
+    source: BinaryIO,
+    manifest_entry: _ManifestEntry,
+    fingerprint: SourceDocumentFingerprint,
+    ocr_adapter: PageOcrAdapter | None,
+) -> _DocumentExtraction:
+    integrity_failure = _initial_integrity_failure(
+        actual=fingerprint,
+        expected=manifest_entry.fingerprint,
+    )
+    if integrity_failure is not None:
+        return _failed_document(manifest_entry.name, integrity_failure)
+
+    try:
+        source.seek(0)
+        document = pdfium.PdfDocument(source, autoclose=False)
+    except Exception:
+        return _failed_document(
+            manifest_entry.name,
+            "document.pdf_unreadable",
+            fingerprint=fingerprint,
+        )
+
+    try:
+        with document:
+            pdf_version = _pdf_version(document.get_version())
+            page_count = len(document)
+            pages = tuple(
+                _extract_page(
+                    document=document,
+                    page_index=page_index,
+                    ocr_adapter=ocr_adapter,
+                )
+                for page_index in range(page_count)
+            )
+    except Exception:
+        return _failed_document(
+            manifest_entry.name,
+            "document.pdf_processing_failed",
+            fingerprint=fingerprint,
+        )
 
     return _DocumentExtraction(
         name=manifest_entry.name,
         status=_document_status(pages),
-        fingerprint=before,
+        fingerprint=fingerprint,
         pdf_version=pdf_version,
         page_count=page_count,
         pages=pages,
@@ -642,8 +779,17 @@ def _measure_text(
     if is_ocr:
         if not confidences:
             signals.append("ocr.confidence_unavailable")
-        elif mean_confidence is None or mean_confidence < _MINIMUM_MEAN_OCR_CONFIDENCE:
-            signals.append("ocr.low_mean_confidence")
+        else:
+            if (
+                mean_confidence is None
+                or mean_confidence < _MINIMUM_MEAN_OCR_CONFIDENCE
+            ):
+                signals.append("ocr.low_mean_confidence")
+            if (
+                minimum_confidence is None
+                or minimum_confidence < _MINIMUM_POINT_OCR_CONFIDENCE
+            ):
+                signals.append("ocr.low_minimum_confidence")
 
     return _TextQuality(
         character_count=len(text),
@@ -982,6 +1128,7 @@ def _summary(document: _DocumentExtraction) -> SourceDocumentSummary:
 
 
 def _write_json_if_changed(path: Path, payload: Mapping[str, object]) -> None:
+    _require_git_ignored(path)
     try:
         content = (
             json.dumps(

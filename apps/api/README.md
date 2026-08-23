@@ -112,7 +112,9 @@ rodadas seja declarada sob uma identidade anterior.
 Os caminhos do diretório de origem, do manifesto e da saída local são
 obrigatórios; não há descoberta recursiva nem acesso aos outros materiais. Cada
 fonte é aberta por descritor binário read-only, validada por tamanho e SHA-256
-antes do parse e verificada novamente no mesmo descritor ao final.
+antes do parse e verificada novamente no mesmo descritor ao final, inclusive
+quando a integridade inicial diverge ou o parse/processamento falha. Uma mudança
+da fonte tem precedência sobre a falha intermediária.
 
 A extração nativa é preferencial. Texto nativo não vazio que seja apenas curto
 ou tenha baixa proporção alfanumérica é preservado como `native/suspect`, pois
@@ -120,11 +122,20 @@ pode representar títulos, tabelas curtas ou localizadores válidos. Páginas se
 texto utilizável podem ser encaminhadas a um `PageOcrAdapter`; sem adapter, elas
 permanecem explicitamente em `ocr_required`. Falhas de OCR preservam qualquer
 fallback nativo suspeito e registram um código sanitizado por página.
+Resultados OCR usam dois gates versionados: confiança média mínima de `0.80` e
+confiança pontual mínima de `0.60`. A página fica `suspect` se qualquer um deles
+falhar.
 
 `RapidOcrAdapter` é a implementação local baseada em RapidOCR e ONNX Runtime.
 O motor e seus modelos são inicializados de forma lazy somente na primeira
 página encaminhada ao OCR, com nível de log `error`; nenhuma chamada externa é
 feita. A factory ou o engine podem ser injetados para testes sintéticos.
+
+Se a saída estiver dentro de qualquer worktree Git, o próprio artefato precisa
+ser confirmado como ignorado antes de cada escrita; destino não ignorado ou
+erro nessa verificação falha fechado. Caminhos explícitos fora de repositórios
+continuam permitidos para testes sintéticos isolados, sem aceitar symlinks ou
+segmentos de escape.
 
 ```python
 from pathlib import Path
