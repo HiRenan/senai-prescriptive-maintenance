@@ -12,6 +12,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
+from hmac import compare_digest
 from io import BytesIO
 from math import isfinite
 from pathlib import Path
@@ -1267,6 +1268,7 @@ def _read_bounded_regular_file(path: Path, maximum_bytes: int) -> bytes:
                 "Similarity index artifact file is invalid."
             )
         chunks: list[bytes] = []
+        snapshot_digest = sha256()
         observed_bytes = 0
         while True:
             block = os.read(
@@ -1276,8 +1278,28 @@ def _read_bounded_regular_file(path: Path, maximum_bytes: int) -> bytes:
             if not block:
                 break
             chunks.append(block)
+            snapshot_digest.update(block)
             observed_bytes += len(block)
             if observed_bytes > maximum_bytes:
+                raise SimilarityIndexArtifactError(
+                    "Similarity index artifact file is invalid."
+                )
+        post_read_metadata = os.fstat(descriptor)
+        # Same-size writes can retain indistinguishable timestamps on some filesystems.
+        # A second bounded digest keeps concurrent-mutation detection byte-based.
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        verification_digest = sha256()
+        verified_bytes = 0
+        while True:
+            block = os.read(
+                descriptor,
+                min(_FILE_READ_BLOCK_BYTES, maximum_bytes + 1 - verified_bytes),
+            )
+            if not block:
+                break
+            verification_digest.update(block)
+            verified_bytes += len(block)
+            if verified_bytes > maximum_bytes:
                 raise SimilarityIndexArtifactError(
                     "Similarity index artifact file is invalid."
                 )
@@ -1285,10 +1307,17 @@ def _read_bounded_regular_file(path: Path, maximum_bytes: int) -> bytes:
         final_path_metadata = path.lstat()
         if (
             opened_metadata.st_size != observed_bytes
-            or final_descriptor_metadata.st_size != observed_bytes
+            or post_read_metadata.st_size != observed_bytes
+            or verified_bytes != observed_bytes
+            or final_descriptor_metadata.st_size != verified_bytes
+            or not compare_digest(
+                snapshot_digest.digest(), verification_digest.digest()
+            )
+            or _file_identity(post_read_metadata) != _file_identity(opened_metadata)
             or _file_identity(final_descriptor_metadata)
             != _file_identity(opened_metadata)
             or _file_identity(final_path_metadata) != _file_identity(opened_metadata)
+            or _file_state(post_read_metadata) != _file_state(opened_metadata)
             or _file_state(final_descriptor_metadata) != _file_state(opened_metadata)
             or _portable_file_state(final_path_metadata)
             != _portable_file_state(opened_metadata)
