@@ -118,6 +118,9 @@ A versão atual contém:
   teste, abstenção tipada para distância, votação ou classe rara, adapter da
   porta de modelo e artefato NumPy/JSON versionado, íntegro e sem
   desserialização executável;
+- um índice de similaridade local derivado somente do artefato k-NN já
+  verificado, com manifesto de compatibilidade e hashes, porta única, adapters
+  equivalentes em memória e PostgreSQL/pgvector e migração reversível;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -126,10 +129,10 @@ A versão atual contém:
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, integração da baseline, da composição RAG ou dos adapters persistentes
-ao fluxo HTTP, busca semântica real por vizinhos, vetores integrados à aplicação,
-configuração operacional ou chamada automática a LLM, autenticação,
-infraestrutura AWS aplicada, deploy ou interface web.
+aplicação, integração da baseline, do índice de similaridade, da composição RAG
+ou dos adapters persistentes ao fluxo HTTP, busca semântica real por vizinhos,
+vetores integrados à aplicação, configuração operacional ou chamada automática
+a LLM, autenticação, infraestrutura AWS aplicada, deploy ou interface web.
 
 ## Arquitetura atual
 
@@ -143,7 +146,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima com adapters em memória/PostgreSQL, baseline e recuperação de vizinhos em memória/pgvector, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
@@ -397,6 +400,8 @@ sem enfraquecer a fronteira dos materiais locais.
   implementado;
 - [`docs/validation/document-pipeline.md`](docs/validation/document-pipeline.md):
   decisões, evidências e limites do pipeline documental governado da SEN-4;
+- [`docs/validation/similarity-index.md`](docs/validation/similarity-index.md):
+  contrato, integridade e paridade sintética do índice de similaridade SEN-52.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 

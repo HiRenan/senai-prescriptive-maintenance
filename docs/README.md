@@ -20,6 +20,7 @@ sem repetir extensamente a mesma orientação.
 | [`validation/knn-baseline.md`](validation/knn-baseline.md) | Decisões, integridade e avaliação temporal sanitizada da baseline k-NN SEN-42. |
 | [`validation/knn-abstention.md`](validation/knn-abstention.md) | Política versionada de suporte, novidade e abstenção do k-NN SEN-51, com avaliação temporal agregada. |
 | [`validation/prescription-orchestration.md`](validation/prescription-orchestration.md) | Decisões, timeout limitado, metadados, estados e riscos residuais da composição prescritiva SEN-59. |
+| [`validation/similarity-index.md`](validation/similarity-index.md) | Contrato, integridade e paridade sintética do índice de similaridade SEN-52. |
 | [`../data/README.md`](../data/README.md) | Preparação local, integridade e fronteira dos materiais e fixtures. |
 
 ## Idioma

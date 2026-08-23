@@ -140,6 +140,66 @@ _INITIAL_DOWN: Final[tuple[LiteralString, ...]] = (
     "DROP TABLE analyses",
 )
 
+_SIMILARITY_INDEX_UP: Final[tuple[LiteralString, ...]] = (
+    """
+    CREATE TABLE similarity_indexes (
+        index_id TEXT PRIMARY KEY
+            CHECK (index_id ~ '^similarity_index_v1_[0-9a-f]{32}$'),
+        content_sha256 TEXT NOT NULL
+            CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
+        manifest_sha256 TEXT NOT NULL
+            CHECK (manifest_sha256 ~ '^[0-9a-f]{64}$'),
+        artifact_schema_version SMALLINT NOT NULL
+            CHECK (artifact_schema_version > 0),
+        dataset_id TEXT NOT NULL
+            CHECK (dataset_id ~ '^[0-9a-f]{64}$'),
+        schema_id TEXT NOT NULL
+            CHECK (schema_id ~ '^[0-9a-f]{64}$'),
+        feature_contract_version SMALLINT NOT NULL
+            CHECK (feature_contract_version > 0),
+        preprocessor_version TEXT NOT NULL
+            CHECK (preprocessor_version ~ '^[a-z0-9][a-z0-9_.-]{2,79}$'),
+        index_version TEXT NOT NULL
+            CHECK (index_version ~ '^[a-z0-9][a-z0-9_.-]{2,79}$'),
+        configuration_version TEXT NOT NULL
+            CHECK (configuration_version ~ '^[a-z0-9][a-z0-9_.-]{2,79}$'),
+        dimension SMALLINT NOT NULL CHECK (dimension = 18),
+        metric TEXT NOT NULL
+            CHECK (metric ~ '^[a-z0-9][a-z0-9_.-]{2,79}$'),
+        record_count INTEGER NOT NULL CHECK (record_count > 0),
+        source_model_id TEXT NOT NULL
+            CHECK (source_model_id ~ '^model_[a-z0-9_.-]{3,64}$'),
+        source_model_content_sha256 TEXT NOT NULL
+            CHECK (source_model_content_sha256 ~ '^[0-9a-f]{64}$'),
+        vector_dtype TEXT NOT NULL CHECK (vector_dtype <> ''),
+        distance_order TEXT NOT NULL CHECK (distance_order <> ''),
+        distance_tie_break TEXT NOT NULL CHECK (distance_tie_break <> '')
+    )
+    """,
+    """
+    CREATE TABLE similarity_index_entries (
+        index_id TEXT NOT NULL,
+        opaque_id TEXT NOT NULL
+            CHECK (opaque_id ~ '^neighbor_[a-z0-9_]{3,64}$'),
+        fault_code TEXT NOT NULL
+            CHECK (fault_code ~ '^fault_[a-z0-9_]{3,200}$'),
+        embedding public.vector(18) NOT NULL,
+        vector_sha256 TEXT NOT NULL
+            CHECK (vector_sha256 ~ '^[0-9a-f]{64}$'),
+        PRIMARY KEY (index_id, opaque_id),
+        CONSTRAINT similarity_index_entries_index_fk
+            FOREIGN KEY (index_id)
+            REFERENCES similarity_indexes (index_id)
+            ON DELETE RESTRICT
+    )
+    """,
+)
+
+_SIMILARITY_INDEX_DOWN: Final[tuple[LiteralString, ...]] = (
+    "DROP TABLE similarity_index_entries",
+    "DROP TABLE similarity_indexes",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Migration:
@@ -160,6 +220,12 @@ MIGRATIONS: Final[tuple[Migration, ...]] = (
         name="initial_analysis_metadata",
         up=_INITIAL_UP,
         down=_INITIAL_DOWN,
+    ),
+    Migration(
+        version=2,
+        name="versioned_similarity_index",
+        up=_SIMILARITY_INDEX_UP,
+        down=_SIMILARITY_INDEX_DOWN,
     ),
 )
 LATEST_MIGRATION_VERSION: Final = MIGRATIONS[-1].version
