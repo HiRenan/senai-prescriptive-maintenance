@@ -40,7 +40,10 @@ fixtures sintéticas.
   e exatamente um destino entre `train`, `validation`, `test`, `purge` e
   `rejected`. Essa reconciliação evita perdas silenciosas.
 - A escrita é atômica e fail-closed. Um destino existente só é aceito quando os
-  seis arquivos são byte a byte idênticos; conteúdo diferente é recusado.
+  seis arquivos são byte a byte idênticos; conteúdo diferente é recusado. Antes
+  da escrita, destinos dentro de qualquer worktree Git precisam estar realmente
+  ignorados. Erros do Git, escapes e componentes que sejam symlinks ou junctions
+  também são recusados; temporários externos a worktrees continuam permitidos.
 
 ### Contrato das 18 features
 
@@ -82,10 +85,13 @@ O fluxo que decide ocorrências e partições não recebe o target:
 
 1. valida o contrato e aplica apenas decisões de qualidade não estatísticas;
 2. ordena registros elegíveis por timestamp e posição estável de origem;
-3. ajusta o limiar de gap somente no prefixo cronológico correspondente a
-   treino, usando o maior valor entre cinco vezes a mediana e o percentil 95;
+3. itera agrupamento e fronteiras atômicas até estabilizar o limiar de gap,
+   ajustando-o em cada iteração somente com os registros das ocorrências que
+   pertencem ao treino final corrente, pelo maior valor entre cinco vezes a
+   mediana e o percentil 95;
 4. agrupa ocorrências apenas por ordem temporal, gap estritamente maior que o
-   limiar e limite inclusivo de 24 horas;
+   limiar e duração estritamente menor que 24 horas: um registro em exatamente
+   86.400 segundos desde o início abre uma nova ocorrência;
 5. escolhe fronteiras cronológicas 70/15/15 por linhas, sem cortar ocorrências;
 6. purga ocorrências completas na cauda da partição anterior quando a fronteira
    não respeita o mesmo limiar de gap;
@@ -94,7 +100,8 @@ O fluxo que decide ocorrências e partições não recebe o target:
 8. somente depois dessas decisões resolve o rótulo exato no inventário e o
    materializa como `y`.
 
-Não há scaling nem imputação. O target não influencia ajuste, ordem,
+Não há scaling nem imputação. O target só é materializado depois da partição,
+como `y`, e não influencia elegibilidade, duplicidade, ajuste, ordem,
 agrupamento, limite de ocorrência, split, purga ou estatística. Um teste
 sintético altera labels dentro de uma sequência curta e comprova que os mesmos
 registros permanecem na mesma ocorrência e no mesmo destino; nenhuma ocorrência
@@ -114,9 +121,10 @@ Cada destino de build contém exatamente:
 - `manifest.json`: identidades, hashes, fit, contagens, reconciliações e gates.
 
 `data-check` é somente leitura e exige o conjunto exato de arquivos, schemas e
-tipos, serialização canônica do manifesto, hashes físicos e lógicos, componentes
-vigentes, recomputação do fit temporal e IQR de treino, reconciliação integral,
-ID do dataset e os onze gates abaixo:
+tipos, schema profundo e sem campos extras para todo o manifesto, serialização
+canônica, hashes físicos e lógicos, componentes vigentes, recomputação do fit
+temporal e IQR de treino, referências cruzadas, cobertura única e integral dos
+destinos versionados, ID do dataset e os onze gates abaixo:
 
 - ledger com destino único e cobertura integral;
 - cobertura canônica de todos os elegíveis;
@@ -132,27 +140,32 @@ ID do dataset e os onze gates abaixo:
 
 ## Validação sintética e agregada
 
-- Testes direcionados do pipeline e CLI: 14 passaram. Eles cobrem projeção das
-  18 features, determinismo, checker read-only, mudança de label dentro de uma
-  ocorrência, isolamento de `y`, purga sintética, falhas de contrato/inventário,
-  saída sanitizada e códigos de saída estáveis.
+- Testes direcionados do pipeline e CLI: 27 passaram e 1 teste condicional de
+  symlink foi ignorado no Windows. Eles cobrem projeção das 18 features,
+  determinismo, checker read-only, mudança de label dentro de uma ocorrência,
+  cenário atômico 10/10/40 sem IDs de validação ou teste no fit, fronteira exata
+  de 24 horas, isolamento de `y`, purga sintética, destino `shadow`, faltas,
+  duplicações e divergência entre disposição e destino, adulterações
+  coerentemente resseladas do manifesto, segurança do destino, saída sanitizada
+  e códigos de saída estáveis.
 - `uv run --frozen poe check`: Ruff format-check e lint passaram, Pyright estrito
-  registrou zero erros e Pytest concluiu 503 testes aprovados, 1 skip esperado e
-  cobertura total de 84,36%, acima do gate de 80%.
+  registrou zero erros e Pytest concluiu 604 testes aprovados, 3 skips esperados
+  e cobertura total de 84,96%, acima do gate de 80%.
 - Nenhum teste ou comando de CI abre a fonte privada; todos os cenários públicos
   são sintéticos.
 
 ## Duas execuções reais independentes
 
-Os destinos `data/processed/sen-41-final-a` e
-`data/processed/sen-41-final-b` foram confirmados por `git check-ignore` antes
-da escrita. Em cada destino, `data-build` e depois `data-check` passaram. Os dois
-manifestos são idênticos e os seis arquivos têm o mesmo tamanho e SHA-256.
+Os destinos `data/processed/sen-41-rebase-a` e
+`data/processed/sen-41-rebase-b` foram confirmados por `git check-ignore`; o
+próprio build repetiu essa prova antes da escrita. Em cada destino, `data-build`
+e depois `data-check` passaram. Os dois manifestos são idênticos e os seis
+arquivos têm o mesmo tamanho e SHA-256.
 
 - Dataset ID:
-  `4fdc15623124e6d58f422b07018847ddbdd408768b6e2ebe9834cfcdc90cac2b`.
+  `a0c1a7c5141b9b3a8856ad9af458fe09baa7fa04f6b96316ecb52a6d6b426327`.
 - Configuração do pipeline:
-  `4c6239ca75dcb4b8cdf9a3fa855f21e558ba1418f57c125d9a54c383c8c232ea`.
+  `a6fedfcc23320e72954a783c0499d9b19ba785f6b9a462f67451bbe531dd72d7`.
 - Schema dos artefatos:
   `9c8fc35a1b63b2f5aa4c90b85a2b164a309768a486deb81b833196fb1fe3bbcd`.
 - Política de qualidade:
@@ -160,18 +173,35 @@ manifestos são idênticos e os seis arquivos têm o mesmo tamanho e SHA-256.
 - Inventário categórico:
   `aabf85c066bcf12fb8b27c4bb6ab7fce601dfc1512b64f762c42bab24b98aa78`.
 - `uv.lock`:
-  `a1ec635bafc2512326ba5fa3ace049d0900c653fded746ba61ecc1ddd7b52c45`.
+  `8739eb081aa6c1785b2b231ed9cc43f959b62de81995bf02a263a9a7a2be9b32`.
 - Cercas IQR de treino:
   `5b25b6adeafbb0d065ae29a1fd788fc055383825cfe80f440c4dd400ca5b7bdb`.
+- Pertencimento do fit temporal, restrito a 116.882 registros das 145
+  ocorrências finais de treino:
+  `9b957316fe916cd67ef93d1d21ff17b698b3fe19d42b4cebee3d3d46beb90200`.
 
 | Derivado | Linhas | Colunas | SHA-256 físico | SHA-256 lógico |
 | --- | ---: | ---: | --- | --- |
-| `canonical.parquet` | 166.796 | 26 | `9aedaca2be07010f26407da263c0300a46c61f411583ca6498e9c0cbac0f440c` | `f5bc39721f7edf112636787b35fb58b658834895742a93951f0c1771a4d319ff` |
+| `canonical.parquet` | 166.796 | 26 | `f0a39f177c8edd15b71616161a687d888521e10526397694ba6e2bef60413b96` | `b4c98c2549a673ba17db2bef83e62861231e391e67b6b4358d3033dc64f0a7ed` |
 | `dispositions.parquet` | 166.796 | 7 | `bfb33e61a4d059792549c1598531bc3b4bb4bd498e1ff0d3d74ea1bdce3c430c` | `f05549141ef1ebe6872be98b6f42de06c20d8150401f25d01a8681a2d583feea` |
 | `train.parquet` | 116.882 | 19 | `5cd162f27afff80191374ee008349a4cc29ec3f89ce6bdf760d99e277d3662f6` | `a8428f851da34a38b811bb41fa066f5a4ae985a305dd595df0e9cbdc3af7abd1` |
 | `validation.parquet` | 25.146 | 19 | `9dc026744712d8ab005a15a1c4c5f20e00de9af16c3a51c437809f327c558693` | `66de1b607cf2cbca59e0e8541761070ea377e2ffc9e10400b6f2ff6e65a89a0d` |
 | `test.parquet` | 24.768 | 19 | `7f5bfec103f85e8a481cbbe7d2468c208fd2759ec29aea48f84e023830e1e993` | `0476d131b1e3d889da4d32039d3c60aa8f45c62e55fe12acea60c03a293b0414` |
-| `manifest.json` | — | — | `e9ed0689b06f82ff13d979e3de5c60149317fb96a59b9dc3eaffef8e7d72416f` | incorporado ao dataset ID |
+| `manifest.json` | — | — | `b9b68de563430410c5f2dcdd51fb5c1a2a065accd07571eb76c5a97a5565023c` | incorporado ao dataset ID |
+
+Na validação do hardening, em relação à primeira execução da SEN-41, contagens,
+fronteiras, ledger e os três Parquets de modelagem permaneceram idênticos.
+Mudaram, como esperado, o ID da configuração, o dataset ID, o manifesto e
+`canonical.parquet`: o canônico contém IDs de ocorrência vinculados à
+configuração versionada, enquanto o manifesto passou a registrar escopo,
+contagens e hash de pertencimento do fit final de treino. Não houve mudança de
+linhas entre partições.
+
+Após o rebase sobre a SEN-43, o novo `uv.lock` alterou apenas o dataset ID e os
+bytes do manifesto. Configuração, schema, política, inventário, pertencimento
+do fit, contagens e hashes físicos e lógicos dos cinco Parquets permaneceram
+idênticos. Os derivados vinculados ao lock anterior foram corretamente
+recusados como desatualizados pelo checker antes das novas execuções A/B.
 
 ### Contagens e fronteiras sanitizadas
 
@@ -186,7 +216,8 @@ manifestos são idênticos e os seis arquivos têm o mesmo tamanho e SHA-256.
 - Registros que também acumulam ao menos um match IQR: 65.998.
 - Registros com match de duplicidade: 0.
 - Registros cujo target foi mapeado pós-partição: 166.796.
-- Limiar de gap ajustado no prefixo de treino: 10,000575 segundos.
+- Limiar de gap ajustado somente nas 145 ocorrências finais de treino:
+  10,000575 segundos; nenhum ID de validação ou teste participa do fit.
 - Maior gap dentro de uma ocorrência: 6,000447 segundos.
 - Maior duração observada de uma ocorrência: 3.998,247042 segundos, abaixo
   do limite de 24 horas.
@@ -219,6 +250,10 @@ registrado nesta validação.
 - O contrato disponível define um único fluxo temporal e não fornece uma chave
   de ativo separada. Se uma futura fonte autorizada trouxer uma identidade de
   ativo validada, a semântica de agrupamento deverá ser versionada e reavaliada.
+- O ajuste temporal depende de um ponto fixo entre agrupamento e fronteira final
+  de treino. A fonte validada convergiu para 10,000575 segundos e reproduziu as
+  fronteiras anteriores; uma fonte futura que oscile ou exceda o limite de
+  iterações será recusada sem publicar derivados.
 - As 65.998 linhas com match IQR não são removidas. A precedência `corrected`
   domina `flagged`, mas todos os motivos continuam no ledger; consumidores não
   devem interpretar a disposição final isoladamente como ausência de outliers.

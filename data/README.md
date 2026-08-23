@@ -202,17 +202,19 @@ leitura e não depende de acessar a fonte local.
 
 O pipeline canônico pode ler `banner.csv` somente por um caminho explicitamente
 autorizado e pela porta auditada do backend. A fonte não deve ser copiada,
-movida, renomeada ou gravada. Antes de executar `data-build`, escolha um destino
-sob `data/processed/` e confirme com `git check-ignore <destino>` que ele está
-ignorado; uma resposta vazia bloqueia a execução.
+movida, renomeada ou gravada. Antes de escrever, `data-build` verifica de forma
+fail-closed que todo destino dentro de uma worktree Git está ignorado. Destinos
+rastreáveis, erros do Git, escapes e caminhos com symlink ou junction são
+recusados; diretórios temporários externos a uma worktree são permitidos.
 
 Cada build local contém somente os seis arquivos declarados pelo pipeline. O
 `manifest.json` expõe apenas metadados técnicos, contagens agregadas, IDs, hashes,
 reconciliações e gates. Os Parquets são derivados privados por registro e nunca
 podem ser adicionados ao Git, publicados, copiados para fixtures ou usados em CI.
-`data-check` valida o conjunto offline sem abrir novamente a fonte e sem alterar
-os arquivos. Para provar determinismo, execute builds independentes em dois
-destinos ignorados e compare `dataset_id`, hashes físicos e hashes lógicos.
+`data-check` valida o conjunto offline contra manifesto, inventário, baseline e
+lock públicos sem abrir novamente a fonte e sem alterar os arquivos. Para provar
+determinismo, execute builds independentes em dois destinos ignorados e compare
+`dataset_id`, hashes físicos e hashes lógicos.
 
 ## Conteúdo público
 

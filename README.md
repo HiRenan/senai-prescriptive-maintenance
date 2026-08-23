@@ -183,8 +183,8 @@ código; `check` é uma sequência fail-fast somente leitura.
 | `uv run --frozen poe typecheck` | Executa Pyright em modo estrito. |
 | `uv run --frozen poe test` | Executa Pytest com cobertura mínima configurada. |
 | `uv run --frozen poe check` | Executa format-check, lint, typecheck e test, nessa ordem. |
-| `uv run --frozen poe data-build --help` | Exibe os caminhos explícitos exigidos para construir derivados canônicos locais. |
-| `uv run --frozen poe data-check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
+| `uv run --frozen python -m prescriptive_maintenance.data.cli build --help` | Exibe os caminhos explícitos exigidos para construir derivados canônicos locais. |
+| `uv run --frozen python -m prescriptive_maintenance.data.cli check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
 | `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
 | `uv run --frozen poe services-up` | Inicia o PostgreSQL local e aguarda o healthcheck. |
 | `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |

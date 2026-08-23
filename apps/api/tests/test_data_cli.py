@@ -97,8 +97,24 @@ def test_check_command_prints_only_sanitized_aggregates(
     def check(**_: object) -> CanonicalCheckResult:
         return result
 
-    monkeypatch.setattr(cli, "check_canonical_dataset", check)
-    exit_code = cli.main(["check", "--lock", "uv.lock", "--output", "local"])
+    monkeypatch.setattr(cli, "check_banner_dataset", check)
+    exit_code = cli.main(
+        [
+            "check",
+            "--manifest",
+            "manifest.json",
+            "--inventory",
+            "inventory.json",
+            "--baseline-json",
+            "baseline.json",
+            "--baseline-markdown",
+            "baseline.md",
+            "--lock",
+            "uv.lock",
+            "--output",
+            "local",
+        ]
+    )
 
     captured = capsys.readouterr()
     payload = _payload(captured.out)

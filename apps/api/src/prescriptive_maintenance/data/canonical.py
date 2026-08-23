@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
+import subprocess
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -68,6 +70,25 @@ _SCHEMA_RESOURCE_NAME: Final = "banner_dataset_schema.v1.json"
 _DECIMAL_PRECISION: Final = 128
 _SHA256_LENGTH: Final = 64
 _PARQUET_COMPRESSION: Final = "zstd"
+_MAX_TEMPORAL_FIT_ITERATIONS: Final = 64
+
+_CANONICAL_GATE_NAMES: Final[tuple[str, ...]] = (
+    "ledger.complete_destination",
+    "canonical.eligible_coverage",
+    "partitions.assignment_alignment",
+    "partitions.occurrence_disjoint",
+    "partitions.projection_exact",
+    "partitions.temporal_order",
+    "partitions.purge_gap",
+    "features.inference_only",
+    "partitions.nonempty",
+    "fit.statistics_train_only",
+    "fit.target_independent",
+)
+
+_PARQUET_ARTIFACT_FILENAMES: Final[tuple[str, ...]] = tuple(
+    name for name in CANONICAL_ARTIFACT_FILENAMES if name != "manifest.json"
+)
 
 type _FeatureValues = Mapping[str, tuple[float, ...]]
 
@@ -302,6 +323,24 @@ class _Occurrence:
     purged: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _OccurrenceGapFit:
+    threshold: Decimal
+    record_ids: tuple[str, ...]
+    occurrence_ids: tuple[str, ...]
+
+    @property
+    def membership_sha256(self) -> str:
+        return sha256(
+            _canonical_json_bytes(
+                {
+                    "record_ids": list(self.record_ids),
+                    "occurrence_ids": list(self.occurrence_ids),
+                }
+            )
+        ).hexdigest()
+
+
 def load_canonical_pipeline_config() -> CanonicalPipelineConfig:
     """Load and strictly validate the packaged v1 pipeline configuration."""
 
@@ -468,7 +507,7 @@ def load_canonical_pipeline_config() -> CanonicalPipelineConfig:
             "gap_quantile",
             "gap_fit_scope",
             "duration_limit_seconds",
-            "duration_boundary_inclusive",
+            "duration_break_operator",
             "gap_boundary_inclusive",
         ),
         "occurrence_grouping",
@@ -476,8 +515,9 @@ def load_canonical_pipeline_config() -> CanonicalPipelineConfig:
     if (
         _text(grouping["stream"], "stream") != "single_source_stream"
         or _text(grouping["gap_fit_scope"], "gap_fit_scope")
-        != "chronological_train_prefix"
-        or not _boolean(grouping["duration_boundary_inclusive"], "duration")
+        != "final_train_occurrences"
+        or _text(grouping["duration_break_operator"], "duration_break_operator")
+        != "greater_than_or_equal"
         or _boolean(grouping["gap_boundary_inclusive"], "gap")
     ):
         raise CanonicalConfigurationError("Occurrence grouping policy is invalid.")
@@ -737,24 +777,13 @@ def build_canonical_dataset(
     sorted_eligible = tuple(
         sorted(eligible_indices, key=lambda index: _record_order_key(records[index]))
     )
-    gap_threshold = _fit_occurrence_gap_threshold(
-        records=records,
-        ordered_indices=sorted_eligible,
-        config=config,
-    )
-    occurrences = _group_occurrences(
+    _occurrences, gap_fit = _fit_final_train_temporal_partitions(
         records=records,
         ordered_indices=sorted_eligible,
         source_sha256=source_fingerprint.sha256,
         config=config,
-        gap_threshold=gap_threshold,
     )
-    _assign_temporal_partitions(
-        records=records,
-        occurrences=occurrences,
-        config=config,
-        gap_threshold=gap_threshold,
-    )
+    gap_threshold = gap_fit.threshold
 
     train_indices = tuple(
         index
@@ -796,6 +825,7 @@ def build_canonical_dataset(
         partitions=partitions,
         config=config,
         gap_threshold=gap_threshold,
+        gap_fit=gap_fit,
     )
     if not all(gates.values()):
         raise CanonicalPartitionError("One or more temporal leakage gates failed.")
@@ -811,21 +841,58 @@ def build_canonical_dataset(
         label_map=label_map,
         source_fingerprint=source_fingerprint,
         lock_sha256=lock_sha256,
-        gap_threshold=gap_threshold,
+        gap_fit=gap_fit,
         iqr_fences=iqr_fences,
         gates=gates,
     )
     return _build_result(output, manifest)
 
 
+def check_banner_dataset(
+    *,
+    manifest_path: Path,
+    inventory_path: Path,
+    baseline_json_path: Path,
+    baseline_markdown_path: Path,
+    output_directory: Path,
+    lock_path: Path,
+) -> CanonicalCheckResult:
+    """Load the approved public identity and validate one local build offline."""
+
+    inventory = load_fault_label_inventory(
+        inventory_path=inventory_path,
+        manifest_path=manifest_path,
+        baseline_json_path=baseline_json_path,
+        baseline_markdown_path=baseline_markdown_path,
+    )
+    return check_canonical_dataset(
+        output_directory=output_directory,
+        lock_path=lock_path,
+        source_fingerprint=inventory.source_fingerprint,
+        label_map=canonical_label_map_from_inventory(inventory),
+        expected_source_row_count=inventory.row_count,
+    )
+
+
 def check_canonical_dataset(
-    *, output_directory: Path, lock_path: Path
+    *,
+    output_directory: Path,
+    lock_path: Path,
+    source_fingerprint: BannerSourceFingerprint,
+    label_map: CanonicalLabelMap,
+    expected_source_row_count: int,
 ) -> CanonicalCheckResult:
     """Validate manifest, content hashes, reconciliation, and leakage read-only."""
 
     config = load_canonical_pipeline_config()
     schema = load_canonical_dataset_schema()
     policy = load_banner_quality_policy()
+    _validate_source_fingerprint(source_fingerprint)
+    _validate_label_map(label_map)
+    if label_map.source_sha256 != source_fingerprint.sha256:
+        raise CanonicalCheckError("Approved checker identities are inconsistent.")
+    if type(expected_source_row_count) is not int or expected_source_row_count <= 0:
+        raise CanonicalCheckError("Approved source row count is invalid.")
     try:
         lock_sha256 = _hash_regular_file(lock_path)
     except OSError:
@@ -846,13 +913,22 @@ def check_canonical_dataset(
     manifest = _decode_json(manifest_bytes, CanonicalCheckError)
     if _manifest_json_bytes(manifest) != manifest_bytes:
         raise CanonicalCheckError("Canonical manifest serialization is invalid.")
-    _validate_manifest_shape(manifest)
+    _validate_manifest_shape(
+        manifest,
+        config=config,
+        schema=schema,
+        policy=policy,
+        source_fingerprint=source_fingerprint,
+        label_map=label_map,
+        expected_source_row_count=expected_source_row_count,
+    )
 
     components = _mapping_for_check(manifest["components"], "components")
     if (
         components.get("pipeline_config_id") != config.config_id
         or components.get("dataset_schema_id") != schema.schema_id
         or components.get("quality_policy_id") != policy.policy_id
+        or components.get("fault_label_inventory_id") != label_map.inventory_id
         or components.get("uv_lock_sha256") != lock_sha256
         or components.get("banner_contract_version") != BANNER_CONTRACT_VERSION
         or components.get("fault_label_normalization_version")
@@ -862,22 +938,35 @@ def check_canonical_dataset(
         raise CanonicalCheckError("Canonical manifest components are stale.")
 
     frames = _read_artifact_frames(directory, schema)
+    allowed_targets = {item.slug for item in label_map.entries}
+    if any(
+        str(item) not in allowed_targets for item in frames["canonical.parquet"]["y"]
+    ):
+        raise CanonicalCheckError("Canonical target is not in the approved inventory.")
     artifact_hashes = _validate_artifact_hashes(
         directory=directory,
         manifest=manifest,
         frames=frames,
     )
+    fit = _mapping_for_check(manifest["fit"], "fit")
     gap_threshold = _decimal_text_value(
-        _mapping_for_check(manifest["fit"], "fit").get(
-            "occurrence_gap_threshold_seconds"
-        ),
+        fit.get("occurrence_gap_threshold_seconds"),
         CanonicalCheckError,
     )
-    recomputed_gap = _fit_gap_from_canonical(frames["canonical.parquet"], config)
-    if recomputed_gap != gap_threshold:
-        raise CanonicalCheckError("Occurrence fit scope is not train-prefix only.")
+    recomputed_gap_fit = _fit_gap_from_canonical(frames["canonical.parquet"], config)
+    if (
+        recomputed_gap_fit.threshold != gap_threshold
+        or fit.get("occurrence_gap_fit_record_count")
+        != len(recomputed_gap_fit.record_ids)
+        or fit.get("occurrence_gap_fit_occurrence_count")
+        != len(recomputed_gap_fit.occurrence_ids)
+        or fit.get("occurrence_gap_fit_membership_sha256")
+        != recomputed_gap_fit.membership_sha256
+    ):
+        raise CanonicalCheckError(
+            "Occurrence fit is not derived from final train only."
+        )
     fences = _fit_iqr_from_canonical(frames["canonical.parquet"], config)
-    fit = _mapping_for_check(manifest["fit"], "fit")
     if fit.get("target_usage") != config.target_usage:
         raise CanonicalCheckError("Target usage contract is invalid.")
     if (
@@ -895,6 +984,7 @@ def check_canonical_dataset(
         partitions=partitions,
         config=config,
         gap_threshold=gap_threshold,
+        gap_fit=recomputed_gap_fit,
     )
     manifest_gates = _mapping_for_check(manifest["gates"], "gates")
     if not all(gates.values()) or manifest_gates != gates:
@@ -1072,20 +1162,89 @@ def _record_order_key(record: _Record) -> tuple[object, ...]:
     return (record.timestamp, record.source_position)
 
 
+def _fit_final_train_temporal_partitions(
+    *,
+    records: list[_Record],
+    ordered_indices: Sequence[int],
+    source_sha256: str,
+    config: CanonicalPipelineConfig,
+) -> tuple[list[_Occurrence], _OccurrenceGapFit]:
+    gap_threshold = Decimal(-1)
+    seen_states: set[tuple[Decimal, tuple[str, ...]]] = set()
+    for _ in range(_MAX_TEMPORAL_FIT_ITERATIONS):
+        _reset_temporal_assignments(records, ordered_indices)
+        occurrences = _group_occurrences(
+            records=records,
+            ordered_indices=ordered_indices,
+            source_sha256=source_sha256,
+            config=config,
+            gap_threshold=gap_threshold,
+        )
+        _assign_temporal_partitions(
+            records=records,
+            occurrences=occurrences,
+            config=config,
+            gap_threshold=max(gap_threshold, Decimal(0)),
+        )
+        train_indices = tuple(
+            index
+            for index in ordered_indices
+            if records[index].partition is Partition.TRAIN
+        )
+        fitted = _fit_occurrence_gap_threshold(
+            records=records,
+            ordered_indices=train_indices,
+            config=config,
+        )
+        if fitted.threshold == gap_threshold:
+            return occurrences, fitted
+        state = (fitted.threshold, fitted.record_ids)
+        if state in seen_states:
+            raise CanonicalPartitionError("Final-train temporal fit did not converge.")
+        seen_states.add(state)
+        gap_threshold = fitted.threshold
+    raise CanonicalPartitionError("Final-train temporal fit did not converge.")
+
+
+def _reset_temporal_assignments(
+    records: list[_Record], ordered_indices: Sequence[int]
+) -> None:
+    for index in ordered_indices:
+        record = records[index]
+        record.occurrence_id = None
+        record.partition = None
+        record.split_exclusion_reason = None
+
+
 def _fit_occurrence_gap_threshold(
     *,
     records: list[_Record],
     ordered_indices: Sequence[int],
     config: CanonicalPipelineConfig,
-) -> Decimal:
+) -> _OccurrenceGapFit:
+    if not ordered_indices:
+        raise CanonicalPartitionError("Train partition is empty before gap fitting.")
+    if any(records[index].occurrence_id is None for index in ordered_indices):
+        raise CanonicalPartitionError("Train occurrence identity is unavailable.")
+    record_ids = tuple(records[index].record_id for index in ordered_indices)
+    occurrence_ids = tuple(
+        dict.fromkeys(
+            cast(str, records[index].occurrence_id) for index in ordered_indices
+        )
+    )
+    if any(
+        records[index].partition is not Partition.TRAIN for index in ordered_indices
+    ):
+        raise CanonicalPartitionError("Occurrence gap fit is not train-only.")
     if len(ordered_indices) < 2:
-        return Decimal(0)
-    prefix_count = int(Decimal(len(ordered_indices)) * config.train_ratio)
-    prefix_count = min(len(ordered_indices), max(2, prefix_count))
-    prefix = ordered_indices[:prefix_count]
+        return _OccurrenceGapFit(
+            threshold=Decimal(0),
+            record_ids=record_ids,
+            occurrence_ids=occurrence_ids,
+        )
     positive_deltas = sorted(
         delta
-        for previous, current in pairwise(prefix)
+        for previous, current in pairwise(ordered_indices)
         if (
             delta := records[current].timestamp.seconds_since(
                 records[previous].timestamp
@@ -1094,11 +1253,20 @@ def _fit_occurrence_gap_threshold(
         > 0
     )
     if not positive_deltas:
-        return Decimal(0)
-    median = _linear_decimal_quantile(positive_deltas, Decimal("0.5"))
-    high_quantile = _linear_decimal_quantile(positive_deltas, config.gap_quantile)
-    with localcontext(isolated_decimal_context(_DECIMAL_PRECISION)):
-        return max(Decimal(config.gap_multiplier) * median, high_quantile)
+        threshold = Decimal(0)
+    else:
+        median = _linear_decimal_quantile(positive_deltas, Decimal("0.5"))
+        high_quantile = _linear_decimal_quantile(positive_deltas, config.gap_quantile)
+        with localcontext(isolated_decimal_context(_DECIMAL_PRECISION)):
+            threshold = max(
+                Decimal(config.gap_multiplier) * median,
+                high_quantile,
+            )
+    return _OccurrenceGapFit(
+        threshold=threshold,
+        record_ids=record_ids,
+        occurrence_ids=occurrence_ids,
+    )
 
 
 def _linear_decimal_quantile(
@@ -1405,26 +1573,53 @@ def _calculate_leakage_gates(
     partitions: Mapping[Partition, pd.DataFrame],
     config: CanonicalPipelineConfig,
     gap_threshold: Decimal,
+    gap_fit: _OccurrenceGapFit,
 ) -> dict[str, bool]:
-    destination_counts = Counter(
-        str(item) for item in dispositions["dataset_destination"]
-    )
+    destinations = tuple(str(item) for item in dispositions["dataset_destination"])
+    allowed_destinations = {item.value for item in DatasetDestination}
+    destinations_valid = all(item in allowed_destinations for item in destinations)
+    destination_counts = Counter(destinations)
     source_count = len(dispositions)
-    destination_coverage = sum(destination_counts.values()) == source_count
-    source_positions = {int(item) for item in dispositions["source_position"]}
-    ledger_complete = (
-        len(source_positions) == source_count
-        and source_positions == set(range(1, source_count + 1))
-        and bool(dispositions["record_id"].is_unique)
+    destination_coverage = (
+        destinations_valid
+        and sum(destination_counts[item] for item in allowed_destinations)
+        == source_count
     )
-    expected_canonical_ids = {
+    source_position_counts = Counter(
+        int(item) for item in dispositions["source_position"]
+    )
+    ledger_record_counts = Counter(str(item) for item in dispositions["record_id"])
+    dispositions_valid = all(
+        str(item) in {value.value for value in Disposition}
+        for item in dispositions["disposition"]
+    )
+    disposition_destination_alignment = all(
+        (str(disposition) == Disposition.REJECTED.value)
+        == (str(destination) == DatasetDestination.REJECTED.value)
+        for disposition, destination in zip(
+            dispositions["disposition"],
+            dispositions["dataset_destination"],
+            strict=True,
+        )
+    )
+    ledger_complete = (
+        source_position_counts == Counter(range(1, source_count + 1))
+        and all(count == 1 for count in ledger_record_counts.values())
+        and len(ledger_record_counts) == source_count
+        and dispositions_valid
+        and disposition_destination_alignment
+    )
+    expected_canonical_ids = Counter(
         str(row.record_id)
         for row in dispositions.itertuples(index=False)
-        if str(row.dataset_destination) != DatasetDestination.REJECTED.value
-    }
-    canonical_ids = {str(item) for item in canonical["record_id"]}
-    canonical_coverage = canonical_ids == expected_canonical_ids and bool(
-        canonical["record_id"].is_unique
+        if str(row.dataset_destination)
+        in allowed_destinations - {DatasetDestination.REJECTED.value}
+    )
+    canonical_ids = Counter(str(item) for item in canonical["record_id"])
+    canonical_coverage = (
+        destinations_valid
+        and canonical_ids == expected_canonical_ids
+        and all(count == 1 for count in canonical_ids.values())
     )
 
     occurrence_partition_sets: dict[str, set[str]] = defaultdict(set)
@@ -1453,7 +1648,10 @@ def _calculate_leakage_gates(
             occurrence_partition_sets[occurrence_id].add(partition)
     occurrence_disjoint = all(
         len(values) <= 1 for values in occurrence_partition_sets.values()
-    ) and all(len(values) == 1 for values in occurrence_destination_sets.values())
+    ) and all(
+        len(values) == 1 and values <= allowed_destinations
+        for values in occurrence_destination_sets.values()
+    )
 
     partition_projection = True
     for partition in Partition:
@@ -1480,7 +1678,22 @@ def _calculate_leakage_gates(
         for frame in partitions.values()
     )
     nonempty_partitions = all(not frame.empty for frame in partitions.values())
-    return {
+    ordered_train = canonical.loc[
+        canonical["partition"] == Partition.TRAIN.value
+    ].sort_values(
+        by=["event_timestamp_utc", "source_position"],
+        kind="stable",
+    )
+    expected_fit_record_ids = tuple(str(item) for item in ordered_train["record_id"])
+    expected_fit_occurrence_ids = tuple(
+        dict.fromkeys(str(item) for item in ordered_train["occurrence_id"])
+    )
+    statistics_train_only = (
+        gap_fit.threshold == gap_threshold
+        and gap_fit.record_ids == expected_fit_record_ids
+        and gap_fit.occurrence_ids == expected_fit_occurrence_ids
+    )
+    gates = {
         "ledger.complete_destination": destination_coverage and ledger_complete,
         "canonical.eligible_coverage": canonical_coverage,
         "partitions.assignment_alignment": partition_alignment,
@@ -1490,9 +1703,12 @@ def _calculate_leakage_gates(
         "partitions.purge_gap": purge_gap,
         "features.inference_only": feature_isolation,
         "partitions.nonempty": nonempty_partitions,
-        "fit.statistics_train_only": True,
+        "fit.statistics_train_only": statistics_train_only,
         "fit.target_independent": True,
     }
+    if tuple(gates) != _CANONICAL_GATE_NAMES:
+        raise AssertionError("Canonical gate registry is inconsistent.")
+    return gates
 
 
 def _partition_temporal_order(canonical: pd.DataFrame) -> bool:
@@ -1531,6 +1747,144 @@ def _partition_purge_gap(canonical: pd.DataFrame, gap_threshold: Decimal) -> boo
     return first_gap >= gap_threshold and second_gap >= gap_threshold
 
 
+def _validate_output_destination(output_directory: Path) -> Path:
+    if output_directory.name in {"", ".", ".."} or ".." in output_directory.parts:
+        raise CanonicalOutputError("Canonical output destination is unsafe.")
+    try:
+        destination = Path(os.path.abspath(os.fspath(output_directory)))
+    except (OSError, TypeError, ValueError):
+        raise CanonicalOutputError("Canonical output destination is invalid.") from None
+    if destination.parent == destination:
+        raise CanonicalOutputError("Canonical output destination is unsafe.")
+
+    _reject_linked_path_components(destination)
+    try:
+        destination_metadata = os.lstat(destination)
+    except FileNotFoundError:
+        destination_metadata = None
+    except OSError:
+        raise CanonicalOutputError(
+            "Canonical output path metadata is unavailable."
+        ) from None
+    if destination_metadata is not None and not stat.S_ISDIR(
+        destination_metadata.st_mode
+    ):
+        raise CanonicalOutputError("Canonical output destination is invalid.")
+    worktree = _find_enclosing_git_worktree(destination)
+    if worktree is None:
+        return destination
+    try:
+        relative = destination.relative_to(worktree).as_posix()
+    except ValueError:
+        raise CanonicalOutputError(
+            "Canonical output destination escapes its worktree."
+        ) from None
+    result = _run_git(
+        worktree,
+        "check-ignore",
+        "--quiet",
+        "--",
+        relative,
+    )
+    if result.returncode == 1:
+        raise CanonicalOutputError(
+            "Canonical output destination is not ignored by Git."
+        )
+    if result.returncode != 0:
+        raise CanonicalOutputError("Canonical output Git-ignore status is unavailable.")
+    return destination
+
+
+def _reject_linked_path_components(path: Path) -> None:
+    for candidate in (*reversed(path.parents), path):
+        try:
+            metadata = os.lstat(candidate)
+        except FileNotFoundError:
+            break
+        except OSError:
+            raise CanonicalOutputError(
+                "Canonical output path metadata is unavailable."
+            ) from None
+        try:
+            is_junction = candidate.is_junction()
+        except OSError:
+            raise CanonicalOutputError(
+                "Canonical output path metadata is unavailable."
+            ) from None
+        if stat.S_ISLNK(metadata.st_mode) or is_junction:
+            raise CanonicalOutputError(
+                "Canonical output path cannot contain a link or junction."
+            )
+
+
+def _find_enclosing_git_worktree(destination: Path) -> Path | None:
+    probe = destination
+    while True:
+        try:
+            metadata = os.lstat(probe)
+        except FileNotFoundError:
+            if probe.parent == probe:
+                return None
+            probe = probe.parent
+            continue
+        except OSError:
+            raise CanonicalOutputError(
+                "Canonical output path metadata is unavailable."
+            ) from None
+        if not stat.S_ISDIR(metadata.st_mode):
+            probe = probe.parent
+        break
+
+    for candidate in (probe, *probe.parents):
+        marker = candidate / ".git"
+        try:
+            marker_metadata = os.lstat(marker)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise CanonicalOutputError(
+                "Git worktree metadata is unavailable."
+            ) from None
+        try:
+            marker_is_junction = marker.is_junction()
+        except OSError:
+            raise CanonicalOutputError(
+                "Git worktree metadata is unavailable."
+            ) from None
+        if stat.S_ISLNK(marker_metadata.st_mode) or marker_is_junction:
+            raise CanonicalOutputError("Git worktree metadata is unsafe.")
+        result = _run_git(candidate, "rev-parse", "--show-toplevel")
+        if result.returncode != 0:
+            raise CanonicalOutputError("Git worktree identity is unavailable.")
+        try:
+            reported = Path(result.stdout.strip()).resolve(strict=True)
+            expected = candidate.resolve(strict=True)
+        except (OSError, ValueError):
+            raise CanonicalOutputError("Git worktree identity is invalid.") from None
+        if reported != expected:
+            raise CanonicalOutputError("Git worktree identity is inconsistent.")
+        return expected
+    return None
+
+
+def _run_git(worktree: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        raise CanonicalOutputError("Git output validation is unavailable.")
+    try:
+        return subprocess.run(  # noqa: S603 - executable and arguments are bounded here.
+            (git_executable, "-C", os.fspath(worktree), *arguments),
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise CanonicalOutputError("Git output validation is unavailable.") from None
+
+
 def _write_artifacts_atomically(
     *,
     output_directory: Path,
@@ -1543,15 +1897,11 @@ def _write_artifacts_atomically(
     label_map: CanonicalLabelMap,
     source_fingerprint: BannerSourceFingerprint,
     lock_sha256: str,
-    gap_threshold: Decimal,
+    gap_fit: _OccurrenceGapFit,
     iqr_fences: Mapping[str, tuple[Decimal, Decimal]],
     gates: Mapping[str, bool],
 ) -> tuple[Path, dict[str, object]]:
-    destination = output_directory.resolve()
-    if destination.parent == destination or destination.name in {"", ".", ".."}:
-        raise CanonicalOutputError("Canonical output destination is unsafe.")
-    if destination.exists() and (destination.is_symlink() or not destination.is_dir()):
-        raise CanonicalOutputError("Canonical output destination is invalid.")
+    destination = _validate_output_destination(output_directory)
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(
@@ -1600,7 +1950,7 @@ def _write_artifacts_atomically(
             label_map=label_map,
             source_fingerprint=source_fingerprint,
             lock_sha256=lock_sha256,
-            gap_threshold=gap_threshold,
+            gap_fit=gap_fit,
             iqr_fences=iqr_fences,
             gates=gates,
             artifacts=artifacts,
@@ -1637,7 +1987,7 @@ def _build_manifest(
     label_map: CanonicalLabelMap,
     source_fingerprint: BannerSourceFingerprint,
     lock_sha256: str,
-    gap_threshold: Decimal,
+    gap_fit: _OccurrenceGapFit,
     iqr_fences: Mapping[str, tuple[Decimal, Decimal]],
     gates: Mapping[str, bool],
     artifacts: list[dict[str, object]],
@@ -1682,8 +2032,11 @@ def _build_manifest(
             "uv_lock_sha256": lock_sha256,
         },
         "fit": {
-            "occurrence_gap_fit_scope": "chronological_train_prefix",
-            "occurrence_gap_threshold_seconds": _decimal_text(gap_threshold),
+            "occurrence_gap_fit_scope": "final_train_occurrences",
+            "occurrence_gap_threshold_seconds": _decimal_text(gap_fit.threshold),
+            "occurrence_gap_fit_record_count": len(gap_fit.record_ids),
+            "occurrence_gap_fit_occurrence_count": len(gap_fit.occurrence_ids),
+            "occurrence_gap_fit_membership_sha256": gap_fit.membership_sha256,
             "iqr_fit_partition": Partition.TRAIN.value,
             "iqr_fences_sha256": sha256(
                 _canonical_json_bytes(_fence_payload(iqr_fences))
@@ -1822,32 +2175,48 @@ def _validate_artifact_hashes(
 
 def _fit_gap_from_canonical(
     canonical: pd.DataFrame, config: CanonicalPipelineConfig
-) -> Decimal:
-    ordered = canonical.sort_values(
+) -> _OccurrenceGapFit:
+    ordered = canonical.loc[
+        canonical["partition"] == Partition.TRAIN.value
+    ].sort_values(
         by=["event_timestamp_utc", "source_position"],
         kind="stable",
     )
+    if ordered.empty:
+        raise CanonicalCheckError("Train partition is empty before gap fitting.")
     timestamps = [
         parse_banner_utc_timestamp(value) for value in ordered["event_timestamp_utc"]
     ]
     if any(item is None for item in timestamps):
         raise CanonicalCheckError("Canonical timestamp is invalid.")
     typed = cast(list[BannerUtcTimestamp], timestamps)
+    record_ids = tuple(str(item) for item in ordered["record_id"])
+    occurrence_ids = tuple(
+        dict.fromkeys(str(item) for item in ordered["occurrence_id"])
+    )
     if len(typed) < 2:
-        return Decimal(0)
-    prefix_count = int(Decimal(len(typed)) * config.train_ratio)
-    prefix_count = min(len(typed), max(2, prefix_count))
+        return _OccurrenceGapFit(
+            threshold=Decimal(0),
+            record_ids=record_ids,
+            occurrence_ids=occurrence_ids,
+        )
     positive = sorted(
         delta
-        for previous, current in pairwise(typed[:prefix_count])
+        for previous, current in pairwise(typed)
         if (delta := current.seconds_since(previous)) > 0
     )
     if not positive:
-        return Decimal(0)
-    median = _linear_decimal_quantile(positive, Decimal("0.5"))
-    high = _linear_decimal_quantile(positive, config.gap_quantile)
-    with localcontext(isolated_decimal_context(_DECIMAL_PRECISION)):
-        return max(Decimal(config.gap_multiplier) * median, high)
+        threshold = Decimal(0)
+    else:
+        median = _linear_decimal_quantile(positive, Decimal("0.5"))
+        high = _linear_decimal_quantile(positive, config.gap_quantile)
+        with localcontext(isolated_decimal_context(_DECIMAL_PRECISION)):
+            threshold = max(Decimal(config.gap_multiplier) * median, high)
+    return _OccurrenceGapFit(
+        threshold=threshold,
+        record_ids=record_ids,
+        occurrence_ids=occurrence_ids,
+    )
 
 
 def _fit_iqr_from_canonical(
@@ -1875,6 +2244,7 @@ def _validate_manifest_reconciliations(
     summary = _mapping_for_check(manifest.get("summary"), "summary")
     canonical = frames["canonical.parquet"]
     dispositions = frames["dispositions.parquet"]
+    _validate_destination_reconciliation(canonical, dispositions)
     disposition_counts = Counter(str(item) for item in dispositions["disposition"])
     destination_counts = Counter(
         str(item) for item in dispositions["dataset_destination"]
@@ -1890,14 +2260,16 @@ def _validate_manifest_reconciliations(
     ):
         raise CanonicalCheckError("Canonical summary does not reconcile.")
     partition_entries = _sequence_for_check(manifest.get("partitions"), "partitions")
-    by_name = {
-        str(_mapping_for_check(item, "partition").get("name")): _mapping_for_check(
-            item, "partition"
-        )
+    names = tuple(
+        str(_mapping_for_check(item, "partition").get("name"))
         for item in partition_entries
-    }
-    if set(by_name) != {item.value for item in Partition}:
+    )
+    if names != tuple(item.value for item in Partition):
         raise CanonicalCheckError("Partition manifest is incomplete.")
+    by_name = {
+        name: _mapping_for_check(item, "partition")
+        for name, item in zip(names, partition_entries, strict=True)
+    }
     for partition in Partition:
         selected = canonical[canonical["partition"] == partition.value]
         entry = by_name[partition.value]
@@ -1909,7 +2281,82 @@ def _validate_manifest_reconciliations(
             raise CanonicalCheckError("Partition counts do not reconcile.")
 
 
-def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
+def _validate_destination_reconciliation(
+    canonical: pd.DataFrame, dispositions: pd.DataFrame
+) -> None:
+    allowed_destinations = {item.value for item in DatasetDestination}
+    allowed_dispositions = {item.value for item in Disposition}
+    destination_values = tuple(
+        str(item) for item in dispositions["dataset_destination"]
+    )
+    if any(item not in allowed_destinations for item in destination_values) or any(
+        str(item) not in allowed_dispositions for item in dispositions["disposition"]
+    ):
+        raise CanonicalCheckError("Disposition ledger contains an unknown value.")
+    if any(
+        (str(disposition) == Disposition.REJECTED.value)
+        != (destination == DatasetDestination.REJECTED.value)
+        for disposition, destination in zip(
+            dispositions["disposition"], destination_values, strict=True
+        )
+    ):
+        raise CanonicalCheckError("Disposition ledger destination is inconsistent.")
+
+    ledger_ids = tuple(str(item) for item in dispositions["record_id"])
+    canonical_ids = tuple(str(item) for item in canonical["record_id"])
+    source_positions = tuple(int(item) for item in dispositions["source_position"])
+    if (
+        Counter(ledger_ids) != Counter(set(ledger_ids))
+        or Counter(canonical_ids) != Counter(set(canonical_ids))
+        or Counter(source_positions) != Counter(range(1, len(dispositions) + 1))
+    ):
+        raise CanonicalCheckError("Canonical row identity coverage is invalid.")
+    expected_canonical_ids = Counter(
+        str(row.record_id)
+        for row in dispositions.itertuples(index=False)
+        if str(row.dataset_destination) != DatasetDestination.REJECTED.value
+    )
+    if Counter(canonical_ids) != expected_canonical_ids:
+        raise CanonicalCheckError("Canonical destination coverage is incomplete.")
+
+    ledger_destination = {
+        str(row.record_id): str(row.dataset_destination)
+        for row in dispositions.itertuples(index=False)
+    }
+    occurrence_destinations: dict[str, set[str]] = defaultdict(set)
+    for row in canonical.itertuples(index=False):
+        partition = None if pd.isna(row.partition) else str(row.partition)
+        exclusion = (
+            None
+            if pd.isna(row.split_exclusion_reason)
+            else str(row.split_exclusion_reason)
+        )
+        if partition in {item.value for item in Partition} and exclusion is None:
+            expected_destination = partition
+        elif partition is None and exclusion == DatasetDestination.PURGE.value:
+            expected_destination = DatasetDestination.PURGE.value
+        else:
+            raise CanonicalCheckError("Canonical destination reference is invalid.")
+        actual_destination = ledger_destination[str(row.record_id)]
+        if actual_destination != expected_destination:
+            raise CanonicalCheckError(
+                "Canonical destination reference is inconsistent."
+            )
+        occurrence_destinations[str(row.occurrence_id)].add(actual_destination)
+    if any(len(values) != 1 for values in occurrence_destinations.values()):
+        raise CanonicalCheckError("Occurrence destination is not atomic.")
+
+
+def _validate_manifest_shape(
+    manifest: Mapping[str, object],
+    *,
+    config: CanonicalPipelineConfig,
+    schema: CanonicalDatasetSchema,
+    policy: BannerQualityPolicy,
+    source_fingerprint: BannerSourceFingerprint,
+    label_map: CanonicalLabelMap,
+    expected_source_row_count: int,
+) -> None:
     _exact_keys_for_check(
         manifest,
         (
@@ -1924,16 +2371,38 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
             "gates",
         ),
     )
-    if manifest.get("manifest_schema_version") != CANONICAL_MANIFEST_SCHEMA_VERSION:
+    if (
+        type(manifest.get("manifest_schema_version")) is not int
+        or manifest.get("manifest_schema_version") != CANONICAL_MANIFEST_SCHEMA_VERSION
+    ):
         raise CanonicalCheckError("Canonical manifest version is unsupported.")
     _require_sha256(manifest.get("dataset_id"), CanonicalCheckError)
     source = _mapping_for_check(manifest.get("source"), "source")
-    if source.get("basename") != "banner.csv":
+    _exact_keys_for_check(source, ("basename", "size_bytes", "sha256"))
+    if (
+        source.get("basename") != "banner.csv"
+        or source.get("size_bytes") != source_fingerprint.size_bytes
+        or source.get("sha256") != source_fingerprint.sha256
+    ):
         raise CanonicalCheckError("Canonical source identity is invalid.")
     _require_sha256(source.get("sha256"), CanonicalCheckError)
     if type(source.get("size_bytes")) is not int or cast(int, source["size_bytes"]) < 0:
         raise CanonicalCheckError("Canonical source size is invalid.")
+
     components = _mapping_for_check(manifest.get("components"), "components")
+    _exact_keys_for_check(
+        components,
+        (
+            "pipeline_config_id",
+            "dataset_schema_id",
+            "banner_contract_version",
+            "quality_policy_id",
+            "fault_label_inventory_id",
+            "fault_label_normalization_version",
+            "fault_label_unicode_version",
+            "uv_lock_sha256",
+        ),
+    )
     for name in (
         "pipeline_config_id",
         "dataset_schema_id",
@@ -1942,9 +2411,208 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
         "uv_lock_sha256",
     ):
         _require_sha256(components.get(name), CanonicalCheckError)
+    if (
+        components.get("pipeline_config_id") != config.config_id
+        or components.get("dataset_schema_id") != schema.schema_id
+        or type(components.get("banner_contract_version")) is not int
+        or components.get("banner_contract_version") != BANNER_CONTRACT_VERSION
+        or components.get("quality_policy_id") != policy.policy_id
+        or components.get("fault_label_inventory_id") != label_map.inventory_id
+        or type(components.get("fault_label_normalization_version")) is not int
+        or components.get("fault_label_normalization_version")
+        != FAULT_LABEL_NORMALIZATION_VERSION
+        or components.get("fault_label_unicode_version") != FAULT_LABEL_UNICODE_VERSION
+    ):
+        raise CanonicalCheckError("Canonical manifest components are incompatible.")
+
+    fit = _mapping_for_check(manifest.get("fit"), "fit")
+    _exact_keys_for_check(
+        fit,
+        (
+            "occurrence_gap_fit_scope",
+            "occurrence_gap_threshold_seconds",
+            "occurrence_gap_fit_record_count",
+            "occurrence_gap_fit_occurrence_count",
+            "occurrence_gap_fit_membership_sha256",
+            "iqr_fit_partition",
+            "iqr_fences_sha256",
+            "scaling",
+            "imputation",
+            "target_usage",
+        ),
+    )
+    threshold = _decimal_text_value(
+        fit.get("occurrence_gap_threshold_seconds"), CanonicalCheckError
+    )
+    if (
+        threshold < 0
+        or fit.get("occurrence_gap_threshold_seconds") != _decimal_text(threshold)
+        or fit.get("occurrence_gap_fit_scope") != "final_train_occurrences"
+        or not _is_positive_manifest_integer(fit.get("occurrence_gap_fit_record_count"))
+        or not _is_positive_manifest_integer(
+            fit.get("occurrence_gap_fit_occurrence_count")
+        )
+        or fit.get("iqr_fit_partition") != Partition.TRAIN.value
+        or fit.get("scaling") != "not_applied"
+        or fit.get("imputation") != "not_applied"
+        or fit.get("target_usage") != config.target_usage
+    ):
+        raise CanonicalCheckError("Canonical fit manifest is invalid.")
+    _require_sha256(
+        fit.get("occurrence_gap_fit_membership_sha256"), CanonicalCheckError
+    )
+    _require_sha256(fit.get("iqr_fences_sha256"), CanonicalCheckError)
+
+    summary = _mapping_for_check(manifest.get("summary"), "summary")
+    _exact_keys_for_check(
+        summary,
+        (
+            "source_row_count",
+            "canonical_row_count",
+            "occurrence_count",
+            "disposition_counts",
+            "destination_counts",
+        ),
+    )
+    source_row_count = summary.get("source_row_count")
+    canonical_row_count = summary.get("canonical_row_count")
+    occurrence_count = summary.get("occurrence_count")
+    if (
+        source_row_count != expected_source_row_count
+        or not _is_positive_manifest_integer(source_row_count)
+        or not _is_positive_manifest_integer(canonical_row_count)
+        or not _is_positive_manifest_integer(occurrence_count)
+        or cast(int, occurrence_count) > cast(int, canonical_row_count)
+    ):
+        raise CanonicalCheckError("Canonical summary shape is invalid.")
+    disposition_counts = _mapping_for_check(
+        summary.get("disposition_counts"), "disposition_counts"
+    )
+    destination_counts = _mapping_for_check(
+        summary.get("destination_counts"), "destination_counts"
+    )
+    _validate_manifest_count_registry(disposition_counts, Disposition)
+    _validate_manifest_count_registry(destination_counts, DatasetDestination)
+    if (
+        sum(cast(int, value) for value in disposition_counts.values())
+        != source_row_count
+        or sum(cast(int, value) for value in destination_counts.values())
+        != source_row_count
+        or canonical_row_count
+        != cast(int, source_row_count)
+        - cast(int, destination_counts[DatasetDestination.REJECTED.value])
+    ):
+        raise CanonicalCheckError("Canonical summary coverage is invalid.")
+
+    partition_entries = _sequence_for_check(manifest.get("partitions"), "partitions")
+    if len(partition_entries) != len(Partition):
+        raise CanonicalCheckError("Partition manifest shape is invalid.")
+    partition_rows: dict[str, int] = {}
+    expected_ratios = {
+        Partition.TRAIN.value: _decimal_text(config.train_ratio),
+        Partition.VALIDATION.value: _decimal_text(config.validation_ratio),
+        Partition.TEST.value: _decimal_text(config.test_ratio),
+    }
+    partition_names: list[str] = []
+    for item in partition_entries:
+        entry = _mapping_for_check(item, "partition")
+        _exact_keys_for_check(
+            entry,
+            ("name", "row_count", "occurrence_count", "target_ratio"),
+        )
+        name = entry.get("name")
+        if not isinstance(name, str):
+            raise CanonicalCheckError("Partition manifest name is invalid.")
+        partition_names.append(name)
+        if (
+            name not in expected_ratios
+            or not _is_positive_manifest_integer(entry.get("row_count"))
+            or not _is_positive_manifest_integer(entry.get("occurrence_count"))
+            or entry.get("target_ratio") != expected_ratios[name]
+        ):
+            raise CanonicalCheckError("Partition manifest entry is invalid.")
+        partition_rows[name] = cast(int, entry["row_count"])
+    if tuple(partition_names) != tuple(item.value for item in Partition):
+        raise CanonicalCheckError("Partition manifest registry is invalid.")
+    if any(
+        partition_rows[item.value] != cast(int, destination_counts[item.value])
+        for item in Partition
+    ) or canonical_row_count != sum(partition_rows.values()) + cast(
+        int, destination_counts[DatasetDestination.PURGE.value]
+    ):
+        raise CanonicalCheckError("Partition manifest references are inconsistent.")
+
+    artifacts = _sequence_for_check(manifest.get("artifacts"), "artifacts")
+    if len(artifacts) != len(_PARQUET_ARTIFACT_FILENAMES):
+        raise CanonicalCheckError("Canonical artifact registry shape is invalid.")
+    artifact_names: list[str] = []
+    artifact_rows: dict[str, int] = {}
+    expected_columns = {
+        "canonical.parquet": len(schema.canonical_fields),
+        "dispositions.parquet": len(schema.disposition_fields),
+        **{
+            f"{partition.value}.parquet": len(schema.partition_fields)
+            for partition in Partition
+        },
+    }
+    for item in artifacts:
+        entry = _mapping_for_check(item, "artifact")
+        _exact_keys_for_check(
+            entry,
+            (
+                "filename",
+                "row_count",
+                "column_count",
+                "logical_sha256",
+                "physical_sha256",
+            ),
+        )
+        filename = entry.get("filename")
+        if not isinstance(filename, str):
+            raise CanonicalCheckError("Canonical artifact filename is invalid.")
+        artifact_names.append(filename)
+        if (
+            filename not in expected_columns
+            or not _is_nonnegative_manifest_integer(entry.get("row_count"))
+            or entry.get("column_count") != expected_columns[filename]
+        ):
+            raise CanonicalCheckError("Canonical artifact entry is invalid.")
+        _require_sha256(entry.get("logical_sha256"), CanonicalCheckError)
+        _require_sha256(entry.get("physical_sha256"), CanonicalCheckError)
+        artifact_rows[filename] = cast(int, entry["row_count"])
+    if tuple(artifact_names) != _PARQUET_ARTIFACT_FILENAMES:
+        raise CanonicalCheckError("Canonical artifact registry is invalid.")
+    if (
+        artifact_rows["canonical.parquet"] != canonical_row_count
+        or artifact_rows["dispositions.parquet"] != source_row_count
+        or any(
+            artifact_rows[f"{partition.value}.parquet"]
+            != partition_rows[partition.value]
+            for partition in Partition
+        )
+    ):
+        raise CanonicalCheckError("Canonical artifact references are inconsistent.")
+
     gates = _mapping_for_check(manifest.get("gates"), "gates")
-    if not gates or any(type(value) is not bool for value in gates.values()):
+    _exact_keys_for_check(gates, _CANONICAL_GATE_NAMES)
+    if any(type(value) is not bool for value in gates.values()):
         raise CanonicalCheckError("Canonical gate registry is invalid.")
+
+
+def _validate_manifest_count_registry(
+    counts: Mapping[str, object], enum_type: type[StrEnum]
+) -> None:
+    _exact_keys_for_check(counts, tuple(item.value for item in enum_type))
+    if any(not _is_nonnegative_manifest_integer(value) for value in counts.values()):
+        raise CanonicalCheckError("Canonical count registry is invalid.")
+
+
+def _is_nonnegative_manifest_integer(value: object) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _is_positive_manifest_integer(value: object) -> bool:
+    return type(value) is int and value > 0
 
 
 def _logical_dataframe_hash(dataframe: pd.DataFrame) -> str:

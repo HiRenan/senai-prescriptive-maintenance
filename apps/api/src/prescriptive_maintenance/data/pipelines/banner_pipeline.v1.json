@@ -93,9 +93,9 @@
     "stream": "single_source_stream",
     "gap_multiplier": 5,
     "gap_quantile": 0.95,
-    "gap_fit_scope": "chronological_train_prefix",
+    "gap_fit_scope": "final_train_occurrences",
     "duration_limit_seconds": 86400,
-    "duration_boundary_inclusive": true,
+    "duration_break_operator": "greater_than_or_equal",
     "gap_boundary_inclusive": false
   },
   "partitioning": {

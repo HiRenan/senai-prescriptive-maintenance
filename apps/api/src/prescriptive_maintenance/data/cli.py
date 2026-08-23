@@ -16,7 +16,7 @@ from prescriptive_maintenance.data.canonical import (
     CanonicalOutputError,
     CanonicalPartitionError,
     build_banner_dataset,
-    check_canonical_dataset,
+    check_banner_dataset,
 )
 from prescriptive_maintenance.data.fault_labels import FaultLabelInventoryError
 from prescriptive_maintenance.data.source import BannerSourceError
@@ -55,7 +55,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "artifact_sha256": dict(result.artifact_sha256),
             }
         else:
-            checked = check_canonical_dataset(
+            checked = check_banner_dataset(
+                manifest_path=arguments.manifest,
+                inventory_path=arguments.inventory,
+                baseline_json_path=arguments.baseline_json,
+                baseline_markdown_path=arguments.baseline_markdown,
                 output_directory=arguments.output,
                 lock_path=arguments.lock,
             )
@@ -99,6 +103,10 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--lock", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
     check = commands.add_parser("check", help="Verifica artefatos sem reescrever.")
+    check.add_argument("--manifest", type=Path, required=True)
+    check.add_argument("--inventory", type=Path, required=True)
+    check.add_argument("--baseline-json", type=Path, required=True)
+    check.add_argument("--baseline-markdown", type=Path, required=True)
     check.add_argument("--lock", type=Path, required=True)
     check.add_argument("--output", type=Path, required=True)
     return parser
