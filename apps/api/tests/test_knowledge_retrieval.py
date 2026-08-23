@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
+from typing import ClassVar, Never, cast
 
 import pytest
 from prescriptive_maintenance.contracts import DocumentStatus
@@ -20,6 +21,7 @@ from prescriptive_maintenance.data.document_indexing import (
 )
 from prescriptive_maintenance.document_lifecycle import (
     DocumentGovernanceService,
+    DocumentRepository,
     DocumentSnapshot,
     InMemoryDocumentRepository,
     ProcessingStep,
@@ -28,6 +30,8 @@ from prescriptive_maintenance.knowledge_retrieval import (
     ApprovedKnowledgeRetrievalService,
     FaultKnowledgeMappingError,
     FaultKnowledgeReferenceError,
+    IndexedChunkReader,
+    KnowledgeChunkScorer,
     KnowledgeRetrievalInputError,
     KnowledgeRetrievalReason,
     RankedKnowledgeEvidence,
@@ -72,6 +76,83 @@ class _RecordingScorer:
     def score(self, *, fault_class: str, chunk: IndexedChunk) -> float | None:
         self.calls.append((fault_class, chunk.chunk.chunk_id, chunk.chunk.content))
         return self.scores.get(chunk.chunk.chunk_id)
+
+
+class MatchEveryFault(str):
+    equality_calls: ClassVar[int] = 0
+
+    def __eq__(self, _other: object) -> bool:
+        type(self).equality_calls += 1
+        return True
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
+
+
+class LyingHash(str):
+    inequality_calls: ClassVar[int] = 0
+
+    def __ne__(self, _other: object) -> bool:
+        type(self).inequality_calls += 1
+        return False
+
+
+class BadHashStr(str):
+    hash_calls: ClassVar[int] = 0
+
+    def __hash__(self) -> int:
+        type(self).hash_calls += 1
+        return id(self)
+
+
+class _HostileItems(dict[str, tuple[str, ...]]):
+    items_calls: ClassVar[int] = 0
+
+    def items(self) -> Never:
+        type(self).items_calls += 1
+        raise RuntimeError("hostile items")
+
+
+@dataclass(slots=True)
+class _StaticChunkReader:
+    records: object
+    failure: Exception | None = None
+
+    def list_by_document(
+        self,
+        document_id: str,
+        *,
+        document_version: str | None = None,
+    ) -> tuple[IndexedChunk, ...]:
+        del document_id, document_version
+        if self.failure is not None:
+            raise self.failure
+        return cast(tuple[IndexedChunk, ...], self.records)
+
+
+@dataclass(slots=True)
+class _StaticScorer:
+    value: object = None
+    failure: Exception | None = None
+    calls: int = 0
+
+    def score(self, *, fault_class: str, chunk: IndexedChunk) -> float | None:
+        del fault_class, chunk
+        self.calls += 1
+        if self.failure is not None:
+            raise self.failure
+        return cast(float | None, self.value)
+
+
+@dataclass(slots=True)
+class _MutatingScorer:
+    calls: int = 0
+
+    def score(self, *, fault_class: str, chunk: IndexedChunk) -> float | None:
+        del fault_class
+        self.calls += 1
+        object.__setattr__(chunk.chunk, "document_id", _DOC_REJECTED)
+        return 0.75
 
 
 def _governance() -> tuple[DocumentGovernanceService, InMemoryDocumentRepository]:
@@ -235,9 +316,9 @@ def _record(
 
 def _retrieval(
     *,
-    documents: InMemoryDocumentRepository,
-    chunks: InMemoryChunkRepository,
-    scorer: _RecordingScorer,
+    documents: DocumentRepository,
+    chunks: IndexedChunkReader,
+    scorer: KnowledgeChunkScorer,
     mappings: dict[str, tuple[str, ...]],
 ) -> ApprovedKnowledgeRetrievalService:
     mapping = build_fault_knowledge_mapping(
@@ -249,6 +330,24 @@ def _retrieval(
         documents=documents,
         chunks=chunks,
         scorer=scorer,
+    )
+
+
+def _approved_retrieval(
+    *,
+    records: object,
+    scorer: KnowledgeChunkScorer,
+) -> tuple[ApprovedKnowledgeRetrievalService, InMemoryDocumentRepository]:
+    lifecycle, documents = _governance()
+    _approved_document(lifecycle, identity=_DOC_APPROVED)
+    return (
+        _retrieval(
+            documents=documents,
+            chunks=_StaticChunkReader(records=records),
+            scorer=scorer,
+            mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+        ),
+        documents,
     )
 
 
@@ -685,3 +784,257 @@ def test_top_k_must_stay_within_the_closed_internal_budget(top_k: object) -> Non
 
     with pytest.raises(KnowledgeRetrievalInputError, match="Top-k"):
         service.retrieve(_FAULT_CLASS, top_k=top_k)  # type: ignore[arg-type]
+
+
+def test_hostile_str_subclasses_are_rejected_before_comparison_or_hashing() -> None:
+    MatchEveryFault.equality_calls = 0
+    LyingHash.inequality_calls = 0
+    BadHashStr.hash_calls = 0
+
+    hostile_fault = MatchEveryFault(_FAULT_CLASS)
+    with pytest.raises(FaultKnowledgeMappingError, match="text"):
+        build_fault_knowledge_mapping(
+            mapping_version=_MAPPING_VERSION,
+            mappings={hostile_fault: (_DOC_APPROVED,)},
+        )
+    with pytest.raises(FaultKnowledgeMappingError, match="text"):
+        build_fault_knowledge_mapping(
+            mapping_version=MatchEveryFault(_MAPPING_VERSION),
+            mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+        )
+
+    valid = build_fault_knowledge_mapping(
+        mapping_version=_MAPPING_VERSION,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+    hostile_hash = {
+        "schema_version": 1,
+        "mapping_version": _MAPPING_VERSION,
+        "mapping_sha256": LyingHash("0" * 64),
+        "mappings": [{"fault_class": _FAULT_CLASS, "document_ids": [_DOC_APPROVED]}],
+    }
+    with pytest.raises(FaultKnowledgeMappingError, match="text"):
+        validate_fault_knowledge_mapping(hostile_hash)
+
+    bad_first = BadHashStr(_DOC_APPROVED)
+    bad_second = BadHashStr(_DOC_APPROVED)
+    with pytest.raises(FaultKnowledgeMappingError, match="reference"):
+        build_fault_knowledge_mapping(
+            mapping_version=valid.mapping_version,
+            mappings={_FAULT_CLASS: (bad_first, bad_second)},
+        )
+
+    assert MatchEveryFault.equality_calls == 0
+    assert LyingHash.inequality_calls == 0
+    assert BadHashStr.hash_calls == 0
+
+
+def test_hostile_fault_lookup_is_rejected_without_matching_another_class() -> None:
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="hostile_fault_lookup",
+        content="Synthetic exact-class content.",
+    )
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.8})
+    service, _documents = _approved_retrieval(records=(record,), scorer=scorer)
+    MatchEveryFault.equality_calls = 0
+
+    with pytest.raises(KnowledgeRetrievalInputError, match="canonical slug"):
+        service.retrieve(MatchEveryFault(_UNMAPPED_CLASS), top_k=1)
+
+    assert MatchEveryFault.equality_calls == 0
+    assert scorer.calls == []
+
+
+def test_hostile_mapping_items_is_typed_without_invoking_the_override() -> None:
+    _HostileItems.items_calls = 0
+    hostile = _HostileItems({_FAULT_CLASS: (_DOC_APPROVED,)})
+
+    with pytest.raises(FaultKnowledgeMappingError, match="mappings"):
+        build_fault_knowledge_mapping(
+            mapping_version=_MAPPING_VERSION,
+            mappings=hostile,
+        )
+
+    assert _HostileItems.items_calls == 0
+
+
+@pytest.mark.parametrize("mixed_with_intact", [False, True])
+def test_any_cryptographic_chunk_corruption_aborts_before_scoring(
+    mixed_with_intact: bool,
+) -> None:
+    intact = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="integrity_intact",
+        content="Synthetic intact content.",
+    )
+    corrupt_source = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="integrity_corrupt",
+        content="Synthetic corrupt content.",
+        page_number=2,
+    )
+    corrupt = replace(
+        corrupt_source,
+        chunk=replace(corrupt_source.chunk, content_sha256="0" * 64),
+    )
+    records = (intact, corrupt) if mixed_with_intact else (corrupt,)
+    scorer = _RecordingScorer(
+        scores={
+            intact.chunk.chunk_id: 0.9,
+            corrupt.chunk.chunk_id: 0.8,
+        }
+    )
+    service, _documents = _approved_retrieval(records=records, scorer=scorer)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=2)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
+    assert scorer.calls == []
+
+
+def test_non_string_index_identity_is_an_integrity_failure_before_scoring() -> None:
+    malformed = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="object_identity",
+        content="Synthetic malformed identity.",
+    )
+    object.__setattr__(malformed.chunk, "chunk_id", object())
+    scorer = _RecordingScorer(scores={})
+    service, _documents = _approved_retrieval(records=(malformed,), scorer=scorer)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
+    assert scorer.calls == []
+
+
+def test_malformed_repository_snapshot_is_sanitized_as_integrity_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="malformed_snapshot",
+        content="Synthetic snapshot boundary.",
+    )
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.8})
+    service, documents = _approved_retrieval(records=(record,), scorer=scorer)
+    malformed = object.__new__(DocumentSnapshot)
+    object.__setattr__(malformed, "revision", 1)
+    object.__setattr__(malformed, "document", object())
+
+    def malformed_get(_identity: str) -> DocumentSnapshot:
+        return malformed
+
+    monkeypatch.setattr(documents, "get", malformed_get)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
+    assert scorer.calls == []
+
+
+def test_repository_and_reader_exceptions_are_typed_without_scoring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="boundary_exception",
+        content="Synthetic boundary exception.",
+    )
+    repository_scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.8})
+    repository_service, documents = _approved_retrieval(
+        records=(record,),
+        scorer=repository_scorer,
+    )
+
+    def fail_repository(_identity: str) -> DocumentSnapshot | None:
+        raise TypeError("hostile repository")
+
+    monkeypatch.setattr(documents, "get", fail_repository)
+    repository_result = repository_service.retrieve(_FAULT_CLASS, top_k=1)
+
+    lifecycle, reader_documents = _governance()
+    _approved_document(lifecycle, identity=_DOC_APPROVED)
+    reader_scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.8})
+    reader_service = _retrieval(
+        documents=reader_documents,
+        chunks=_StaticChunkReader(
+            records=(),
+            failure=RuntimeError("hostile reader"),
+        ),
+        scorer=reader_scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+    reader_result = reader_service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert repository_result.reason is KnowledgeRetrievalReason.INDEX_UNAVAILABLE
+    assert reader_result.reason is KnowledgeRetrievalReason.INDEX_UNAVAILABLE
+    assert repository_scorer.calls == []
+    assert reader_scorer.calls == []
+
+
+def test_malformed_reader_collection_is_an_integrity_failure_without_scoring() -> None:
+    scorer = _StaticScorer(value=0.8)
+    service, _documents = _approved_retrieval(records=object(), scorer=scorer)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
+    assert scorer.calls == 0
+
+
+def test_scorer_mutation_is_detected_and_cannot_change_frozen_evidence() -> None:
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="scorer_mutation",
+        content="Synthetic immutable evidence.",
+    )
+    scorer = _MutatingScorer()
+    service, _documents = _approved_retrieval(records=(record,), scorer=scorer)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.RANKING_FAILED
+    assert scorer.calls == 1
+    assert record.chunk.document_id == _DOC_APPROVED
+
+
+@pytest.mark.parametrize(
+    ("score", "failure"),
+    [
+        (10**10_000, None),
+        (None, RuntimeError("hostile scorer")),
+    ],
+    ids=("overflow", "exception"),
+)
+def test_scorer_overflow_and_exceptions_return_ranking_failed(
+    score: object,
+    failure: Exception | None,
+) -> None:
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="scorer_failure",
+        content="Synthetic scorer failure.",
+    )
+    scorer = _StaticScorer(value=score, failure=failure)
+    service, _documents = _approved_retrieval(records=(record,), scorer=scorer)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.RANKING_FAILED
+    assert scorer.calls == 1

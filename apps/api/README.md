@@ -364,7 +364,14 @@ extração e indexação e a coerência do registro indexado. Versões `rejected
 `failed`, `superseded`, candidatas ainda não aprovadas, versões antigas, páginas
 com falha e embeddings ausentes são removidos antes de qualquer chamada ao
 `KnowledgeChunkScorer`. O serviço não procura outra classe ou documento quando
-o conjunto fica vazio.
+o conjunto fica vazio. Estados explícitos de página ou embedding inelegível não
+se confundem com corrupção: qualquer quebra estrutural, de identidade ou de
+SHA-256 em uma versão declarada íntegra pelo lifecycle aborta toda a recuperação
+antes do scorer.
+
+Cada candidato validado é congelado em tipos básicos antes do ranking. O scorer
+recebe uma cópia isolada, e qualquer mutação dessa cópia invalida o ranking; a
+evidência final é materializada somente do snapshot anterior à fronteira.
 
 Os vazios distinguem por enum classe sem mapeamento, ausência de cobertura
 aprovada e ranking sem hits; indisponibilidade, integridade inválida e falha do
