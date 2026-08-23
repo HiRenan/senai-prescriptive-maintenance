@@ -78,6 +78,31 @@ sequence = [
   "test",
 ]
 
+[tool.poe.tasks.data-build]
+help = "Constrói o dataset canônico local em destino explícito."
+cmd = "python -m prescriptive_maintenance.data.cli build --input ${input} --manifest ${manifest} --inventory ${inventory} --baseline-json ${baseline_json} --baseline-markdown ${baseline_markdown} --lock ${lock} --output ${output}"
+args = [
+  { name = "input", options = ["--input"], required = true },
+  { name = "manifest", options = ["--manifest"], required = true },
+  { name = "inventory", options = ["--inventory"], required = true },
+  { name = "baseline_json", options = ["--baseline-json"], required = true },
+  { name = "baseline_markdown", options = ["--baseline-markdown"], required = true },
+  { name = "lock", options = ["--lock"], required = true },
+  { name = "output", options = ["--output"], required = true },
+]
+
+[tool.poe.tasks.data-check]
+help = "Verifica manifesto, reconciliações e gates locais sem reescrever."
+cmd = "python -m prescriptive_maintenance.data.cli check --manifest ${manifest} --inventory ${inventory} --baseline-json ${baseline_json} --baseline-markdown ${baseline_markdown} --lock ${lock} --output ${output}"
+args = [
+  { name = "manifest", options = ["--manifest"], required = true },
+  { name = "inventory", options = ["--inventory"], required = true },
+  { name = "baseline_json", options = ["--baseline-json"], required = true },
+  { name = "baseline_markdown", options = ["--baseline-markdown"], required = true },
+  { name = "lock", options = ["--lock"], required = true },
+  { name = "output", options = ["--output"], required = true },
+]
+
 [tool.poe.tasks.hooks]
 help = "Executa os guardrails pre-commit em todos os arquivos."
 cmd = "pre-commit run --all-files"

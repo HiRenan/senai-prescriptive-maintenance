@@ -498,6 +498,68 @@ citação sustenta a afirmação, não implementa guardrails completos, não per
 resultados e não configura infraestrutura AWS. Esses comportamentos dependem de
 tarefas posteriores.
 
+## Pipeline canônico local
+
+`load_canonical_pipeline_config()` valida a configuração versionada que mapeia
+as 26 colunas de origem para metadados, target, exclusões justificadas e 18
+features `float64` disponíveis no instante do evento. As representações
+redundantes em °F e `in/s` não entram nas features; quando divergem das colunas
+canônicas confiáveis, a política registra uma correção determinística no ledger
+sem alterar a fonte.
+
+`build_banner_dataset()` carrega primeiro o inventário categórico validado e abre
+`banner.csv` uma única vez pela porta auditada e estritamente read-only. Cada
+linha recebe uma disposição de qualidade e exatamente um destino entre `train`,
+`validation`, `test`, `purge` e `rejected`. O target textual é mapeado exatamente
+para o slug aprovado, mas não participa de ordenação, ajuste, agrupamento ou
+split: ocorrências usam somente ordem temporal estável, gap e duração. O limiar
+de gap converge com ajuste exclusivo nas ocorrências da partição final de
+treino; o manifesto registra a quantidade e o hash de pertencimento desse fit.
+Uma nova ocorrência começa quando o gap é estritamente maior que o limiar ou
+quando sua duração alcança exatamente 86.400 segundos, portanto toda ocorrência
+tem duração estritamente menor que 24 horas. A divisão 70/15/15 preserva
+ocorrências inteiras, purga as fronteiras pelo mesmo gap e ajusta cercas IQR
+somente em treino. Apenas depois da partição o target entra nos três artefatos de
+modelagem, sob o nome `y`.
+
+O destino contém exatamente `canonical.parquet`, `dispositions.parquet`,
+`train.parquet`, `validation.parquet`, `test.parquet` e `manifest.json`. O
+manifesto vincula fonte, configuração, schemas, política, inventário e
+`uv.lock`; também reconcilia linhas, ocorrências, disposições, destinos,
+partições, hashes físicos/lógicos e gates de leakage. `check_banner_dataset()`
+carrega as identidades públicas aprovadas e refaz essas provas offline com
+schema estrito, referências cruzadas e cobertura exata de destinos, sem
+reescrever arquivos.
+
+Os comandos exigem todos os caminhos explicitamente. Antes de qualquer escrita,
+o próprio build exige que um destino dentro de uma worktree Git esteja realmente
+ignorado; erros de consulta, escapes e componentes que sejam links ou junctions
+bloqueiam a operação. Temporários externos a worktrees Git continuam permitidos.
+Nunca copie a fonte para a worktree:
+
+```powershell
+git check-ignore data/processed/banner/run-local
+uv run --frozen poe data-build `
+  --input C:/caminho/autorizado/banner.csv `
+  --manifest data/source-manifest.json `
+  --inventory data/inventories/banner/<source-sha>/fault-labels.v1.json `
+  --baseline-json data/baselines/banner/<source-sha>/baseline.v1.json `
+  --baseline-markdown data/baselines/banner/<source-sha>/summary.md `
+  --lock uv.lock `
+  --output data/processed/banner/run-local
+uv run --frozen poe data-check `
+  --manifest data/source-manifest.json `
+  --inventory data/inventories/banner/<source-sha>/fault-labels.v1.json `
+  --baseline-json data/baselines/banner/<source-sha>/baseline.v1.json `
+  --baseline-markdown data/baselines/banner/<source-sha>/summary.md `
+  --lock uv.lock `
+  --output data/processed/banner/run-local
+```
+
+As saídas do CLI são somente agregados sanitizados. Testes e CI exercitam o
+pipeline exclusivamente com dados sintéticos; derivados reais permanecem
+locais e ignorados.
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:
