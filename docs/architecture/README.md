@@ -26,7 +26,7 @@ ainda não abre conexão com ele.
 | `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados e geração, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
 | `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da liveness. | Não inclui dependências de desenvolvimento nem integra persistência. |
 | `apps/web` | Workspace privado, servidor HTTP sem dependências, Dockerfile multi-stage e `GET /health/live`. | Não contém UI, framework, componentes, estilos, assets ou comportamento visual. |
-| `.dockerignore` | Allowlist comum dos manifests, locks e fontes necessários aos dois builds. | Exclui todo o restante do monorepo dos contextos de imagem. |
+| `.dockerignore` e `apps/*/Dockerfile.dockerignore` | União segura na raiz e allowlists específicas dos manifests, locks e fontes necessários a cada build. | Excluem todo o restante do monorepo dos contextos; a API inclui somente o README exigido pelos metadados Python. |
 | `compose.yaml` | Topologia API, web e PostgreSQL 17/pgvector 0.8.6, binds em loopback, healthchecks e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
 | `scripts/smoke.py` | Verifica runtimes, importação, `.env.example`, Compose e liveness HTTP; opcionalmente banco/pgvector, contêineres e igualdade do OpenAPI v1. | Não inicia nem encerra serviços e não valida funcionalidades futuras. |
@@ -61,13 +61,15 @@ O caminho mínimo validado é:
 
 O caminho containerizado adicional é:
 
-1. `uv run --frozen poe applications-build` constrói API e web com bases por
+1. `uv run --frozen poe applications-audit` exporta os contextos filtrados reais
+   e audita os filesystems dos builders;
+2. `uv run --frozen poe applications-build` constrói API e web com bases por
    digest e locks congelados;
-2. `uv run --frozen poe applications-up` inicia PostgreSQL, API e web e aguarda
+3. `uv run --frozen poe applications-up` inicia PostgreSQL, API e web e aguarda
    os três healthchecks;
-3. `uv run --frozen poe smoke --with-services --with-applications` verifica o
+4. `uv run --frozen poe smoke --with-services --with-applications` verifica o
    banco, as liveness da API e da web e o OpenAPI v1 servido;
-4. `uv run --frozen poe services-down` remove contêineres e rede sem apagar o
+5. `uv run --frozen poe services-down` remove contêineres e rede sem apagar o
    volume PostgreSQL.
 
 O processo Uvicorn usado pelo smoke escuta apenas em loopback e em uma porta

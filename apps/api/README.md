@@ -118,7 +118,10 @@ não processa bytes, cria chunks nem expõe novas rotas.
 O Dockerfile multi-stage instala somente as dependências de produção pelo
 `uv.lock`, executa o Uvicorn como UID/GID `65532` e verifica
 `GET /health/live`. O build parte da raiz porque o lock do workspace é único;
-`.dockerignore` limita o contexto aos manifests, lock e fontes do pacote.
+`Dockerfile.dockerignore` limita o contexto aos manifests, lock, fontes do
+pacote e ao README exigido pelos metadados Python. Os targets `context-audit` e
+`builder-audit`, executados por `uv run --frozen poe applications-audit`, provam
+o conteúdo do contexto real e a ausência de resíduos no filesystem do builder.
 
 O fluxo completo de build, start, smoke da liveness e do snapshot OpenAPI v1 e
 stop está em [`infra/README.md`](../../infra/README.md).

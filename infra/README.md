@@ -72,6 +72,7 @@ healthchecks, compara o OpenAPI servido com o snapshot v1 e encerra a topologia
 sem remover o volume:
 
 ```powershell
+uv run --frozen poe applications-audit
 uv run --frozen poe applications-build
 uv run --frozen poe applications-up
 uv run --frozen poe smoke --with-services --with-applications
@@ -122,10 +123,12 @@ node:22-alpine3.22@sha256:cd7807368cf24826297cbad5dca1a44972ccfd770647db52a8c758
 
 A API instala somente o grupo de produção por `uv sync --frozen --no-dev`; a
 web confirma o workspace por `pnpm install --frozen-lockfile --prod` e não tem
-dependências de aplicação. A allowlist de `.dockerignore` limita os contextos a
-manifests, locks e fontes necessários. Nenhuma etapa copia `.env`, Git, dados,
-materiais originais, caches, testes ou ferramentas de desenvolvimento para as
-imagens finais.
+dependências de aplicação. Cada Dockerfile possui uma allowlist específica; a
+API inclui também o README exigido pelos metadados do pacote. A tarefa
+`applications-audit` exporta o contexto filtrado que o BuildKit recebeu e
+executa auditorias dentro dos builders. `.env`, Git, dados, materiais originais,
+caches, testes, snapshots OpenAPI, READMEs desnecessários e ferramentas de
+desenvolvimento não chegam ao builder nem às imagens finais.
 
 Neste fluxo, reprodutibilidade significa bases imutáveis por digest, ferramentas
 e dependências fixadas, locks congelados e contexto controlado. O image ID local

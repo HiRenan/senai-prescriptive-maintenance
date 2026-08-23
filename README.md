@@ -197,6 +197,7 @@ código; `check` é uma sequência fail-fast somente leitura.
 | `uv run --frozen python -m prescriptive_maintenance.data.cli check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
 | `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
 | `uv run --frozen poe services-up` | Inicia o PostgreSQL local e aguarda o healthcheck. |
+| `uv run --frozen poe applications-audit` | Audita os contextos Docker reais e os filesystems dos builders. |
 | `uv run --frozen poe applications-build` | Constrói as imagens locais multi-stage da API e da web. |
 | `uv run --frozen poe applications-up` | Constrói e inicia PostgreSQL, API e web e aguarda os healthchecks. |
 | `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |
@@ -219,14 +220,17 @@ Se `127.0.0.1:5432` estiver ocupada, escolha uma porta host livre por
 
 ## Topologia containerizada local
 
-O fluxo completo usa o mesmo `compose.yaml` do banco, sem duplicar serviços. As
-imagens recebem somente os manifests, locks e fontes necessários pela allowlist
-de `.dockerignore`; materiais originais, demais dados, `.env`, Git, caches e
-dependências de desenvolvimento ficam fora do contexto e das imagens finais.
+O fluxo completo usa o mesmo `compose.yaml` do banco, sem duplicar serviços.
+Cada Dockerfile tem uma allowlist própria, e a `.dockerignore` da raiz mantém
+uma união segura para clientes sem suporte à convenção específica. Somente os
+manifests, locks e fontes necessários chegam ao builder; testes, snapshots
+OpenAPI, READMEs desnecessários, materiais originais, demais dados, `.env`, Git,
+caches e dependências de desenvolvimento ficam fora do contexto e das imagens.
 
 Execute build, start, smoke e stop a partir da raiz:
 
 ```powershell
+uv run --frozen poe applications-audit
 uv run --frozen poe applications-build
 uv run --frozen poe applications-up
 uv run --frozen poe smoke --with-services --with-applications

@@ -115,6 +115,10 @@ cmd = "docker compose up --detach --wait postgres"
 help = "Constrói as imagens locais da API e da web pelos locks congelados."
 cmd = "docker compose build api web"
 
+[tool.poe.tasks.applications-audit]
+help = "Audita os contextos Docker reais e os filesystems dos builders."
+script = "scripts.container_audit:main()"
+
 [tool.poe.tasks.applications-up]
 help = "Inicia PostgreSQL, API e web e aguarda todos os healthchecks."
 cmd = "docker compose up --detach --build --wait postgres api web"

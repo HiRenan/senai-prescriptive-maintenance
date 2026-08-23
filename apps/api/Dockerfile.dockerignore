@@ -1,10 +1,7 @@
 **
-# Reopen only parent paths needed to reach the explicit file allowlist.
+# Reopen only parent paths needed to reach the API file allowlist.
 !pyproject.toml
 !uv.lock
-!package.json
-!pnpm-lock.yaml
-!pnpm-workspace.yaml
 !apps/
 apps/*
 !apps/api/
@@ -30,7 +27,3 @@ apps/api/src/**/README*
 apps/api/src/**/test_*.py
 apps/api/src/**/*_test.py
 apps/api/src/**/*.py[cod]
-!apps/web/
-apps/web/*
-!apps/web/package.json
-!apps/web/server.mjs

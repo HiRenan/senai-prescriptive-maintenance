@@ -1,3 +1,7 @@
+FROM scratch AS context-audit
+
+COPY . /context
+
 FROM ghcr.io/astral-sh/uv:0.9.4@sha256:c4089b0085cf4d38e38d5cdaa5e57752c1878a6f41f2e3a3a234dc5f23942cb4 AS uv
 
 FROM python:3.13-slim-bookworm@sha256:00faa2debb87529f9f0764e9491d8ba400a3678976616c3bd7cb193745ac20d1 AS builder
@@ -20,6 +24,10 @@ RUN uv sync --frozen --no-dev --no-install-workspace
 COPY apps/api/src ./apps/api/src
 
 RUN uv sync --frozen --no-dev --no-editable
+
+FROM builder AS builder-audit
+
+RUN /opt/venv/bin/python -c "from importlib.util import find_spec; from pathlib import Path; workspace = Path('/workspace'); venv = Path('/opt/venv'); forbidden_parts = {'tests', 'openapi', '__pycache__', '.git', '.cache', '.pytest_cache', '.ruff_cache', '.mypy_cache'}; repo_bad = [path for path in workspace.rglob('*') if any(part.lower() in forbidden_parts for part in path.parts) or path.suffix.lower() in {'.pyc', '.pyo', '.pdf', '.csv'} or path.name.lower() == '.env' or path.name.lower().startswith('.env.')]; venv_cache = [path for path in venv.rglob('*') if path.name.lower() == '__pycache__' or path.suffix.lower() in {'.pyc', '.pyo'}]; dev_modules = [name for name in ('coverage', 'pre_commit', 'poethepoet', 'pyright', 'pytest', 'ruff') if find_spec(name) is not None]; failed = bool(repo_bad or venv_cache or dev_modules); print(f'API builder audit: repository_residues={len(repo_bad)} cache_artifacts={len(venv_cache)} development_modules={len(dev_modules)}'); raise SystemExit(failed)"
 
 FROM python:3.13-slim-bookworm@sha256:00faa2debb87529f9f0764e9491d8ba400a3678976616c3bd7cb193745ac20d1 AS runtime
 

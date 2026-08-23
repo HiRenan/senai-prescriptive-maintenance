@@ -1,0 +1,11 @@
+**
+# Reopen only parent paths needed to reach the web file allowlist.
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+apps/*
+!apps/web/
+apps/web/*
+!apps/web/package.json
+!apps/web/server.mjs
