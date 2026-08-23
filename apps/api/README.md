@@ -158,6 +158,49 @@ mesmos bytes e não substituem os artefatos; falhas continuam visíveis e são
 tentadas novamente na próxima execução. Esses JSON contêm derivados reais e
 devem permanecer somente sob um caminho local ignorado, como `data/processed/`.
 
+## Segmentação e indexação das extrações
+
+`chunk_extracted_document()` aceita somente o mapping estruturado de um
+`extraction.v1.json`; a fronteira não recebe caminho de PDF, não descobre fontes
+e não reabre materiais originais. O parser valida a versão do schema, a
+identidade SHA-256, a ordem das páginas, os métodos e os estados emitidos pela
+SEN-43 antes de segmentar. Página é uma fronteira obrigatória; headings Markdown
+e linhas curtas em caixa alta formam seções conservadoras, sem remover o heading
+do conteúdo.
+
+A configuração padrão `document-chunking.v1` limita cada chunk a 1.600
+caracteres, usa overlap de até 200 caracteres e identifica separadamente as
+versões da limpeza e da detecção de seção. A limpeza normaliza fins de linha,
+remove somente controles técnicos delimitados, apara whitespace ao fim das
+linhas e limita sequências de linhas vazias; Unicode válido, espaços internos e
+significado não são normalizados. O `chunk_id` é o SHA-256 canônico prefixado por
+`chunk_` sobre hash do conteúdo, documento, versão da fonte, página, seção,
+posição e configuração. `document_id` permanece estável pelo nome lógico e
+`document_version` deriva do SHA-256 observado pela extração.
+
+`index_extracted_document()` usa uma porta de embeddings com resultado por
+chunk e persiste tanto sucessos quanto falhas. `LocalHashEmbeddingProvider`
+produz vetores `fake-local-hash` determinísticos e offline para CI; ele é
+explicitamente não semântico e sua dimensão integra a versão da representação. O
+`InMemoryChunkRepository` é ordenado, idempotente e rejeita colisões.
+`PgVectorChunkRepository` apenas traduz registros para linhas tipadas e exige um
+`PgVectorWriter` injetado: não abre conexão, não executa SQL e não exige serviço
+na suíte padrão.
+
+Os limites são medidos em caracteres, não em tokens, e a detecção de headings é
+heurística; por isso a configuração favorece rastreabilidade e repetibilidade,
+não uma granularidade semanticamente ótima. O overlap padrão de 12,5% aumenta
+proporcionalmente o volume armazenado, e cada registro retém conteúdo e
+proveniência completos. O provider hash comprova a integração offline, mas não
+serve para avaliar qualidade de recuperação.
+
+Páginas sem texto, colisões e falhas de provider permanecem em códigos
+sanitizados no resultado. Chunks sem embedding continuam armazenados com vetor
+nulo e estado `failed`; estados `completed`, `attention_required`, `partial` e
+`failed` descrevem somente a indexação e nunca aprovam, rejeitam ou ocultam um
+documento. Busca vetorial, recuperação governada, lifecycle, API e UI não fazem
+parte desta fronteira.
+
 ## Contrato tabular de `banner`
 
 `prescriptive_maintenance.data.BANNER_COLUMN_CATALOG` é a fonte versionada e

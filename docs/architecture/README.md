@@ -19,7 +19,7 @@ não abre conexão com ele.
 | `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | Não contém adapters de modelo, recuperação, geração ou persistência reais. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
-| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes. Os derivados dos PDFs permanecem locais e ignorados; OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
+| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v1, validação da saída, porta neutra, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não recupera contexto, não faz chamada automática, não lê credenciais, não valida suporte semântico das citações e não contém SDK ou configuração de infraestrutura AWS. |
 | `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados e geração, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
@@ -96,8 +96,9 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
   resultados vêm somente de fakes sintéticos; vizinhos pertencem ao modelo e
   citações pertencem à evidência documental, com referências opacas de documento,
   versão e chunk e página positiva, sem título, caminho ou texto bruto.
-- **Persistência:** o banco está disponível localmente, mas não existe cliente,
-  repositório, migração ou persistência integrada ao backend.
+- **Persistência:** há repositório local em memória e contrato de escrita
+  pgvector injetável para chunks, mas não existe cliente, SQL, migração ou
+  persistência integrada ao banco da aplicação.
 - **Web:** `apps/web` reserva o limite do workspace; não existe frontend.
 - **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
   categórico aprovado e visão derivada da política são públicos; originais e
@@ -114,9 +115,9 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou pipeline de transformação tabular da aplicação;
 - esquema da aplicação, migrações e persistência integrada;
-- adapters reais de modelo ou recuperação, embeddings, uso de vetores pela
-  aplicação, similaridade e recuperação governada de contexto, execução RAG
-  integrada ou configuração operacional de LLM;
+- adapters reais de modelo ou recuperação, embedding semântico, conexão
+  pgvector da aplicação, busca por similaridade, recuperação governada de
+  contexto, execução RAG integrada ou configuração operacional de LLM;
 - autenticação, autorização e endpoint de readiness;
 - frontend, experiência de usuário ou assets visuais;
 - recursos AWS, deploy, ambiente de produção ou observabilidade operacional.

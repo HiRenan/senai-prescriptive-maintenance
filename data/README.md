@@ -161,6 +161,11 @@ locais e ignorados. Não use `git add -f`, não publique esses JSON e não copie
 seu conteúdo para logs, testes ou documentação. Os testes da porta constroem
 PDFs, engines e respostas OCR inteiramente sintéticos em diretórios temporários.
 
+Chunks, vetores e relatórios de validação criados a partir desses JSON também
+são derivados locais. Qualquer persistência em arquivo deve usar um destino
+ignorado sob `data/processed/`; validações públicas registram somente contagens,
+estados e identidades/hashes sanitizados, nunca o conteúdo dos chunks.
+
 ## Artefatos públicos derivados aprovados
 
 A baseline pública é o par exato abaixo, identificado pelo SHA-256 aprovado no
