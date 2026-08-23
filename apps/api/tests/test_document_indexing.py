@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from unicodedata import category as unicode_category
 
 import pytest
 from prescriptive_maintenance.contracts import Citation
@@ -26,6 +27,27 @@ from prescriptive_maintenance.data.document_indexing import (
 )
 
 _SYNTHETIC_SOURCE_HASH = "a" * 64
+
+
+def _documented_cleanup(text: str) -> str:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalized.translate(
+        str.maketrans(
+            {"\x00": None, "\x08": None, "\x0b": "\n", "\x0c": "\n", "\x7f": None}
+        )
+    )
+    lines = [line.rstrip(" \t") for line in normalized.split("\n")]
+    cleaned_lines: list[str] = []
+    blank_count = 0
+    for line in lines:
+        if line:
+            blank_count = 0
+            cleaned_lines.append(line)
+        else:
+            blank_count += 1
+            if blank_count <= 2:
+                cleaned_lines.append("")
+    return "\n".join(cleaned_lines).strip("\n")
 
 
 def _synthetic_page(
@@ -243,6 +265,151 @@ def test_empty_page_is_explicit_and_does_not_hide_other_chunks() -> None:
     assert result.failures[0].page_number == 1
     assert result.failures[0].chunk_id is None
     assert len(repository) == 1
+
+
+def test_page_without_chunk_preserves_its_original_failure_and_provenance() -> None:
+    extraction = _synthetic_extraction(
+        [
+            _synthetic_page(
+                1,
+                None,
+                method="ocr",
+                status="failed",
+                failure_code="page.ocr_failed",
+                quality_signals=("text.empty",),
+            ),
+            _synthetic_page(2, "Entirely synthetic available page text."),
+        ],
+        document_status="partial",
+    )
+
+    result = chunk_extracted_document(extraction)
+
+    assert result.status is DocumentIndexingStatus.PARTIAL
+    assert tuple(chunk.page_number for chunk in result.chunks) == (2,)
+    assert len(result.failures) == 1
+    failure = result.failures[0]
+    assert failure.code == "page.ocr_failed"
+    assert failure.page_number == 1
+    assert failure.chunk_id is None
+    assert failure.provenance is not None
+    assert failure.provenance.page_number == 1
+    assert failure.provenance.page_extraction_method == "ocr"
+    assert failure.provenance.page_extraction_status == "failed"
+    assert failure.provenance.page_failure_code == "page.ocr_failed"
+    assert failure.provenance.quality_signals == ("text.empty",)
+    assert not hasattr(failure.provenance, "text")
+
+
+def test_page_failure_provenance_rejects_an_unsanitized_source_code() -> None:
+    extraction = _synthetic_extraction(
+        [
+            _synthetic_page(
+                1,
+                None,
+                method="ocr",
+                status="failed",
+                failure_code="page.ocr_failed/private-detail",
+            )
+        ],
+        document_status="failed",
+    )
+
+    with pytest.raises(DocumentChunkingError) as raised:
+        chunk_extracted_document(extraction)
+
+    assert str(raised.value) == "Structured document extraction is invalid."
+    assert "private-detail" not in str(raised.value)
+
+
+def test_offsets_reference_original_page_text_after_length_changing_cleanup() -> None:
+    page_text = (
+        "\nalpha\x00beta  \r\n\r\n\r\n\r\n"
+        "gammagammagammagammagammagammagammagammagammagamma\x7f\n"
+    )
+    extraction = _synthetic_extraction([_synthetic_page(1, page_text)])
+    configuration = ChunkingConfiguration(max_characters=36, overlap_characters=6)
+
+    first = chunk_extracted_document(extraction, configuration=configuration)
+    second = chunk_extracted_document(extraction, configuration=configuration)
+
+    assert first == second
+    assert len(first.chunks) > 1
+    assert all(
+        len(chunk.content) <= configuration.max_characters for chunk in first.chunks
+    )
+    assert first.chunks[0].character_start == page_text.index("a")
+    assert first.chunks[-1].character_end == page_text.rindex("a") + 1
+    for chunk in first.chunks:
+        assert 0 <= chunk.character_start < chunk.character_end <= len(page_text)
+        source_excerpt = page_text[chunk.character_start : chunk.character_end]
+        assert _documented_cleanup(source_excerpt) == chunk.content
+        assert "\x00" not in chunk.content
+        assert "\x7f" not in chunk.content
+    for left, right in zip(first.chunks, first.chunks[1:], strict=False):
+        overlap_lengths = tuple(
+            length
+            for length in range(1, configuration.overlap_characters + 1)
+            if left.content[-length:] == right.content[:length]
+        )
+        assert overlap_lengths
+
+
+@pytest.mark.parametrize(
+    ("prefix_length", "grapheme"),
+    [
+        (31, "e\u0301"),
+        (31, "\u2699\ufe0f"),
+        (30, "\U0001f469\u200d\U0001f527"),
+    ],
+)
+def test_chunk_boundaries_never_split_required_grapheme_sequences(
+    prefix_length: int,
+    grapheme: str,
+) -> None:
+    page_text = f"{'x' * prefix_length}{grapheme}{'y' * 40}"
+    extraction = _synthetic_extraction([_synthetic_page(1, page_text)])
+    configuration = ChunkingConfiguration(max_characters=32, overlap_characters=0)
+
+    result = chunk_extracted_document(extraction, configuration=configuration)
+
+    assert all(
+        len(chunk.content) <= configuration.max_characters for chunk in result.chunks
+    )
+    assert any(grapheme in chunk.content for chunk in result.chunks)
+    chunk_boundaries = {
+        boundary
+        for chunk in result.chunks
+        for boundary in (chunk.character_start, chunk.character_end)
+    }
+    grapheme_start = page_text.index(grapheme)
+    assert chunk_boundaries.isdisjoint(
+        range(grapheme_start + 1, grapheme_start + len(grapheme))
+    )
+    assert all(
+        not (
+            unicode_category(page_text[boundary]).startswith("M")
+            or page_text[boundary] == "\u200d"
+            or page_text[boundary - 1] == "\u200d"
+        )
+        for boundary in chunk_boundaries
+        if 0 < boundary < len(page_text)
+    )
+
+
+def test_one_grapheme_longer_than_the_limit_remains_indivisible() -> None:
+    grapheme = "a" + "\u200db" * 20
+    page_text = f"{grapheme}tail"
+    extraction = _synthetic_extraction([_synthetic_page(1, page_text)])
+    configuration = ChunkingConfiguration(max_characters=32, overlap_characters=0)
+
+    result = chunk_extracted_document(extraction, configuration=configuration)
+
+    assert result.chunks[0].content == grapheme
+    assert len(result.chunks[0].content) > configuration.max_characters
+    assert result.chunks[0].character_start == 0
+    assert result.chunks[0].character_end == len(grapheme)
+    assert result.chunks[1].content == "tail"
 
 
 def test_failed_extraction_without_pages_preserves_the_source_failure() -> None:

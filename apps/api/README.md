@@ -178,6 +178,14 @@ significado não são normalizados. O `chunk_id` é o SHA-256 canônico prefixad
 posição e configuração. `document_id` permanece estável pelo nome lógico e
 `document_version` deriva do SHA-256 observado pela extração.
 
+`character_start` e `character_end` usam índices Python baseados em zero e o
+intervalo semiaberto `[start, end)` sobre o valor original de `pages[].text` no
+`extraction.v1.json`, antes da limpeza. Um mapa interno transporta cada limite
+pela remoção de NUL/DEL, normalização de CRLF, descarte de whitespace ao fim da
+linha e colapso de linhas vazias. Por isso o trecho fonte pode ter comprimento e
+bytes diferentes de `content`; reaplicar a limpeza ao trecho apontado produz o
+conteúdo do chunk. Tamanho máximo e overlap continuam medidos no texto limpo.
+
 `index_extracted_document()` usa uma porta de embeddings com resultado por
 chunk e persiste tanto sucessos quanto falhas. `LocalHashEmbeddingProvider`
 produz vetores `fake-local-hash` determinísticos e offline para CI; ele é
@@ -187,16 +195,23 @@ explicitamente não semântico e sua dimensão integra a versão da representaç
 `PgVectorWriter` injetado: não abre conexão, não executa SQL e não exige serviço
 na suíte padrão.
 
-Os limites são medidos em caracteres, não em tokens, e a detecção de headings é
+Os limites são medidos em caracteres, não em tokens, e sempre avançam por um
+limite seguro de grafema. A implementação usa somente a biblioteca padrão para
+manter juntos caractere-base, marcas Unicode, variation selectors, modificadores
+de emoji e cadeias ligadas por ZWJ; um grafema isolado maior que o teto é mantido
+inteiro e pode produzir o único chunk acima desse teto. A detecção de headings é
 heurística; por isso a configuração favorece rastreabilidade e repetibilidade,
 não uma granularidade semanticamente ótima. O overlap padrão de 12,5% aumenta
 proporcionalmente o volume armazenado, e cada registro retém conteúdo e
 proveniência completos. O provider hash comprova a integração offline, mas não
 serve para avaliar qualidade de recuperação.
 
-Páginas sem texto, colisões e falhas de provider permanecem em códigos
-sanitizados no resultado. Chunks sem embedding continuam armazenados com vetor
-nulo e estado `failed`; estados `completed`, `attention_required`, `partial` e
+Quando uma página não produz chunk, seu código `page.*` original tem precedência
+no resultado e acompanha número da página, método, estado, sinais e demais
+proveniências sanitizadas; o código genérico de chunking é usado somente quando
+a extração não forneceu uma falha. Colisões e falhas de provider também
+permanecem explícitas. Chunks sem embedding continuam armazenados com vetor nulo
+e estado `failed`; estados `completed`, `attention_required`, `partial` e
 `failed` descrevem somente a indexação e nunca aprovam, rejeitam ou ocultam um
 documento. Busca vetorial, recuperação governada, lifecycle, API e UI não fazem
 parte desta fronteira.

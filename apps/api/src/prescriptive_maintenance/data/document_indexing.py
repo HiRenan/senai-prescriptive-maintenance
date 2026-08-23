@@ -10,6 +10,7 @@ from enum import StrEnum
 from hashlib import sha256, shake_256
 from math import isfinite, sqrt
 from typing import Final, Protocol, cast
+from unicodedata import category as unicode_category
 
 from prescriptive_maintenance.data.source_documents import (
     SOURCE_DOCUMENT_EXTRACTION_SCHEMA_VERSION,
@@ -34,15 +35,9 @@ _CHUNK_ID_PATTERN: Final = re.compile(r"chunk_[a-z0-9_]{3,64}")
 _IDENTITY_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _FAILURE_CODE_PATTERN: Final = re.compile(r"[a-z][a-z0-9_.]{0,79}")
 _MARKDOWN_HEADING: Final = re.compile(r"^#{1,6}[ \t]+(?P<title>\S.*)$")
-_TECHNICAL_NOISE_TRANSLATION: Final = str.maketrans(
-    {
-        "\x00": None,
-        "\x08": None,
-        "\x0b": "\n",
-        "\x0c": "\n",
-        "\x7f": None,
-    }
-)
+_REMOVED_TECHNICAL_NOISE: Final = frozenset({"\x00", "\x08", "\x7f"})
+_LINE_BREAK_TECHNICAL_NOISE: Final = frozenset({"\x0b", "\x0c"})
+_ZERO_WIDTH_JOINER: Final = "\u200d"
 
 
 class DocumentChunkingError(Exception):
@@ -224,6 +219,24 @@ class IndexingFailure:
     code: str
     page_number: int | None
     chunk_id: str | None
+    provenance: ExtractionProvenance | None = None
+
+    def __post_init__(self) -> None:
+        if _FAILURE_CODE_PATTERN.fullmatch(self.code) is None:
+            raise ValueError("Indexing failure code is invalid.")
+        if self.page_number is not None and (
+            type(self.page_number) is not int or self.page_number < 1
+        ):
+            raise ValueError("Indexing failure page number is invalid.")
+        if (
+            self.chunk_id is not None
+            and _CHUNK_ID_PATTERN.fullmatch(self.chunk_id) is None
+        ):
+            raise ValueError("Indexing failure chunk identity is invalid.")
+        if self.provenance is not None and (
+            self.page_number is None or self.provenance.page_number != self.page_number
+        ):
+            raise ValueError("Indexing failure provenance does not match its page.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,6 +465,17 @@ class _Section:
     text: str
 
 
+@dataclass(frozen=True, slots=True)
+class _CleanedPageText:
+    text: str
+    source_spans: tuple[tuple[int, int], ...]
+
+    def source_bounds(self, start: int, end: int) -> tuple[int, int]:
+        if not 0 <= start < end <= len(self.source_spans):
+            raise ValueError("Cleaned text bounds are invalid.")
+        return self.source_spans[start][0], self.source_spans[end - 1][1]
+
+
 def chunk_extracted_document(
     extraction: Mapping[str, object],
     *,
@@ -470,36 +494,36 @@ def chunk_extracted_document(
     for page in structured.pages:
         if page.text is None:
             failures.append(
-                IndexingFailure(
-                    code="chunking.page_text_unavailable",
-                    page_number=page.page_number,
-                    chunk_id=None,
+                _page_failure(
+                    structured,
+                    page,
+                    fallback_code="chunking.page_text_unavailable",
                 )
             )
             continue
         try:
             page.text.encode("utf-8")
-            cleaned_text = _clean_technical_noise(page.text)
+            cleaned_page = _clean_technical_noise_with_mapping(page.text)
         except UnicodeError:
             failures.append(
-                IndexingFailure(
-                    code="chunking.page_text_invalid_unicode",
-                    page_number=page.page_number,
-                    chunk_id=None,
+                _page_failure(
+                    structured,
+                    page,
+                    fallback_code="chunking.page_text_invalid_unicode",
                 )
             )
             continue
-        if not cleaned_text:
+        if not cleaned_page.text:
             failures.append(
-                IndexingFailure(
-                    code="chunking.page_empty_after_cleanup",
-                    page_number=page.page_number,
-                    chunk_id=None,
+                _page_failure(
+                    structured,
+                    page,
+                    fallback_code="chunking.page_empty_after_cleanup",
                 )
             )
             continue
 
-        for section in _split_sections(cleaned_text):
+        for section in _split_sections(cleaned_page.text):
             section_id = _section_id(
                 document_id=document_id,
                 document_version=document_version,
@@ -512,8 +536,12 @@ def chunk_extracted_document(
             ):
                 content = section.text[local_start:local_end]
                 ordinal += 1
-                character_start = section.start + local_start
-                character_end = section.start + local_end
+                cleaned_start = section.start + local_start
+                cleaned_end = section.start + local_end
+                character_start, character_end = cleaned_page.source_bounds(
+                    cleaned_start,
+                    cleaned_end,
+                )
                 content_sha256 = _digest_text(content)
                 chunk_id = _build_chunk_id(
                     content_sha256=content_sha256,
@@ -553,6 +581,7 @@ def chunk_extracted_document(
                             code="chunking.chunk_id_collision",
                             page_number=page.page_number,
                             chunk_id=chunk_id,
+                            provenance=_provenance(structured, page),
                         )
                     )
                     continue
@@ -600,6 +629,7 @@ def index_extracted_document(
             code=cast(str, record.embedding.failure_code),
             page_number=record.chunk.page_number,
             chunk_id=record.chunk.chunk_id,
+            provenance=record.chunk.provenance,
         )
         for record in records
         if record.embedding.status is EmbeddingStatus.FAILED
@@ -634,7 +664,7 @@ def _parse_extraction(extraction: Mapping[str, object]) -> _StructuredExtraction
         document_status = DocumentExtractionStatus(
             _non_empty_string(extraction["status"])
         )
-        document_failure_code = _optional_string(extraction["failure_code"])
+        document_failure_code = _optional_failure_code(extraction["failure_code"])
         raw_pages = _object_sequence(extraction["pages"])
         raw_page_count = extraction["page_count"]
         page_count = (
@@ -697,9 +727,9 @@ def _parse_page(raw_page: object, *, expected_page_number: int) -> _ExtractionPa
         method=PageExtractionMethod(_non_empty_string(page["method"])),
         status=PageExtractionStatus(_non_empty_string(page["status"])),
         text=text,
-        failure_code=_optional_string(page["failure_code"]),
-        ocr_trigger_codes=_string_tuple(page["ocr_trigger_codes"]),
-        quality_signals=_string_tuple(quality["signals"]),
+        failure_code=_optional_failure_code(page["failure_code"]),
+        ocr_trigger_codes=_code_tuple(page["ocr_trigger_codes"]),
+        quality_signals=_code_tuple(quality["signals"]),
     )
 
 
@@ -733,6 +763,13 @@ def _optional_string(value: object) -> str | None:
     return _non_empty_string(value)
 
 
+def _optional_failure_code(value: object) -> str | None:
+    text = _optional_string(value)
+    if text is not None and _FAILURE_CODE_PATTERN.fullmatch(text) is None:
+        raise ValueError
+    return text
+
+
 def _hash_string(value: object) -> str:
     text = _non_empty_string(value)
     if _HASH_PATTERN.fullmatch(text) is None:
@@ -740,29 +777,75 @@ def _hash_string(value: object) -> str:
     return text
 
 
-def _string_tuple(value: object) -> tuple[str, ...]:
+def _code_tuple(value: object) -> tuple[str, ...]:
     if not isinstance(value, list) or any(
-        not isinstance(item, str) or not item for item in cast(list[object], value)
+        not isinstance(item, str) or _FAILURE_CODE_PATTERN.fullmatch(item) is None
+        for item in cast(list[object], value)
     ):
         raise ValueError
     return tuple(cast(list[str], value))
 
 
-def _clean_technical_noise(text: str) -> str:
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    normalized = normalized.translate(_TECHNICAL_NOISE_TRANSLATION)
-    lines = [line.rstrip(" \t") for line in normalized.split("\n")]
-    cleaned_lines: list[str] = []
-    blank_count = 0
-    for line in lines:
-        if line:
-            blank_count = 0
-            cleaned_lines.append(line)
+def _clean_technical_noise_with_mapping(text: str) -> _CleanedPageText:
+    mapped: list[tuple[str, int, int]] = []
+    cursor = 0
+    while cursor < len(text):
+        character = text[cursor]
+        if character == "\r":
+            source_end = (
+                cursor + 2 if text[cursor : cursor + 2] == "\r\n" else cursor + 1
+            )
+            mapped.append(("\n", cursor, source_end))
+            cursor = source_end
             continue
-        blank_count += 1
-        if blank_count <= 2:
-            cleaned_lines.append("")
-    return "\n".join(cleaned_lines).strip("\n")
+        if character in _REMOVED_TECHNICAL_NOISE:
+            cursor += 1
+            continue
+        if character in _LINE_BREAK_TECHNICAL_NOISE:
+            mapped.append(("\n", cursor, cursor + 1))
+        else:
+            mapped.append((character, cursor, cursor + 1))
+        cursor += 1
+
+    trimmed: list[tuple[str, int, int]] = []
+    line: list[tuple[str, int, int]] = []
+    for item in mapped:
+        if item[0] != "\n":
+            line.append(item)
+            continue
+        while line and line[-1][0] in {" ", "\t"}:
+            line.pop()
+        trimmed.extend(line)
+        line.clear()
+        trimmed.append(item)
+    while line and line[-1][0] in {" ", "\t"}:
+        line.pop()
+    trimmed.extend(line)
+
+    collapsed: list[tuple[str, int, int]] = []
+    consecutive_newlines = 0
+    for item in trimmed:
+        if item[0] == "\n":
+            consecutive_newlines += 1
+            if consecutive_newlines > 3:
+                continue
+        else:
+            consecutive_newlines = 0
+        collapsed.append(item)
+
+    start = 0
+    end = len(collapsed)
+    while start < end and collapsed[start][0] == "\n":
+        start += 1
+    while end > start and collapsed[end - 1][0] == "\n":
+        end -= 1
+    cleaned = collapsed[start:end]
+    return _CleanedPageText(
+        text="".join(character for character, _, _ in cleaned),
+        source_spans=tuple(
+            (source_start, source_end) for _, source_start, source_end in cleaned
+        ),
+    )
 
 
 def _split_sections(text: str) -> tuple[_Section, ...]:
@@ -823,8 +906,10 @@ def _heading_title(line: str) -> str | None:
 
 def _trim_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     while start < end and text[start].isspace():
-        start += 1
-    while end > start and text[end - 1].isspace():
+        start = _next_grapheme_boundary(text, start + 1, maximum=end)
+    while (
+        end > start and text[end - 1].isspace() and _is_grapheme_boundary(text, end - 1)
+    ):
         end -= 1
     return start, end
 
@@ -842,14 +927,22 @@ def _chunk_bounds(
             if hard_end == len(text)
             else _preferred_break(text, cursor=cursor, hard_end=hard_end)
         )
+        end = _previous_grapheme_boundary(text, end, minimum=cursor)
+        if end == cursor:
+            end = _next_grapheme_boundary(text, hard_end, maximum=len(text))
         start, trimmed_end = _trim_bounds(text, cursor, end)
         if start < trimmed_end:
             bounds.append((start, trimmed_end))
         if end == len(text):
             break
         next_cursor = max(cursor + 1, end - configuration.overlap_characters)
+        next_cursor = _next_grapheme_boundary(text, next_cursor, maximum=end)
         while next_cursor < end and text[next_cursor].isspace():
-            next_cursor += 1
+            next_cursor = _next_grapheme_boundary(
+                text,
+                next_cursor + 1,
+                maximum=end,
+            )
         cursor = next_cursor
     return tuple(bounds)
 
@@ -861,6 +954,40 @@ def _preferred_break(text: str, *, cursor: int, hard_end: int) -> int:
         if position >= minimum:
             return position + len(delimiter)
     return hard_end
+
+
+def _is_grapheme_boundary(text: str, index: int) -> bool:
+    if index <= 0 or index >= len(text):
+        return True
+    previous = text[index - 1]
+    following = text[index]
+    return not (
+        _is_grapheme_extension(following)
+        or previous == _ZERO_WIDTH_JOINER
+        or following == _ZERO_WIDTH_JOINER
+    )
+
+
+def _is_grapheme_extension(character: str) -> bool:
+    code_point = ord(character)
+    return (
+        unicode_category(character).startswith("M")
+        or 0xFE00 <= code_point <= 0xFE0F
+        or 0xE0100 <= code_point <= 0xE01EF
+        or 0x1F3FB <= code_point <= 0x1F3FF
+    )
+
+
+def _previous_grapheme_boundary(text: str, index: int, *, minimum: int) -> int:
+    while index > minimum and not _is_grapheme_boundary(text, index):
+        index -= 1
+    return index
+
+
+def _next_grapheme_boundary(text: str, index: int, *, maximum: int) -> int:
+    while index < maximum and not _is_grapheme_boundary(text, index):
+        index += 1
+    return index
 
 
 def _document_id(source_name: str) -> str:
@@ -941,6 +1068,20 @@ def _provenance(
         pdfium_version=structured.pdfium_version,
         ocr_adapter_name=structured.ocr_adapter_name,
         ocr_adapter_version=structured.ocr_adapter_version,
+    )
+
+
+def _page_failure(
+    structured: _StructuredExtraction,
+    page: _ExtractionPage,
+    *,
+    fallback_code: str,
+) -> IndexingFailure:
+    return IndexingFailure(
+        code=page.failure_code or fallback_code,
+        page_number=page.page_number,
+        chunk_id=None,
+        provenance=_provenance(structured, page),
     )
 
 
