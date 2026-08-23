@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from prescriptive_maintenance import __version__
+from prescriptive_maintenance.contracts import API_CONTRACT_VERSION
 from prescriptive_maintenance.main import app, create_app
 
 
@@ -20,7 +20,7 @@ def test_create_app_returns_isolated_applications() -> None:
     assert first_application is not second_application
     assert first_application.router is not second_application.router
     assert first_application.title == "Prescriptive Maintenance API"
-    assert first_application.version == __version__
+    assert first_application.version == API_CONTRACT_VERSION
 
 
 def test_liveness_contract_without_local_configuration(

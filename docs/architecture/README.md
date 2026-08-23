@@ -15,11 +15,13 @@ não abre conexão com ele.
 
 | Área | Implementação comprovável | Limite atual |
 | --- | --- | --- |
-| `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app` e `GET /health/live`. | A liveness verifica apenas o processo e não acessa dependências. |
+| `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live` e rotas do contrato HTTP v1. | A liveness verifica apenas o processo; as demais rotas usam fakes sintéticos injetáveis. |
+| `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | Não contém adapters de modelo, recuperação, geração ou persistência reais. |
+| `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only, emitir recibos pre/post efetivos, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos somente no acesso à fonte; os runners só persistem artefatos aprovados após integridade, gates, reconciliações e igualdade byte a byte. O inventário pode ser validado offline, e a política oferece consulta imutável e resolve a ação efetiva de matches contextuais sem aplicar regras a linhas. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v1, validação da saída, porta neutra, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não recupera contexto, não faz chamada automática, não lê credenciais, não valida suporte semântico das citações e não contém SDK ou configuração de infraestrutura AWS. |
-| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, configuração, dados e geração, incluindo JSON, golden e cenários inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
+| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados e geração, incluindo snapshots, JSON, golden e cenários inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
 | `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
@@ -87,6 +89,10 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 
 - **Aplicação:** FastAPI e configuração são código de produção; smoke e Compose
   são suporte ao desenvolvimento e à validação.
+- **Contrato de análise:** schemas, portas e orquestração são executáveis, mas os
+  resultados vêm somente de fakes sintéticos; vizinhos pertencem ao modelo e
+  citações pertencem à evidência documental, com referências opacas de documento,
+  versão e chunk e página positiva, sem título, caminho ou texto bruto.
 - **Persistência:** o banco está disponível localmente, mas não existe cliente,
   repositório, migração ou persistência integrada ao backend.
 - **Web:** `apps/web` reserva o limite do workspace; não existe frontend.
@@ -106,9 +112,9 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou pipeline de transformação tabular da aplicação;
 - esquema da aplicação, migrações e persistência integrada;
-- embeddings, uso de vetores pela aplicação, similaridade, recuperação
-  governada de contexto, execução RAG integrada ou configuração operacional de
-  LLM;
+- adapters reais de modelo ou recuperação, embeddings, uso de vetores pela
+  aplicação, similaridade e recuperação governada de contexto, execução RAG
+  integrada ou configuração operacional de LLM;
 - autenticação, autorização e endpoint de readiness;
 - frontend, experiência de usuário ou assets visuais;
 - recursos AWS, deploy, ambiente de produção ou observabilidade operacional.

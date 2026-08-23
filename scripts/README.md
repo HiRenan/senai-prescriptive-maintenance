@@ -23,3 +23,12 @@ uv run --frozen poe smoke --with-services
 
 O smoke nunca inicia, interrompe ou remove recursos Docker. Esse ciclo pertence
 às tarefas `services-up` e `services-down`.
+
+`generate_openapi.py` renderiza de forma determinística o contrato HTTP v1 em
+`apps/api/openapi/v1.json`. A opção `--check` compara os bytes sem reescrever o
+snapshot:
+
+```powershell
+uv run --frozen python scripts/generate_openapi.py
+uv run --frozen python scripts/generate_openapi.py --check
+```

@@ -26,6 +26,36 @@ uv run --frozen uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --por
 processo está vivo e não acessa banco, arquivos, rede, configurações externas
 ou outros serviços.
 
+## Contrato HTTP v1
+
+O contrato público congelado está em [`openapi/v1.json`](openapi/v1.json). Ele
+define `POST /analysis` com exatamente 18 features métricas e `top_k` entre 1 e
+10, além da consulta de análise e das operações mínimas de registro, consulta,
+aprovação, rejeição e reprocessamento de documentos PDF. Os cinco resultados de
+análise são `normal`, `documented_fault`, `undocumented_fault`,
+`out_of_distribution` e `degraded`; os sete estados documentais também formam
+uniões discriminadas fechadas para geração de tipos sem cópia manual no
+frontend.
+
+Os vizinhos opacos pertencem exclusivamente à porta do modelo, são preservados
+em qualquer resultado quando disponíveis e expõem somente referência, posição,
+código normalizado da falha e distância padronizada finita não negativa, sem
+limite unitário. Evidências documentais carregam apenas seu suporte documental e
+citações governadas; cada citação identifica documento, versão e chunk por
+referências opacas e uma página positiva, sem título, caminho ou texto bruto.
+`support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
+medida de confiança.
+
+A aplicação usa fakes determinísticos e inteiramente sintéticos: ela não executa
+modelo, recuperação, geração, persistência nem leitura de arquivos reais. O
+registro documental recebe somente metadados seguros de um PDF e nunca implica
+aprovação. Para regenerar e conferir o snapshot:
+
+```powershell
+uv run --frozen python scripts/generate_openapi.py
+uv run --frozen python scripts/generate_openapi.py --check
+```
+
 A verificação canônica inicia o Uvicorn em loopback e porta efêmera, faz a
 requisição HTTP real e encerra o processo ao final, sem exigir banco ou `.env`:
 
