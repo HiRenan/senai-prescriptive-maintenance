@@ -205,11 +205,12 @@ contrato de geração e sua unicidade é local à análise, representada pela ch
 composta `(analysis_id, evidence_id)`; o mesmo identificador pode ser reutilizado
 por outra análise sem perder a origem de cada referência.
 
-O esquema não possui features, linhas, vetores, embeddings, texto, conteúdo
-bruto, caminho, nome de arquivo, diagnóstico ou prescrição. Assim, a recuperação
-de uma análise devolve todos os IDs de versão usados sem persistir os materiais
-originais ou dados privados. Um replay com o mesmo ID e os mesmos metadados é
-idempotente; reutilizar o ID com metadados diferentes gera conflito tipado.
+As tabelas de metadados de análise e documentos não possuem features, linhas,
+vetores, embeddings, texto, conteúdo bruto, caminho, nome de arquivo,
+diagnóstico ou prescrição. Assim, a recuperação de uma análise devolve todos os
+IDs de versão usados sem persistir os materiais originais ou dados privados. Um
+replay com o mesmo ID e os mesmos metadados é idempotente; reutilizar o ID com
+metadados diferentes gera conflito tipado.
 `DocumentRepository.add_version()` acrescenta de forma idempotente uma versão
 imutável e seus chunks a um documento existente. Ele não reescreve nem remove
 histórico: repetir a mesma versão é uma operação vazia, enquanto associar o mesmo
@@ -1010,6 +1011,53 @@ A aplicação HTTP continua injetando fakes sintéticos; a baseline e seu adapte
 não são conectados às rotas nesta tarefa. As decisões e métricas temporais
 sanitizadas estão em [`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md)
 e [`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).
+
+## Índice de similaridade versionado
+
+`save_similarity_index_from_knn_artifact()` recebe somente o artefato k-NN v2
+(baseline SEN-42 com a política SEN-51) que passou integralmente por
+`load_knn_model()`. A saída local contém
+`manifest.json`, estado do pré-processador em JSON, metadados opacos dos
+registros em JSON e `vectors.npy` `float32`. O manifesto fixa `dataset_id`,
+`schema_id`, versões de feature, pré-processador, índice e configuração,
+dimensão 18, métrica euclidiana, quantidade de registros, identidade do modelo
+de origem e hashes físicos e lógicos.
+
+`load_similarity_index()` exige o conjunto exato de arquivos e serialização JSON
+canônica. Compatibilidade e hashes físicos são validados antes de abrir o array;
+a carga NumPy usa sempre `allow_pickle=False`, e os hashes lógicos e a identidade
+de conteúdo são recalculados antes de devolver o índice imutável. Dimensão
+divergente, números não finitos, versão, configuração, hash ou identidade
+incompatível bloqueiam a operação.
+
+`SimilarityIndexPort` congela a mesma consulta para os dois adapters. O seletor
+carrega o `index_id`, o `model_id` de origem e toda a compatibilidade de dataset,
+schema, versões e configuração; qualquer divergência falha antes da busca. A
+consulta usa features cruas na ordem canônica, aplica apenas o estado JSON
+verificado, filtra opcionalmente por `fault_code` e ordena por distância
+crescente seguida de ID opaco crescente. `top_k` permanece entre 1 e 10. O
+adapter em memória faz varredura exata; o adapter PostgreSQL usa o operador
+euclidiano do pgvector com o mesmo desempate. A construção do adapter valida
+integralmente os vetores instalados. Em cada consulta, manifesto, quantidade e
+top-k do banco são lidos no mesmo snapshot `READ ONLY`/`REPEATABLE READ`;
+cardinalidade, IDs, ordem, metadados e distâncias são comparados ao top-k
+canônico vetorizado do artefato imutável em memória antes da resposta.
+
+A migração `versioned_similarity_index`, versão 2, acrescenta somente o
+manifesto instalado e seus registros opacos com `public.vector(18)`. Não há
+índice aproximado nesta versão: o contrato `exact-flat.v1` prioriza paridade e
+reprodutibilidade para a baseline. `install_similarity_index()` é transacional,
+idempotente para replay byte a byte e rejeita colisões ou conteúdo divergente;
+a conexão continua pertencendo ao chamador. Migrações 1 e 2 compartilham o
+mesmo runner, checksum e advisory lock.
+
+Os testes PostgreSQL usam schema aleatório descartável e comprovam
+`up/down/up`, replay concorrente, rollback de escrita parcial e paridade exata
+com empates, filtros e conjunto vazio. Sem
+`PRESCRIPTIVE_MAINTENANCE_TEST_DATABASE_URL`, eles são ignorados e a suíte
+padrão permanece offline. Nenhum artefato real é instalado pelos testes. A
+justificativa e os limites estão em
+[`docs/validation/similarity-index.md`](../../docs/validation/similarity-index.md).
 
 ## Verificações
 

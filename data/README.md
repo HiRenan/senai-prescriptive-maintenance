@@ -244,6 +244,24 @@ pickle; ela exige `allow_pickle=False`, o conjunto exato de arquivos e a
 verificação de schema, compatibilidade, hashes e `model_id` antes de disponibilizar
 o modelo em memória.
 
+## Índice de similaridade local
+
+O índice derivado do modelo deve ser gravado em outro destino explícito e
+ignorado, como `data/processed/indexes/<index-id>/`. Ele contém manifesto,
+estado do pré-processador, metadados por referência opaca e vetores `float32`.
+Embora não contenha a fonte original, todo o diretório continua sendo derivado
+privado por registro: não use `git add -f`, não publique e não copie seus bytes
+para fixtures, logs ou documentação.
+
+`save_similarity_index_from_knn_artifact()` só aceita um artefato de modelo já
+validado, exige destino ignorado dentro de worktrees e faz publicação atômica.
+`load_similarity_index()` verifica versões, configuração, dimensão, métrica,
+quantidade, identidades e hashes antes de carregar o array com
+`allow_pickle=False`. Somente um índice carregado por essa fronteira deve ser
+entregue a `install_similarity_index()` para instalação transacional no banco
+local. Testes públicos de memória e PostgreSQL constroem exclusivamente índices
+sintéticos em diretórios e schemas descartáveis.
+
 ## Conteúdo público
 
 Somente fixtures inteiramente sintéticas, samples previamente sanitizados, o par
