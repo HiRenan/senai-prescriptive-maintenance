@@ -221,6 +221,21 @@ lock públicos sem abrir novamente a fonte e sem alterar os arquivos. Para prova
 determinismo, execute builds independentes em dois destinos ignorados e compare
 `dataset_id`, hashes físicos e hashes lógicos.
 
+## Artefatos locais de modelo
+
+A baseline k-NN consome somente as partições canônicas já verificadas e grava
+seu artefato em um destino explícito, como `data/processed/models/<model-id>/`.
+O diretório contém um manifesto JSON e três arrays NumPy com vetores
+padronizados, índices de classe e referências opacas. Esses arrays permanecem
+derivados privados por registro: não use `git add -f`, não publique e não copie
+seu conteúdo para fixtures, logs ou documentação.
+
+Dentro de uma worktree, `save_knn_model()` exige que o destino esteja ignorado e
+rejeita links, junctions e substituição de bytes divergentes. A carga não usa
+pickle; ela exige `allow_pickle=False`, o conjunto exato de arquivos e a
+verificação de schema, compatibilidade, hashes e `model_id` antes de disponibilizar
+o modelo em memória.
+
 ## Conteúdo público
 
 Somente fixtures inteiramente sintéticas, samples previamente sanitizados, o par
