@@ -177,14 +177,18 @@ gera conflito.
 
 `InMemoryUnitOfWork` é o adapter da suíte padrão e não abre rede. Cada unidade
 publica mudanças somente após `commit()` explícito; exceção, saída sem commit ou
-conflito transacional descarta todo o estado preparado. `PostgresUnitOfWork`
-oferece a mesma fronteira sobre uma conexão psycopg com autocommit desabilitado.
+conflito transacional descarta todo o estado preparado. A entrada é reconstruída
+recursivamente nos tipos mínimos do módulo, de modo que subclasses e campos
+adicionais do chamador não sejam retidos. `PostgresUnitOfWork` oferece a mesma
+fronteira sobre uma conexão psycopg ociosa com autocommit desabilitado; ela não
+assume uma transação externa. Uma violação relacional retorna erro de domínio
+sanitizado e marca a unidade como `rollback-only` até `rollback()` ou a saída.
 
 A migração `initial_analysis_metadata`, versão 1, é aplicada por `upgrade()` e
 revertida por `downgrade()`. As duas operações são transacionais, verificam o
-checksum da versão aplicada e são idempotentes no alvo atual. O bootstrap do
-Compose continua responsável somente pelo pgvector; migrações da aplicação são
-sempre chamadas explicitamente:
+checksum da versão aplicada, serializam concorrência por lock transacional e são
+idempotentes no alvo atual. O bootstrap do Compose continua responsável somente
+pelo pgvector; migrações da aplicação são sempre chamadas explicitamente:
 
 ```python
 from psycopg import Connection

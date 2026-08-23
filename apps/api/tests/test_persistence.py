@@ -1,6 +1,7 @@
 """Contract tests for minimal metadata and the in-memory transaction adapter."""
 
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
+from typing import cast
 
 import pytest
 from persistence_samples import (
@@ -10,6 +11,8 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
 )
+from prescriptive_maintenance.contracts import AnalysisOutcome as ApiAnalysisOutcome
+from prescriptive_maintenance.domain import AnalysisOutcome
 from prescriptive_maintenance.persistence import (
     AnalysisMetadata,
     ChunkReference,
@@ -23,6 +26,33 @@ from prescriptive_maintenance.persistence import (
     TransactionConflictError,
     UnitOfWork,
 )
+
+_FORBIDDEN_PAYLOAD = "synthetic raw payload that must never be persisted"
+
+
+@dataclass(frozen=True, slots=True)
+class _TaintedChunkReference(ChunkReference):
+    raw_content: str = _FORBIDDEN_PAYLOAD
+
+
+@dataclass(frozen=True, slots=True)
+class _TaintedDocumentVersion(DocumentVersionMetadata):
+    raw_content: str = _FORBIDDEN_PAYLOAD
+
+
+@dataclass(frozen=True, slots=True)
+class _TaintedDocument(DocumentMetadata):
+    raw_content: str = _FORBIDDEN_PAYLOAD
+
+
+@dataclass(frozen=True, slots=True)
+class _TaintedEvidenceReference(EvidenceReference):
+    raw_content: str = _FORBIDDEN_PAYLOAD
+
+
+@dataclass(frozen=True, slots=True)
+class _TaintedAnalysis(AnalysisMetadata):
+    raw_content: str = _FORBIDDEN_PAYLOAD
 
 
 def _accepts_unit_of_work(unit_of_work: UnitOfWork) -> UnitOfWork:
@@ -131,6 +161,131 @@ def test_analysis_rejects_noncanonical_dataset_and_duplicate_local_evidence() ->
                 replace(second, evidence_id=first.evidence_id),
             ),
         )
+
+
+def test_analysis_outcome_is_exactly_the_closed_api_v1_domain() -> None:
+    expected_outcomes = (
+        "normal",
+        "documented_fault",
+        "undocumented_fault",
+        "out_of_distribution",
+        "degraded",
+    )
+    assert ApiAnalysisOutcome is AnalysisOutcome
+    assert tuple(outcome.value for outcome in AnalysisOutcome) == expected_outcomes
+
+    store = InMemoryStore()
+    analyses = tuple(
+        replace(
+            SYNTHETIC_ANALYSIS,
+            analysis_id=f"ana_synthetic_outcome_{index}",
+            outcome=outcome,
+            evidence_references=(),
+        )
+        for index, outcome in enumerate(AnalysisOutcome)
+    )
+    with InMemoryUnitOfWork(store) as transaction:
+        for analysis in analyses:
+            transaction.analyses.add(analysis)
+        transaction.commit()
+
+    with InMemoryUnitOfWork(store) as query:
+        assert (
+            tuple(query.analyses.get(analysis.analysis_id) for analysis in analyses)
+            == analyses
+        )
+
+    with pytest.raises(ValueError, match="five API v1 outcomes"):
+        replace(
+            SYNTHETIC_ANALYSIS,
+            outcome=cast(AnalysisOutcome, "synthetic_arbitrary_outcome"),
+        )
+
+    invalid = replace(
+        SYNTHETIC_ANALYSIS,
+        analysis_id="ana_synthetic_invalid_outcome",
+        evidence_references=(),
+    )
+    object.__setattr__(
+        invalid,
+        "outcome",
+        cast(AnalysisOutcome, "synthetic_arbitrary_outcome"),
+    )
+    with (
+        InMemoryUnitOfWork() as transaction,
+        pytest.raises(ValueError, match="five API v1 outcomes"),
+    ):
+        transaction.analyses.add(invalid)
+
+
+def test_in_memory_rebuilds_subclasses_without_forbidden_payloads() -> None:
+    chunk = SYNTHETIC_DOCUMENT.versions[0].chunks[0]
+    tainted_chunk = _TaintedChunkReference(
+        chunk_ref=chunk.chunk_ref,
+        document_id=chunk.document_id,
+        document_version_id=chunk.document_version_id,
+        page_number=chunk.page_number,
+    )
+    version = SYNTHETIC_DOCUMENT.versions[0]
+    tainted_version = _TaintedDocumentVersion(
+        document_version_id=version.document_version_id,
+        document_id=version.document_id,
+        source_sha256=version.source_sha256,
+        created_at=version.created_at,
+        chunks=(tainted_chunk,),
+    )
+    tainted_document = _TaintedDocument(
+        document_id=SYNTHETIC_DOCUMENT.document_id,
+        created_at=SYNTHETIC_DOCUMENT.created_at,
+        versions=(tainted_version,),
+    )
+    tainted_reference = _TaintedEvidenceReference(
+        evidence_id="synthetic-tainted-evidence",
+        document_id=tainted_document.document_id,
+        document_version_id=tainted_version.document_version_id,
+        chunk_ref=tainted_chunk.chunk_ref,
+        ordinal=1,
+    )
+    tainted_analysis = _TaintedAnalysis(
+        analysis_id="ana_synthetic_tainted",
+        outcome=AnalysisOutcome.DOCUMENTED_FAULT,
+        dataset_id=SYNTHETIC_DATASET_ID,
+        model_id="model_synthetic_v1",
+        prompt_id="prompt_synthetic_v1",
+        configuration_id="config_synthetic_v1",
+        created_at=SYNTHETIC_ANALYSIS.created_at,
+        evidence_references=(tainted_reference,),
+    )
+
+    store = InMemoryStore()
+    with InMemoryUnitOfWork(store) as transaction:
+        transaction.documents.add(tainted_document)
+        transaction.analyses.add(tainted_analysis)
+        transaction.commit()
+
+    with InMemoryUnitOfWork(store) as query:
+        recovered_document = query.documents.get(tainted_document.document_id)
+        recovered_analysis = query.analyses.get(tainted_analysis.analysis_id)
+
+    assert recovered_document is not None
+    assert recovered_analysis is not None
+    recovered_version = recovered_document.versions[0]
+    recovered_chunk = recovered_version.chunks[0]
+    recovered_reference = recovered_analysis.evidence_references[0]
+    assert type(recovered_document) is DocumentMetadata
+    assert type(recovered_version) is DocumentVersionMetadata
+    assert type(recovered_chunk) is ChunkReference
+    assert type(recovered_analysis) is AnalysisMetadata
+    assert type(recovered_reference) is EvidenceReference
+    recovered_nodes: tuple[object, ...] = (
+        recovered_document,
+        recovered_version,
+        recovered_chunk,
+        recovered_analysis,
+        recovered_reference,
+    )
+    assert all(not hasattr(node, "raw_content") for node in recovered_nodes)
+    assert all(_FORBIDDEN_PAYLOAD not in repr(node) for node in recovered_nodes)
 
 
 def test_document_rejects_a_chunk_identifier_reused_across_versions() -> None:

@@ -32,6 +32,10 @@ class UnitOfWorkStateError(PersistenceError):
     """The unit of work was used outside its valid lifecycle."""
 
 
+class TransactionRollbackOnlyError(UnitOfWorkStateError):
+    """A failed database constraint requires an explicit rollback."""
+
+
 class AnalysisRepository(Protocol):
     """Persist and recover complete analysis metadata aggregates."""
 

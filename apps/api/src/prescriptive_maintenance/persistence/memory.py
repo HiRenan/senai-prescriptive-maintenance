@@ -11,6 +11,9 @@ from prescriptive_maintenance.persistence.models import (
     DocumentMetadata,
     DocumentVersionMetadata,
     EvidenceReference,
+    canonical_analysis,
+    canonical_document,
+    canonical_document_version,
 )
 from prescriptive_maintenance.persistence.ports import (
     AnalysisRepository,
@@ -68,6 +71,7 @@ class InMemoryDocumentRepository(DocumentRepository):
         self._state = state
 
     def add(self, document: DocumentMetadata) -> None:
+        document = canonical_document(document)
         existing = self._state.documents.get(document.document_id)
         if existing is not None:
             if existing == document:
@@ -100,6 +104,7 @@ class InMemoryDocumentRepository(DocumentRepository):
         self._state.documents[document.document_id] = document
 
     def add_version(self, version: DocumentVersionMetadata) -> None:
+        version = canonical_document_version(version)
         document = self._state.documents.get(version.document_id)
         if document is None:
             raise PersistenceIntegrityError(
@@ -151,6 +156,7 @@ class InMemoryAnalysisRepository(AnalysisRepository):
         self._state = state
 
     def add(self, analysis: AnalysisMetadata) -> None:
+        analysis = canonical_analysis(analysis)
         existing = self._state.analyses.get(analysis.analysis_id)
         if existing is not None:
             if existing == analysis:

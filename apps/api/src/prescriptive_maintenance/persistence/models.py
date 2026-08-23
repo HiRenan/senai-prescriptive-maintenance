@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
-from prescriptive_maintenance.contracts import AnalysisOutcome
+from prescriptive_maintenance.domain import AnalysisOutcome
 
 _ANALYSIS_ID: Final = re.compile(r"^ana_[a-z0-9_]{3,64}$")
 _DOCUMENT_ID: Final = re.compile(r"^doc_[a-z0-9_]{3,64}$")
@@ -156,6 +156,8 @@ class AnalysisMetadata:
 
     def __post_init__(self) -> None:
         _validate_identifier(self.analysis_id, _ANALYSIS_ID, "analysis_id")
+        if type(self.outcome) is not AnalysisOutcome:
+            raise ValueError("outcome must be one of the five API v1 outcomes.")
         _validate_identifier(self.dataset_id, _DATASET_ID, "dataset_id")
         _validate_identifier(self.model_id, _MODEL_ID, "model_id")
         _validate_identifier(self.prompt_id, _PROMPT_ID, "prompt_id")
@@ -186,3 +188,66 @@ class AnalysisMetadata:
             if reference.document_version_id not in identifiers:
                 identifiers.append(reference.document_version_id)
         return tuple(identifiers)
+
+
+def _canonical_chunk_reference(reference: ChunkReference) -> ChunkReference:
+    return ChunkReference(
+        chunk_ref=reference.chunk_ref,
+        document_id=reference.document_id,
+        document_version_id=reference.document_version_id,
+        page_number=reference.page_number,
+    )
+
+
+def canonical_document_version(
+    version: DocumentVersionMetadata,
+) -> DocumentVersionMetadata:
+    """Rebuild one version using only its governed metadata fields."""
+
+    return DocumentVersionMetadata(
+        document_version_id=version.document_version_id,
+        document_id=version.document_id,
+        source_sha256=version.source_sha256,
+        created_at=version.created_at,
+        chunks=tuple(_canonical_chunk_reference(chunk) for chunk in version.chunks),
+    )
+
+
+def canonical_document(document: DocumentMetadata) -> DocumentMetadata:
+    """Rebuild one document without retaining caller-owned subclasses."""
+
+    return DocumentMetadata(
+        document_id=document.document_id,
+        created_at=document.created_at,
+        versions=tuple(
+            canonical_document_version(version) for version in document.versions
+        ),
+    )
+
+
+def _canonical_evidence_reference(reference: EvidenceReference) -> EvidenceReference:
+    return EvidenceReference(
+        evidence_id=reference.evidence_id,
+        document_id=reference.document_id,
+        document_version_id=reference.document_version_id,
+        chunk_ref=reference.chunk_ref,
+        ordinal=reference.ordinal,
+    )
+
+
+def canonical_analysis(analysis: AnalysisMetadata) -> AnalysisMetadata:
+    """Rebuild one analysis using the closed, minimal persistence shape."""
+
+    return AnalysisMetadata(
+        analysis_id=analysis.analysis_id,
+        outcome=analysis.outcome,
+        dataset_id=analysis.dataset_id,
+        model_id=analysis.model_id,
+        prompt_id=analysis.prompt_id,
+        configuration_id=analysis.configuration_id,
+        created_at=analysis.created_at,
+        evidence_references=tuple(
+            _canonical_evidence_reference(reference)
+            for reference in analysis.evidence_references
+        ),
+    )

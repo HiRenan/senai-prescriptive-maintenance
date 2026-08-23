@@ -29,6 +29,7 @@ from prescriptive_maintenance.persistence.ports import (
     PersistenceError,
     PersistenceIntegrityError,
     TransactionConflictError,
+    TransactionRollbackOnlyError,
     UnitOfWork,
     UnitOfWorkStateError,
 )
@@ -63,6 +64,7 @@ __all__ = [
     "PostgresDocumentRepository",
     "PostgresUnitOfWork",
     "TransactionConflictError",
+    "TransactionRollbackOnlyError",
     "UnitOfWork",
     "UnitOfWorkStateError",
     "current_version",

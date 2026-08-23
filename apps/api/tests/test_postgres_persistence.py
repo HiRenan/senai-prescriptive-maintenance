@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from threading import Barrier
 from typing import Final, cast
 from uuid import uuid4
 
@@ -17,13 +19,19 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
 )
+from prescriptive_maintenance.domain import AnalysisOutcome
 from prescriptive_maintenance.persistence import (
     LATEST_MIGRATION_VERSION,
+    ChunkReference,
+    DocumentMetadata,
+    DocumentVersionMetadata,
     InMemoryUnitOfWork,
     PersistenceConflictError,
     PersistenceIntegrityError,
     PostgresConnectionFactory,
     PostgresUnitOfWork,
+    TransactionRollbackOnlyError,
+    UnitOfWorkStateError,
     current_version,
     downgrade,
     upgrade,
@@ -34,6 +42,7 @@ from prescriptive_maintenance.persistence.migrations import (
 )
 from psycopg import Connection, sql
 from psycopg.errors import CheckViolation
+from psycopg.pq import TransactionStatus
 from psycopg.rows import RowFactory, dict_row
 
 _DATABASE_URL_VARIABLE: Final = "PRESCRIPTIVE_MAINTENANCE_TEST_DATABASE_URL"
@@ -194,6 +203,33 @@ def test_migration_empty_up_down_up_is_reproducible(
         connection.close()
 
 
+def test_concurrent_empty_database_upgrades_are_serialized_and_idempotent(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    barrier = Barrier(2)
+
+    def migrate_from_empty() -> int:
+        connection = postgres_connection_factory()
+        try:
+            barrier.wait(timeout=10)
+            upgrade(connection)
+            return current_version(connection)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = tuple(executor.submit(migrate_from_empty) for _ in range(2))
+        versions = tuple(future.result(timeout=20) for future in futures)
+
+    assert versions == (LATEST_MIGRATION_VERSION, LATEST_MIGRATION_VERSION)
+    verification = postgres_connection_factory()
+    try:
+        assert current_version(verification) == LATEST_MIGRATION_VERSION
+        assert _table_names(verification) > _APPLICATION_TABLES
+    finally:
+        verification.close()
+
+
 def test_schema_constraints_and_columns_are_minimal(
     postgres_connection_factory: PostgresConnectionFactory,
 ) -> None:
@@ -269,8 +305,81 @@ def test_schema_constraints_and_columns_are_minimal(
         ).fetchone()
         assert row is not None
         assert row["dataset_id"] == SYNTHETIC_DATASET_ID
+
+        with connection.transaction():
+            for index, outcome in enumerate(AnalysisOutcome):
+                connection.execute(
+                    """
+                    INSERT INTO analyses (
+                        analysis_id,
+                        outcome,
+                        dataset_id,
+                        model_id,
+                        prompt_id,
+                        configuration_id,
+                        created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        f"ana_synthetic_outcome_{index}",
+                        outcome.value,
+                        SYNTHETIC_DATASET_ID,
+                        "model_synthetic_v1",
+                        "prompt_synthetic_v1",
+                        "config_synthetic_v1",
+                    ),
+                )
+
+        with pytest.raises(CheckViolation), connection.transaction():
+            connection.execute(
+                """
+                INSERT INTO analyses (
+                    analysis_id,
+                    outcome,
+                    dataset_id,
+                    model_id,
+                    prompt_id,
+                    configuration_id,
+                    created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """,
+                (
+                    "ana_synthetic_arbitrary_outcome",
+                    "synthetic_arbitrary_outcome",
+                    SYNTHETIC_DATASET_ID,
+                    "model_synthetic_v1",
+                    "prompt_synthetic_v1",
+                    "config_synthetic_v1",
+                ),
+            )
     finally:
         connection.close()
+
+
+def test_postgres_adapter_rejects_an_arbitrary_outcome(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    invalid = replace(
+        SYNTHETIC_ANALYSIS,
+        analysis_id="ana_synthetic_invalid_outcome",
+        evidence_references=(),
+    )
+    object.__setattr__(
+        invalid,
+        "outcome",
+        cast(AnalysisOutcome, "synthetic_arbitrary_outcome"),
+    )
+    with (
+        PostgresUnitOfWork(postgres_connection_factory) as transaction,
+        pytest.raises(ValueError, match="five API v1 outcomes"),
+    ):
+        transaction.analyses.add(invalid)
 
 
 def test_postgres_round_trip_and_exact_replay_idempotency(
@@ -418,6 +527,113 @@ def test_postgres_evidence_identifiers_are_scoped_to_the_analysis(
             SYNTHETIC_ANALYSIS
         )
         assert query.analyses.get(second_analysis.analysis_id) == second_analysis
+
+
+def test_constraint_failure_is_sanitized_and_marks_transaction_rollback_only(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    conflicting_document = DocumentMetadata(
+        document_id="doc_synthetic_conflict",
+        created_at=SYNTHETIC_DOCUMENT.created_at,
+        versions=(
+            DocumentVersionMetadata(
+                document_version_id="docver_synthetic_conflict",
+                document_id="doc_synthetic_conflict",
+                source_sha256="4" * 64,
+                created_at=SYNTHETIC_DOCUMENT.created_at,
+                chunks=(
+                    ChunkReference(
+                        chunk_ref="chunk_synthetic_guide_v1_01",
+                        document_id="doc_synthetic_conflict",
+                        document_version_id="docver_synthetic_conflict",
+                        page_number=1,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    with PostgresUnitOfWork(postgres_connection_factory) as transaction:
+        repository = transaction.documents
+        repository.add(SYNTHETIC_DOCUMENT)
+        with pytest.raises(PersistenceConflictError) as caught:
+            repository.add(conflicting_document)
+
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
+        assert "psycopg" not in repr(caught.value).lower()
+        assert transaction.rollback_only
+        with pytest.raises(TransactionRollbackOnlyError, match="explicit rollback"):
+            repository.get(SYNTHETIC_DOCUMENT.document_id)
+        with pytest.raises(TransactionRollbackOnlyError, match="explicit rollback"):
+            transaction.commit()
+        transaction.rollback()
+
+    with PostgresUnitOfWork(postgres_connection_factory) as query:
+        assert query.documents.get(SYNTHETIC_DOCUMENT.document_id) is None
+        assert query.documents.get(conflicting_document.document_id) is None
+
+
+def test_unit_of_work_rejects_an_external_transaction_without_touching_it(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    external = postgres_connection_factory()
+    observer = postgres_connection_factory()
+    try:
+        external.execute(
+            "INSERT INTO documents (document_id, created_at) VALUES (%s, %s)",
+            ("doc_synthetic_external", SYNTHETIC_DOCUMENT.created_at),
+        )
+        assert external.info.transaction_status is TransactionStatus.INTRANS
+
+        with (
+            pytest.raises(UnitOfWorkStateError, match="idle connection"),
+            PostgresUnitOfWork(lambda: external),
+        ):
+            raise AssertionError("A non-idle connection must not be accepted.")
+
+        assert not external.closed
+        assert external.info.transaction_status is TransactionStatus.INTRANS
+        assert (
+            external.execute(
+                "SELECT document_id FROM documents WHERE document_id = %s",
+                ("doc_synthetic_external",),
+            ).fetchone()
+            is not None
+        )
+        assert (
+            observer.execute(
+                "SELECT document_id FROM documents WHERE document_id = %s",
+                ("doc_synthetic_external",),
+            ).fetchone()
+            is None
+        )
+
+        external.commit()
+        assert (
+            observer.execute(
+                "SELECT document_id FROM documents WHERE document_id = %s",
+                ("doc_synthetic_external",),
+            ).fetchone()
+            is not None
+        )
+    finally:
+        external.rollback()
+        observer.rollback()
+        external.close()
+        observer.close()
 
 
 def test_invalid_reference_and_failure_roll_back_entire_postgres_transaction(

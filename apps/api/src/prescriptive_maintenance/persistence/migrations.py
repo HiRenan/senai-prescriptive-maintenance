@@ -33,6 +33,12 @@ FROM prescriptive_schema_migrations
 ORDER BY version
 """
 _HISTORY_DROP_SQL: Final[LiteralString] = "DROP TABLE prescriptive_schema_migrations"
+_MIGRATION_LOCK_SQL: Final[LiteralString] = "SELECT pg_advisory_xact_lock(%s)"
+_MIGRATION_LOCK_ID: Final = int.from_bytes(
+    sha256(b"prescriptive-maintenance:schema-migrations").digest()[:8],
+    byteorder="big",
+    signed=True,
+)
 
 _INITIAL_UP: Final[tuple[LiteralString, ...]] = (
     """
@@ -177,6 +183,7 @@ def upgrade(connection: PostgresConnection, *, target: int | None = None) -> Non
     selected_target = LATEST_MIGRATION_VERSION if target is None else target
     _validate_target(selected_target)
     with connection.transaction():
+        _lock_migrations(connection)
         connection.execute(_HISTORY_TABLE_SQL)
         applied = _read_applied(connection)
         current = applied[-1] if applied else 0
@@ -197,6 +204,7 @@ def downgrade(connection: PostgresConnection, *, target: int = 0) -> None:
 
     _validate_target(target)
     with connection.transaction():
+        _lock_migrations(connection)
         if not _history_table_exists(connection):
             if target == 0:
                 return
@@ -228,6 +236,10 @@ def current_version(connection: PostgresConnection) -> int:
 def _validate_target(target: int) -> None:
     if type(target) is not int or not 0 <= target <= LATEST_MIGRATION_VERSION:
         raise MigrationTargetError("Migration target is outside the known range.")
+
+
+def _lock_migrations(connection: PostgresConnection) -> None:
+    connection.execute(_MIGRATION_LOCK_SQL, (_MIGRATION_LOCK_ID,))
 
 
 def _history_table_exists(connection: PostgresConnection) -> bool:

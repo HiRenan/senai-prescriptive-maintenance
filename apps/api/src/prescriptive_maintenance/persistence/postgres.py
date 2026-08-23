@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
-from typing import NoReturn, cast
+from typing import cast
 
 from psycopg import IntegrityError
 from psycopg.errors import UniqueViolation
+from psycopg.pq import TransactionStatus
 
-from prescriptive_maintenance.contracts import AnalysisOutcome
+from prescriptive_maintenance.domain import AnalysisOutcome
 from prescriptive_maintenance.persistence.migrations import PostgresConnection
 from prescriptive_maintenance.persistence.models import (
     AnalysisMetadata,
@@ -18,23 +20,49 @@ from prescriptive_maintenance.persistence.models import (
     DocumentMetadata,
     DocumentVersionMetadata,
     EvidenceReference,
+    canonical_analysis,
+    canonical_document,
+    canonical_document_version,
 )
 from prescriptive_maintenance.persistence.ports import (
     AnalysisRepository,
     DocumentRepository,
     PersistenceConflictError,
+    PersistenceError,
     PersistenceIntegrityError,
+    TransactionRollbackOnlyError,
     UnitOfWorkStateError,
 )
 
 type PostgresConnectionFactory = Callable[[], PostgresConnection]
 
 
+@dataclass(slots=True)
+class _PostgresTransactionState:
+    rollback_only: bool = False
+
+    def require_usable(self) -> None:
+        if self.rollback_only:
+            raise TransactionRollbackOnlyError(
+                "The PostgreSQL transaction requires an explicit rollback."
+            )
+
+    def mark_rollback_only(self) -> None:
+        self.rollback_only = True
+
+
 class PostgresDocumentRepository(DocumentRepository):
-    def __init__(self, connection: PostgresConnection) -> None:
+    def __init__(
+        self,
+        connection: PostgresConnection,
+        transaction_state: _PostgresTransactionState | None = None,
+    ) -> None:
         self._connection = connection
+        self._transaction_state = transaction_state or _PostgresTransactionState()
 
     def add(self, document: DocumentMetadata) -> None:
+        self._transaction_state.require_usable()
+        document = canonical_document(document)
         existing = self.get(document.document_id)
         if existing is not None:
             if existing == document:
@@ -49,12 +77,16 @@ class PostgresDocumentRepository(DocumentRepository):
             )
             for version in document.versions:
                 self._insert_version(version)
-        except UniqueViolation:
-            _raise_conflict()
-        except IntegrityError:
-            _raise_integrity()
+        except IntegrityError as error:
+            failure = _sanitized_constraint_error(error, self._transaction_state)
+        else:
+            failure = None
+        if failure is not None:
+            raise failure from None
 
     def add_version(self, version: DocumentVersionMetadata) -> None:
+        self._transaction_state.require_usable()
+        version = canonical_document_version(version)
         document = self.get(version.document_id)
         if document is None:
             raise PersistenceIntegrityError(
@@ -79,10 +111,12 @@ class PostgresDocumentRepository(DocumentRepository):
 
         try:
             self._insert_version(version)
-        except UniqueViolation:
-            _raise_conflict()
-        except IntegrityError:
-            _raise_integrity()
+        except IntegrityError as error:
+            failure = _sanitized_constraint_error(error, self._transaction_state)
+        else:
+            failure = None
+        if failure is not None:
+            raise failure from None
 
     def _insert_version(self, version: DocumentVersionMetadata) -> None:
         self._connection.execute(
@@ -120,6 +154,7 @@ class PostgresDocumentRepository(DocumentRepository):
             )
 
     def get(self, document_id: str) -> DocumentMetadata | None:
+        self._transaction_state.require_usable()
         document_row = self._connection.execute(
             """
             SELECT document_id, created_at
@@ -184,10 +219,17 @@ class PostgresDocumentRepository(DocumentRepository):
 
 
 class PostgresAnalysisRepository(AnalysisRepository):
-    def __init__(self, connection: PostgresConnection) -> None:
+    def __init__(
+        self,
+        connection: PostgresConnection,
+        transaction_state: _PostgresTransactionState | None = None,
+    ) -> None:
         self._connection = connection
+        self._transaction_state = transaction_state or _PostgresTransactionState()
 
     def add(self, analysis: AnalysisMetadata) -> None:
+        self._transaction_state.require_usable()
+        analysis = canonical_analysis(analysis)
         existing = self.get(analysis.analysis_id)
         if existing is not None:
             if existing == analysis:
@@ -239,12 +281,15 @@ class PostgresAnalysisRepository(AnalysisRepository):
                         reference.ordinal,
                     ),
                 )
-        except UniqueViolation:
-            _raise_conflict()
-        except IntegrityError:
-            _raise_integrity()
+        except IntegrityError as error:
+            failure = _sanitized_constraint_error(error, self._transaction_state)
+        else:
+            failure = None
+        if failure is not None:
+            raise failure from None
 
     def get(self, analysis_id: str) -> AnalysisMetadata | None:
+        self._transaction_state.require_usable()
         analysis_row = self._connection.execute(
             """
             SELECT
@@ -299,16 +344,16 @@ class PostgresAnalysisRepository(AnalysisRepository):
         )
 
 
-def _raise_conflict() -> NoReturn:
-    raise PersistenceConflictError(
-        "A traceable identifier is already in use."
-    ) from None
-
-
-def _raise_integrity() -> NoReturn:
-    raise PersistenceIntegrityError(
+def _sanitized_constraint_error(
+    error: IntegrityError,
+    transaction_state: _PostgresTransactionState,
+) -> PersistenceError:
+    transaction_state.mark_rollback_only()
+    if isinstance(error, UniqueViolation):
+        return PersistenceConflictError("A traceable identifier is already in use.")
+    return PersistenceIntegrityError(
         "Persisted metadata violates a relational constraint."
-    ) from None
+    )
 
 
 class PostgresUnitOfWork:
@@ -319,19 +364,30 @@ class PostgresUnitOfWork:
         self._connection: PostgresConnection | None = None
         self._analyses: PostgresAnalysisRepository | None = None
         self._documents: PostgresDocumentRepository | None = None
+        self._transaction_state: _PostgresTransactionState | None = None
         self._completed = False
 
     @property
     def analyses(self) -> AnalysisRepository:
         if self._analyses is None or self._completed:
             raise UnitOfWorkStateError("The unit of work is not active.")
+        self._require_transaction_state().require_usable()
         return self._analyses
 
     @property
     def documents(self) -> DocumentRepository:
         if self._documents is None or self._completed:
             raise UnitOfWorkStateError("The unit of work is not active.")
+        self._require_transaction_state().require_usable()
         return self._documents
+
+    @property
+    def rollback_only(self) -> bool:
+        """Report whether a database constraint requires rollback."""
+
+        if self._connection is None or self._completed:
+            raise UnitOfWorkStateError("The unit of work is not active.")
+        return self._require_transaction_state().rollback_only
 
     def __enter__(self) -> PostgresUnitOfWork:
         if self._connection is not None:
@@ -342,9 +398,15 @@ class PostgresUnitOfWork:
             raise UnitOfWorkStateError(
                 "PostgreSQL units of work require autocommit to be disabled."
             )
+        if connection.info.transaction_status is not TransactionStatus.IDLE:
+            raise UnitOfWorkStateError(
+                "PostgreSQL units of work require an idle connection."
+            )
+        transaction_state = _PostgresTransactionState()
         self._connection = connection
-        self._analyses = PostgresAnalysisRepository(connection)
-        self._documents = PostgresDocumentRepository(connection)
+        self._transaction_state = transaction_state
+        self._analyses = PostgresAnalysisRepository(connection, transaction_state)
+        self._documents = PostgresDocumentRepository(connection, transaction_state)
         self._completed = False
         return self
 
@@ -366,9 +428,11 @@ class PostgresUnitOfWork:
             self._connection = None
             self._analyses = None
             self._documents = None
+            self._transaction_state = None
 
     def commit(self) -> None:
         connection = self._require_pending_connection()
+        self._require_transaction_state().require_usable()
         connection.commit()
         self._completed = True
 
@@ -381,3 +445,8 @@ class PostgresUnitOfWork:
         if self._connection is None or self._completed:
             raise UnitOfWorkStateError("The unit of work is not pending.")
         return self._connection
+
+    def _require_transaction_state(self) -> _PostgresTransactionState:
+        if self._transaction_state is None:
+            raise UnitOfWorkStateError("The unit of work is not active.")
+        return self._transaction_state

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Final
 
-from prescriptive_maintenance.contracts import AnalysisOutcome
+from prescriptive_maintenance.domain import AnalysisOutcome
 from prescriptive_maintenance.persistence import (
     AnalysisMetadata,
     ChunkReference,
