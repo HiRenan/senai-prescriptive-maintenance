@@ -19,9 +19,9 @@ não abre conexão com ele.
 | `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | Não contém adapters de modelo, recuperação, geração ou persistência reais. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
-| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com a única porta tipada para abrir `banner.csv` em modo binário read-only, emitir recibos pre/post efetivos, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos somente no acesso à fonte; os runners só persistem artefatos aprovados após integridade, gates, reconciliações e igualdade byte a byte. O inventário pode ser validado offline, e a política oferece consulta imutável e resolve a ação efetiva de matches contextuais sem aplicar regras a linhas. |
+| `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes. Os derivados dos PDFs permanecem locais e ignorados; OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v1, validação da saída, porta neutra, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não recupera contexto, não faz chamada automática, não lê credenciais, não valida suporte semântico das citações e não contém SDK ou configuração de infraestrutura AWS. |
-| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados e geração, incluindo snapshots, JSON, golden e cenários inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
+| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados e geração, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
 | `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
 | `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
@@ -34,10 +34,13 @@ não abre conexão com ele.
 | `.github/workflows/security.yml` | CodeQL, revisão de dependências e varredura de segredos. | Revisão de dependências existe somente no evento de pull request. |
 | `.github/dependabot.yml` | Atualizações semanais agrupadas para uv, npm, GitHub Actions e Docker Compose. | Todos os pull requests gerados têm `develop` como destino. |
 
-`pandas`, `pandera` e `pyarrow` compõem as dependências de produção da camada de
-dados. `matplotlib` e `pandas-stubs` permanecem no grupo de desenvolvimento
-porque apoiam a inspeção gráfica e a tipagem estática sem ampliar as
-dependências instaladas do backend em produção.
+`pandas`, `pandera`, `pyarrow`, `pypdfium2`, `rapidocr` e `onnxruntime` compõem
+as dependências de produção da camada de dados. PDFium cobre parse, texto nativo
+e rasterização; o adapter RapidOCR inicializa o engine ONNX local somente quando
+uma página exige OCR, sem serviço ou binário OCR do sistema. `matplotlib` e
+`pandas-stubs` permanecem no grupo de desenvolvimento porque apoiam a inspeção
+gráfica e a tipagem estática sem ampliar as dependências instaladas do backend
+em produção.
 
 ## Execução local existente
 
@@ -98,8 +101,7 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 - **Web:** `apps/web` reserva o limite do workspace; não existe frontend.
 - **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
   categórico aprovado e visão derivada da política são públicos; originais e
-  demais derivados permanecem
-  locais e ignorados.
+  extrações dos PDFs e demais derivados permanecem locais e ignorados.
 - **Geração:** contratos e providers pertencem ao backend modular; o diagnóstico
   vem do modelo anterior e o domínio usa somente a porta neutra e resultados
   sanitizados, sem importar conceitos do Bedrock.
