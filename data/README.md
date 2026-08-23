@@ -166,6 +166,14 @@ são derivados locais. Qualquer persistência em arquivo deve usar um destino
 ignorado sob `data/processed/`; validações públicas registram somente contagens,
 estados e identidades/hashes sanitizados, nunca o conteúdo dos chunks.
 
+O mapeamento real entre classes canônicas e documentos lógicos também pode ser
+derivado dos materiais locais e não é uma exceção pública. Mantenha sua
+configuração versionada em um caminho explícito sob `data/external/`, como
+`data/external/knowledge/fault-knowledge-mapping.v1.json`, e nunca a adicione ao
+Git. Validações privadas podem registrar somente versão e hash da configuração,
+contagens, IDs opacos e estados; nomes, textos e associações descritivas não
+devem aparecer em logs, testes ou documentação.
+
 ## Artefatos públicos derivados aprovados
 
 A baseline pública é o par exato abaixo, identificado pelo SHA-256 aprovado no
