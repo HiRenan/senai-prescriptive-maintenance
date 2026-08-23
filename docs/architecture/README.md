@@ -22,6 +22,7 @@ fábricas injetadas e permanece desacoplado das rotas HTTP.
 | `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates monotônicos de extração/indexação, auditoria append-only com texto seguro, replay semântico exato, relógio UTC injetável e repositório em memória cujo CAS valida o comando e o agregado completos. | Não processa bytes ou chunks, não implementa adapter PostgreSQL e não altera os endpoints do contrato v1. |
 | `apps/api/src/prescriptive_maintenance/knowledge_retrieval.py` | Configuração externa de classe canônica para documentos opacos com versão, hash semântico e referências validadas; uma rotina fail-closed seleciona somente a versão aprovada vigente, confere integridade antes do scorer e revalida o mesmo snapshot antes de derivar tanto o ranking content-free quanto o snapshot interno com texto e hash. A conferência pontual posterior valida os mesmos snapshots sem scorer ou reranking. | Não inclui configuração real, scorer semântico, busca pgvector, provider, endpoint, persistência ou geração. O conteúdo enriquecido não cruza a API. |
 | `apps/api/src/prescriptive_maintenance/governed_retrieval.py` | Porta RAG interna e exception-total que bloqueia normal/OOD, mapeia ausência, classe não documentada e falha técnica, aplica limiar com identidade SHA-256 e limita o prefixo ranqueado pelos budgets existentes de evidência. | Não chama LLM, não converte para o contrato de geração, não implementa guardrails, não consulta índice diretamente e não está integrada às rotas HTTP. |
+| `apps/api/src/prescriptive_maintenance/prescription_orchestration.py` | Composição interna pura que valida o resultado do modelo, chama recuperação apenas para falha documentável, reutiliza os guardrails RAG, limita o provider síncrono por timeout e slot unitário e devolve estados e metadados allowlisted. | Não executa o modelo, não persiste, não configura provider real, não oferece cancelamento do provider síncrono e não está ligada às rotas HTTP. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
 | `apps/api/src/prescriptive_maintenance/persistence/` | Metadados imutáveis de análise/documento/versão/chunk/evidência, evolução idempotente de versões, repositórios tipados, unidade transacional, adapter em memória, adapter psycopg e migração inicial reversível. | Não persiste conteúdo, features, vetores ou narrativas e ainda não é chamado pelas rotas HTTP. |
@@ -139,6 +140,12 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
   sanitizados, sem importar conceitos do Bedrock. O gate RAG encapsula documento
   não confiável, recusa estado inseguro antes da chamada e só aceita prescrições
   com schema, diagnóstico, citações e snapshots atuais revalidados.
+- **Orquestração prescritiva:** a composição interna recebe um `ModelPrediction`
+  já produzido, preserva diagnóstico e vizinhos content-free e só permite que
+  `FAULT` com evidência governada chegue ao provider. O slot unitário evita
+  crescimento de chamadas síncronas órfãs; timeout não cancela a chamada tardia,
+  que permanece descartada e mantém a instância ocupada até retornar. Não há
+  retry, fila, cache global, persistência nem integração com a API.
 - **Recuperação para RAG:** a decisão governada consome o snapshot já filtrado e
   revalidado pela recuperação documental, nunca faz uma segunda busca por
   conteúdo e mantém texto somente na fronteira interna. Política e mapeamento
@@ -157,8 +164,8 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 - integração das rotas HTTP com os repositórios persistentes;
 - integração operacional do adapter de modelo, scorer real, embedding semântico,
   índice vetorial, conexão pgvector e uso de vetores pela aplicação, busca
-  semântica por similaridade, recuperação RAG integrada de ponta a ponta ou
-  configuração operacional de LLM;
+  semântica por similaridade, integração da composição RAG com adapters reais e
+  rotas HTTP ou configuração operacional de LLM;
 - autenticação, autorização e endpoint de readiness;
 - frontend, experiência de usuário ou assets visuais;
 - recursos AWS, deploy, ambiente de produção ou observabilidade operacional.

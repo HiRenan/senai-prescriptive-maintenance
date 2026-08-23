@@ -100,6 +100,11 @@ A versão atual contém:
 - guardrails RAG internos que recusam estado ou evidência inseguros antes do
   provider, encapsulam documentos em envelopes não confiáveis e revalidam
   schema, citações e atualidade dos mesmos snapshots depois da chamada;
+- uma composição prescritiva interna e pura que só encaminha falhas documentadas
+  com evidência governada aos guardrails, encerra normal, OOD e ausência
+  documental sem provider, limita chamadas síncronas por timeout e capacidade
+  unitária e registra apenas prompt, provider, latência monotônica e uso
+  allowlisted;
 - um pipeline canônico local e determinístico para `banner.csv`, com 18 features
   de inferência, ledger completo de disposições, agrupamento temporal de
   ocorrências independente do target, partições cronológicas com purga e
@@ -118,9 +123,9 @@ A versão atual contém:
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, integração da baseline ou dos adapters persistentes ao fluxo HTTP,
-busca semântica real por vizinhos, vetores integrados à aplicação, recuperação
-RAG integrada de ponta a ponta, chamada automática a LLM, autenticação,
+aplicação, integração da baseline, da composição RAG ou dos adapters persistentes
+ao fluxo HTTP, busca semântica real por vizinhos, vetores integrados à aplicação,
+configuração operacional ou chamada automática a LLM, autenticação,
 infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
@@ -135,7 +140,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada e guardrails internos pré/pós-provider, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
@@ -366,9 +371,8 @@ implementadas**:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou orquestração do pipeline canônico pela aplicação;
 - integração das rotas HTTP com a persistência, a baseline e o uso de vetores;
-- busca semântica real por similaridade, recuperação RAG integrada de ponta a
-  ponta ou
-  configuração operacional de LLM;
+- busca semântica real por similaridade, integração operacional da composição
+  RAG com modelo, adapters reais e API ou configuração operacional de LLM;
 - autenticação, autorização, métricas e exportação de telemetria;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de

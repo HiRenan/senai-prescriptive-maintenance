@@ -461,9 +461,10 @@ Ausência de cobertura aprovada, ranking vazio e itens abaixo do limiar tornam-s
 corrupção, quebra do contrato do adapter e falha de ranking tornam-se
 `retrieval_unavailable`. Assim, ausência legítima não é confundida com falha
 técnica. Nenhum limiar operacional, mapeamento real ou conteúdo documental é
-versionado. Esta camada não chama geração/LLM, não implementa guardrails, não
-altera endpoints e não adiciona banco, consulta pgvector ou integração com o
-fluxo HTTP.
+versionado. Esta camada não chama geração/LLM por conta própria, não implementa
+guardrails, não altera endpoints e não adiciona banco, consulta pgvector ou
+integração com o fluxo HTTP; a composição prescritiva descrita abaixo a consome
+por sua porta tipada.
 
 ## Contrato tabular de `banner`
 
@@ -839,7 +840,58 @@ somente a colisão estrutural de identidades; uma saída de insuficiência ou
 resposta determinística do provider fake valida contratos e repetibilidade, mas
 não demonstra resistência semântica universal a prompt injection. A
 fronteira não persiste resultados, não configura infraestrutura AWS e não está
-integrada à API ou à orquestração de análise.
+integrada à API ou ao `AnalysisService`.
+
+## Orquestração prescritiva interna
+
+`PrescriptionOrchestrationService` compõe a porta de recuperação governada e o
+`RagGuardrailService` sem duplicar filtro documental, schema, citações ou
+revalidação de vigência. A entrada é um `ModelPrediction` validado e copiado:
+diagnóstico público, suporte heurístico, identidade do modelo e vizinhos opacos
+são preservados nos resultados. A chave canônica de recuperação identifica a
+classe documental usada somente pelo contrato de geração; ela não substitui o
+código público do diagnóstico.
+
+Somente `FAULT` com chave documental e resultado governado `evidence` alcança os
+guardrails. `NORMAL`, `OUT_OF_DISTRIBUTION`, falha sem chave, `no_evidence` e
+`unmapped_fault` encerram como `skipped`, sem provider. Indisponibilidade de
+recuperação, currentness ou provider encerra como `degraded`; saída sem citação,
+schema inválido, evidência obsoleta e demais violações determinísticas encerram
+como `refused`. Todos esses estados carregam código, mensagem e próxima ação
+allowlisted. Nenhum resultado carrega snapshot, conteúdo, prompt ou output raw.
+
+A chamada síncrona ao provider usa um slot por instância, adquirido
+atomicamente antes de criar a thread daemon. Não existe fila ou retry. O caller
+espera no máximo o timeout explícito, estritamente positivo e limitado a 120
+segundos. Se a chamada ultrapassa o limite, o slot continua retido até a própria
+execução tardia sair pelo `finally`; novas tentativas recebem `provider_busy` sem
+criar thread ou nova chamada. A conclusão tardia é descartada e não consegue
+alterar o resultado já devolvido.
+
+Essa fronteira não torna um provider síncrono cancelável. Se ele nunca retornar,
+o único slot da instância permanece ocupado; a recuperação operacional é
+substituir a instância depois de tratar a dependência. O timeout cobre a chamada
+ao provider, enquanto recuperação e currentness dependem de timeouts próprios
+nos adapters. Essa escolha limita crescimento de chamadas órfãs sem inventar
+cancelamento cooperativo ou um executor global.
+
+Os metadados contêm somente o ID real
+`prescriptive-generation-system.v2`, um `provider_id` estável configurado,
+latência medida por relógio monotônico injetado e `ProviderUsage` validado. Essa
+latência cobre a fase completa entre o gate inicial de currentness e a
+revalidação final, incluindo provider; não é uma métrica isolada da rede ou do
+modelo. Uso de uma `ProviderResponse` válida permanece auditável mesmo quando o
+conteúdo é insuficiente ou falha no gate posterior; erro, timeout e envelope
+inválido não inventam contadores. Relógio hostil, não finito, regressivo ou cujo
+delta transborda fecha como `timing_unavailable` e descarta a geração.
+
+A composição é pura em relação ao domínio: não persiste, não mantém cache
+global, não repete a chamada e não produz efeito além do provider explicitamente
+injetado. A suíte padrão usa o `FakeGenerationProvider` e doubles sintéticos;
+nenhuma chamada Bedrock live ocorre. A camada ainda não executa o modelo, não é
+instanciada pelas rotas e não elimina a janela depois da segunda revalidação de
+vigência. Suporte estrutural e citações válidas também não provam, por si sós, a
+correção semântica de uma prescrição.
 
 ## Pipeline canônico local
 
