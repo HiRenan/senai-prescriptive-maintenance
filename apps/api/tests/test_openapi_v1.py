@@ -67,6 +67,77 @@ def test_openapi_has_frozen_paths_and_unique_operation_ids() -> None:
     assert len(operation_ids) == len(set(operation_ids))
 
 
+def test_document_operations_declare_exact_applicable_responses() -> None:
+    schema = json.loads(openapi_bytes())
+    expected_statuses = {
+        ("/documents", "post"): {"201", "409", "422", "503"},
+        ("/documents", "get"): {"200", "503"},
+        ("/documents/{document_id}", "get"): {"200", "404", "422", "503"},
+        ("/documents/{document_id}/approve", "post"): {
+            "200",
+            "404",
+            "409",
+            "422",
+            "503",
+        },
+        ("/documents/{document_id}/reject", "post"): {
+            "200",
+            "404",
+            "409",
+            "422",
+            "503",
+        },
+        ("/documents/{document_id}/reprocess", "post"): {
+            "200",
+            "404",
+            "409",
+            "422",
+            "503",
+        },
+    }
+
+    for (path, method), statuses in expected_statuses.items():
+        responses = schema["paths"][path][method]["responses"]
+        assert set(responses) == statuses
+        for status_code in statuses - {"200", "201"}:
+            assert responses[status_code]["content"]["application/json"]["schema"] == {
+                "$ref": "#/components/schemas/ErrorResponse"
+            }
+
+
+def test_openapi_distinguishes_analysis_and_document_error_descriptions() -> None:
+    schema = json.loads(openapi_bytes())
+    paths = schema["paths"]
+
+    assert paths["/analysis"]["post"]["responses"]["503"]["description"] == (
+        "A análise está temporariamente indisponível."
+    )
+    for path, method in (
+        ("/documents", "post"),
+        ("/documents", "get"),
+        ("/documents/{document_id}", "get"),
+        ("/documents/{document_id}/approve", "post"),
+        ("/documents/{document_id}/reject", "post"),
+        ("/documents/{document_id}/reprocess", "post"),
+    ):
+        assert paths[path][method]["responses"]["503"]["description"] == (
+            "O ciclo documental está temporariamente indisponível."
+        )
+
+    assert paths["/documents"]["post"]["responses"]["409"]["description"] == (
+        "O comando documental conflita com o estado armazenado."
+    )
+    for path in (
+        "/documents/{document_id}/approve",
+        "/documents/{document_id}/reject",
+        "/documents/{document_id}/reprocess",
+    ):
+        assert paths[path]["post"]["responses"]["409"]["description"] == (
+            "O comando documental conflita com o estado armazenado ou a transição "
+            "solicitada não é válida para o estado atual."
+        )
+
+
 def test_openapi_freezes_exact_feature_order_and_top_k_limits() -> None:
     schema = json.loads(openapi_bytes())
     components = schema["components"]["schemas"]

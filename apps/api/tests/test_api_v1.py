@@ -15,15 +15,21 @@ from prescriptive_maintenance.contracts import (
     AnalysisFeatures,
     AnalysisRequest,
     AnalysisResponse,
+    ApprovedDocument,
+    ApproveDocumentRequest,
     Citation,
     Diagnosis,
     DocumentListResponse,
     DocumentResponse,
     DocumentStatus,
+    ErrorResponse,
     OpaqueNeighbor,
     Prescription,
+    ProcessingDocument,
     ReceivedDocument,
     RegisterDocumentRequest,
+    RejectDocumentRequest,
+    RejectedDocument,
 )
 from prescriptive_maintenance.document_lifecycle import (
     DocumentGovernanceService,
@@ -52,7 +58,11 @@ from prescriptive_maintenance.ports import (
 )
 from prescriptive_maintenance.services import (
     AnalysisService,
+    DocumentConflictError,
+    DocumentNotFoundError,
     DocumentServiceUnavailableError,
+    InvalidDocumentRequestError,
+    InvalidDocumentTransitionError,
 )
 
 EXPECTED_FEATURES = (
@@ -758,6 +768,157 @@ def test_document_repository_failure_returns_sanitized_503() -> None:
     }
     assert "private-document-token" not in response.text
     assert "private" not in response.text
+
+
+class FailingDocumentService(SyntheticDocumentService):
+    def __init__(self, *, method: str, error: Exception) -> None:
+        super().__init__()
+        self._method = method
+        self._error = error
+
+    def _raise_for(self, method: str) -> None:
+        if method == self._method:
+            raise self._error
+
+    def register(self, request: RegisterDocumentRequest) -> ReceivedDocument:
+        self._raise_for("register")
+        return super().register(request)
+
+    def list(self) -> DocumentListResponse:
+        self._raise_for("list")
+        return super().list()
+
+    def get(self, document_id: str) -> DocumentResponse:
+        self._raise_for("get")
+        return super().get(document_id)
+
+    def approve(
+        self,
+        document_id: str,
+        request: ApproveDocumentRequest,
+    ) -> ApprovedDocument:
+        self._raise_for("approve")
+        return super().approve(document_id, request)
+
+    def reject(
+        self,
+        document_id: str,
+        request: RejectDocumentRequest,
+    ) -> RejectedDocument:
+        self._raise_for("reject")
+        return super().reject(document_id, request)
+
+    def reprocess(self, document_id: str) -> ProcessingDocument:
+        self._raise_for("reprocess")
+        return super().reprocess(document_id)
+
+
+_DOCUMENT_OPERATION_REQUESTS: dict[
+    str,
+    tuple[str, str, str, str, dict[str, object] | None],
+] = {
+    "register": (
+        "registerDocument",
+        "POST",
+        "/documents",
+        "/documents",
+        {
+            "filename": "runtime-error.synthetic.pdf",
+            "media_type": "application/pdf",
+            "size_bytes": 512,
+            "sha256": "c" * 64,
+        },
+    ),
+    "list": ("listDocuments", "GET", "/documents", "/documents", None),
+    "get": (
+        "getDocument",
+        "GET",
+        "/documents/{document_id}",
+        "/documents/doc_synthetic_received",
+        None,
+    ),
+    "approve": (
+        "approveDocument",
+        "POST",
+        "/documents/{document_id}/approve",
+        "/documents/doc_synthetic_pending/approve",
+        {"note": "Aprovação sintética."},
+    ),
+    "reject": (
+        "rejectDocument",
+        "POST",
+        "/documents/{document_id}/reject",
+        "/documents/doc_synthetic_pending/reject",
+        {"reason": "Motivo sintético."},
+    ),
+    "reprocess": (
+        "reprocessDocument",
+        "POST",
+        "/documents/{document_id}/reprocess",
+        "/documents/doc_synthetic_rejected/reprocess",
+        None,
+    ),
+}
+
+_DOCUMENT_CAUGHT_ERROR_CASES: tuple[
+    tuple[str, type[Exception], int],
+    ...,
+] = (
+    ("register", InvalidDocumentRequestError, 422),
+    ("register", DocumentConflictError, 409),
+    ("register", DocumentServiceUnavailableError, 503),
+    ("list", DocumentServiceUnavailableError, 503),
+    ("get", DocumentNotFoundError, 404),
+    ("get", DocumentServiceUnavailableError, 503),
+    ("approve", DocumentNotFoundError, 404),
+    ("approve", InvalidDocumentRequestError, 422),
+    ("approve", DocumentConflictError, 409),
+    ("approve", InvalidDocumentTransitionError, 409),
+    ("approve", DocumentServiceUnavailableError, 503),
+    ("reject", DocumentNotFoundError, 404),
+    ("reject", InvalidDocumentRequestError, 422),
+    ("reject", DocumentConflictError, 409),
+    ("reject", InvalidDocumentTransitionError, 409),
+    ("reject", DocumentServiceUnavailableError, 503),
+    ("reprocess", DocumentNotFoundError, 404),
+    ("reprocess", DocumentConflictError, 409),
+    ("reprocess", InvalidDocumentTransitionError, 409),
+    ("reprocess", DocumentServiceUnavailableError, 503),
+)
+
+
+@pytest.mark.parametrize(
+    ("service_method", "error_type", "expected_status"),
+    _DOCUMENT_CAUGHT_ERROR_CASES,
+)
+def test_caught_document_errors_match_declared_openapi_responses(
+    service_method: str,
+    error_type: type[Exception],
+    expected_status: int,
+) -> None:
+    operation_id, http_method, path_template, request_path, payload = (
+        _DOCUMENT_OPERATION_REQUESTS[service_method]
+    )
+    application = create_app(
+        document_service=FailingDocumentService(
+            method=service_method,
+            error=error_type("private runtime detail"),
+        )
+    )
+
+    with TestClient(application) as client:
+        if payload is None:
+            response = client.request(http_method, request_path)
+        else:
+            response = client.request(http_method, request_path, json=payload)
+
+    assert response.status_code == expected_status
+    ErrorResponse.model_validate_json(response.content)
+    operation = application.openapi()["paths"][path_template][http_method.lower()]
+    assert operation["operationId"] == operation_id
+    assert operation["responses"][str(expected_status)]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ErrorResponse"}
 
 
 class TrackingDocumentService(SyntheticDocumentService):

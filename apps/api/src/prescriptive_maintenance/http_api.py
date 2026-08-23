@@ -124,13 +124,31 @@ def document_response_examples() -> dict[str, dict[str, Any]]:
     }
 
 
-def _error_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
+_ANALYSIS_UNAVAILABLE_DESCRIPTION = "A análise está temporariamente indisponível."
+_DOCUMENT_CONFLICT_DESCRIPTION = (
+    "O comando documental conflita com o estado armazenado."
+)
+_DOCUMENT_ACTION_CONFLICT_DESCRIPTION = (
+    "O comando documental conflita com o estado armazenado ou a transição solicitada "
+    "não é válida para o estado atual."
+)
+_DOCUMENT_UNAVAILABLE_DESCRIPTION = (
+    "O ciclo documental está temporariamente indisponível."
+)
+
+
+def _error_responses(
+    *codes: int,
+    description_overrides: dict[int, str] | None = None,
+) -> dict[int | str, dict[str, Any]]:
     descriptions = {
         404: "Recurso não encontrado.",
         409: "Transição documental inválida.",
         422: "Requisição inválida; nenhuma porta interna é chamada.",
-        503: "O modelo não pode produzir um resultado seguro.",
+        503: _ANALYSIS_UNAVAILABLE_DESCRIPTION,
     }
+    if description_overrides is not None:
+        descriptions.update(description_overrides)
     responses: dict[int | str, dict[str, Any]] = {}
     for code in codes:
         responses[code] = {
@@ -224,7 +242,15 @@ def build_api_router(
                     }
                 },
             },
-            **_error_responses(422),
+            **_error_responses(
+                409,
+                422,
+                503,
+                description_overrides={
+                    409: _DOCUMENT_CONFLICT_DESCRIPTION,
+                    503: _DOCUMENT_UNAVAILABLE_DESCRIPTION,
+                },
+            ),
         },
     )
     def _register_document(payload: RegisterDocumentRequest) -> ReceivedDocument:
@@ -243,7 +269,10 @@ def build_api_router(
         operation_id="listDocuments",
         tags=["documents"],
         summary="Lista documentos e estados do ciclo",
-        responses=_error_responses(422),
+        responses=_error_responses(
+            503,
+            description_overrides={503: _DOCUMENT_UNAVAILABLE_DESCRIPTION},
+        ),
     )
     def _list_documents() -> DocumentListResponse:
         try:
@@ -264,7 +293,12 @@ def build_api_router(
                     "application/json": {"examples": document_response_examples()}
                 },
             },
-            **_error_responses(404, 422),
+            **_error_responses(
+                404,
+                422,
+                503,
+                description_overrides={503: _DOCUMENT_UNAVAILABLE_DESCRIPTION},
+            ),
         },
     )
     def _get_document(document_id: DocumentId) -> DocumentResponse:
@@ -285,7 +319,16 @@ def build_api_router(
         operation_id="approveDocument",
         tags=["documents"],
         summary="Aprova um documento pendente",
-        responses=_error_responses(404, 409, 422),
+        responses=_error_responses(
+            404,
+            409,
+            422,
+            503,
+            description_overrides={
+                409: _DOCUMENT_ACTION_CONFLICT_DESCRIPTION,
+                503: _DOCUMENT_UNAVAILABLE_DESCRIPTION,
+            },
+        ),
     )
     def _approve_document(
         document_id: DocumentId,
@@ -310,7 +353,16 @@ def build_api_router(
         operation_id="rejectDocument",
         tags=["documents"],
         summary="Rejeita um documento pendente",
-        responses=_error_responses(404, 409, 422),
+        responses=_error_responses(
+            404,
+            409,
+            422,
+            503,
+            description_overrides={
+                409: _DOCUMENT_ACTION_CONFLICT_DESCRIPTION,
+                503: _DOCUMENT_UNAVAILABLE_DESCRIPTION,
+            },
+        ),
     )
     def _reject_document(
         document_id: DocumentId,
@@ -335,7 +387,16 @@ def build_api_router(
         operation_id="reprocessDocument",
         tags=["documents"],
         summary="Reprocessa um documento rejeitado ou com falha",
-        responses=_error_responses(404, 409, 422),
+        responses=_error_responses(
+            404,
+            409,
+            422,
+            503,
+            description_overrides={
+                409: _DOCUMENT_ACTION_CONFLICT_DESCRIPTION,
+                503: _DOCUMENT_UNAVAILABLE_DESCRIPTION,
+            },
+        ),
     )
     def _reprocess_document(document_id: DocumentId) -> ProcessingDocument:
         try:
