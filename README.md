@@ -63,6 +63,9 @@ A versão atual contém:
 - uma política declarativa e versionada de qualidade, validada contra contrato e
   profiler, com identificador semântico SHA-256, precedências imutáveis e visão
   pública derivada apenas da política e dos agregados rastreados da baseline;
+- contratos v1 de geração para diagnóstico imutável de entrada, evidências,
+  avaliação de suporte, prescrições, citações e warnings, com prompt versionado,
+  provider fake determinístico e adaptador Bedrock desabilitável;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -70,8 +73,9 @@ A versão atual contém:
   GitHub Actions e Docker Compose, sempre direcionadas a `develop`;
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
-Não há, nesta etapa, regras de negócio, ingestão contínua pela aplicação,
-análise de similaridade, vetores integrados à aplicação, RAG, LLM, autenticação,
+Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
+aplicação, análise de similaridade, vetores integrados à aplicação, recuperação
+de contexto, execução RAG integrada, chamada automática a LLM, autenticação,
 persistência integrada, readiness, infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
@@ -86,7 +90,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, contrato tabular, profiler agregado, inventário categórico de rótulos e política declarativa de qualidade. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, camada de dados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
@@ -269,10 +273,11 @@ request são escritos em português. O fluxo completo está em
 As seguintes capacidades pertencem à evolução futura e **não estão
 implementadas**:
 
-- modelo de domínio e regras prescritivas;
+- regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua, limpeza tabular ou pipeline de transformação da aplicação;
 - persistência da aplicação no PostgreSQL e uso de vetores pelo backend;
-- busca por similaridade, recuperação de contexto, RAG ou integração com LLM;
+- busca por similaridade, recuperação governada de contexto, execução RAG
+  integrada ou configuração operacional de LLM;
 - autenticação, autorização, readiness e observabilidade de produção;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de

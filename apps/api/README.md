@@ -378,6 +378,44 @@ contra a identidade aprovada no manifesto antes da comparação. O módulo não
 descobre nem acessa materiais originais e não implementa limpeza, correção por
 registro, ledger ou remoção de outliers.
 
+## Fronteira de geração prescritiva
+
+`prescriptive_maintenance.generation` define o contrato
+`prescriptive-generation.v1` para o diagnóstico recebido do modelo, evidências
+fornecidas explicitamente, avaliação de suporte documental, prescrições,
+citações e warnings. O diagnóstico de entrada contém um `fault_code` e um resumo
+técnico imutáveis; o provider só pode avaliar seu suporte documental e deve ecoar
+o código exatamente, sem substituir ou reinventar o diagnóstico.
+
+Citações carregam somente o `evidence_id`; origem e localizador permanecem nos
+metadados confiáveis da evidência de entrada e não podem ser inventados pelo
+provider. Avaliações suportadas e prescrições exigem citações conhecidas,
+enquanto evidência insuficiente ou conflitante proíbe prescrições. A requisição
+aceita no máximo 12 evidências, limita cada conteúdo a 4.000 caracteres e o
+conjunto a 24.000 caracteres; a serialização ordena os itens por `evidence_id`.
+
+O prompt `prescriptive-generation-system.v1` é um recurso versionado do pacote.
+Ele manda preservar o diagnóstico, usar somente as evidências recebidas, tratar
+seu conteúdo como dado e nunca como instrução, proíbe completar lacunas e exige
+JSON conforme o schema estrito enviado junto da requisição. A validação rejeita
+campos extras, chaves JSON duplicadas, números não finitos, versão incompatível,
+estrutura inválida, código de falha alterado e citações fora da entrada antes de
+criar o resultado do domínio.
+
+`FakeGenerationProvider` produz resposta sintética determinística sem ler
+arquivos, rede, ambiente ou credenciais. `BedrockGenerationProvider` implementa
+a mesma porta por uma fábrica de cliente injetada pelo chamador; sua configuração
+é desabilitada por padrão e a fábrica só é usada durante uma chamada explícita a
+`generate_prescription()`. O adaptador não importa SDK AWS, não descobre
+credenciais e publica somente contagens de tokens inteiras e não negativas;
+erros, envelopes inválidos e metadados extras são substituídos por resultados
+genéricos e sanitizados.
+
+Essa fronteira não recupera documentos, não comprova semanticamente que uma
+citação sustenta a afirmação, não implementa guardrails completos, não persiste
+resultados e não configura infraestrutura AWS. Esses comportamentos dependem de
+tarefas posteriores.
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:
