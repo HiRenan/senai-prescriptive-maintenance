@@ -49,6 +49,9 @@ A versão atual contém:
   Compose;
 - imagens multi-stage da API e da fronteira web, construídas por bases fixadas
   por digest e locks congelados, com processos não privilegiados e healthchecks;
+- um perfil Terraform AWS demo, ainda não aplicado, com frontend S3 privado por
+  CloudFront/OAC, API Gateway protegida por Cognito, imagem da API em Fargate
+  privado, filas, storage versionado, logs, alarmes, Budget e teardown explícito;
 - automação Poe para bootstrap, formatação, lint, tipagem estrita, testes,
   hooks, smoke e controle dos serviços locais;
 - um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
@@ -126,7 +129,7 @@ Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
 aplicação, integração da baseline, da composição RAG ou dos adapters persistentes
 ao fluxo HTTP, busca semântica real por vizinhos, vetores integrados à aplicação,
 configuração operacional ou chamada automática a LLM, autenticação,
-infraestrutura AWS, deploy ou interface web.
+infraestrutura AWS aplicada, deploy ou interface web.
 
 ## Arquitetura atual
 
@@ -144,6 +147,7 @@ Os componentes existentes são:
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
+| `infra/aws/demo/` | Perfil Terraform declarativo, privado e removível para uma demo single-AZ; nenhum recurso foi aplicado. |
 | `data/` | Manifesto dos materiais locais, fixtures sintéticas, artefatos públicos aprovados e destinos ignorados para derivados canônicos locais. |
 
 O inventário detalhado está em
@@ -171,7 +175,7 @@ sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md)
 │   ├── architecture/ # inventário da arquitetura implementada
 │   └── data/         # visões humanas derivadas de contratos de dados
 ├── experiments/      # estudos isolados do código de produção
-├── infra/            # PostgreSQL e pgvector para desenvolvimento local
+├── infra/            # PostgreSQL local e perfil Terraform AWS demo
 └── scripts/          # automação cross-platform exposta pelo Poe
 ```
 
@@ -185,6 +189,8 @@ sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md)
 - Corepack e pnpm `10.15.1`;
 - Docker Desktop ou Docker Engine com Compose v2 para o smoke e os comandos de
   infraestrutura.
+- Terraform `>=1.15.9,<1.16` somente para validar o perfil AWS demo, sem exigir
+  credenciais no plano estático.
 
 ## Quickstart
 
@@ -375,8 +381,8 @@ implementadas**:
   RAG com modelo, adapters reais e API ou configuração operacional de LLM;
 - autenticação, autorização, métricas e exportação de telemetria;
 - frontend ou qualquer experiência de usuário;
-- infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de
-  produção.
+- infraestrutura AWS aplicada, pipeline de deploy, release publicada ou
+  ambiente de produção.
 
 Cada capacidade deverá entrar por tarefa própria, com critérios verificáveis e
 sem enfraquecer a fronteira dos materiais locais.
@@ -389,6 +395,8 @@ sem enfraquecer a fronteira dos materiais locais.
 - [`docs/adr/README.md`](docs/adr/README.md): decisões arquiteturais;
 - [`docs/architecture/README.md`](docs/architecture/README.md): estado técnico
   implementado.
+- [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
+  validação estática e teardown do perfil AWS não aplicado.
 
 ## Acesso e direitos
 

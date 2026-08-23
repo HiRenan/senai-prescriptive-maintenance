@@ -11,31 +11,33 @@ produto implementada e está estruturado como base para um monólito modular. A
 fronteira `apps/web` possui somente um processo operacional de liveness, sem
 interface. PostgreSQL/pgvector existe como serviço local independente; a API
 não abre conexão automaticamente, enquanto o módulo de persistência recebe
-fábricas injetadas e permanece desacoplado das rotas HTTP.
+fábricas injetadas e permanece desacoplado das rotas HTTP. `infra/aws/demo`
+descreve recursos Terraform, mas nenhum ambiente AWS foi aplicado.
 
 ## Componentes existentes
 
 | Área | Implementação comprovável | Limite atual |
 | --- | --- | --- |
-| `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live` e rotas do contrato HTTP v1. | A liveness verifica apenas o processo; as demais rotas usam fakes sintéticos injetáveis. |
+| `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live`, `GET /health/ready` e rotas do contrato HTTP v1. | A liveness verifica apenas o processo; a readiness consulta somente a dependência exigida pelo perfil e as rotas de negócio usam fakes sintéticos injetáveis. |
 | `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | A aplicação continua injetando fakes; não conecta a baseline nem adapters de recuperação, geração ou persistência reais. |
 | `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates monotônicos de extração/indexação, auditoria append-only com texto seguro, replay semântico exato, relógio UTC injetável e repositório em memória cujo CAS valida o comando e o agregado completos. | Não processa bytes ou chunks, não implementa adapter PostgreSQL e não altera os endpoints do contrato v1. |
 | `apps/api/src/prescriptive_maintenance/knowledge_retrieval.py` | Configuração externa de classe canônica para documentos opacos com versão, hash semântico e referências validadas; uma rotina fail-closed seleciona somente a versão aprovada vigente, confere integridade antes do scorer e revalida o mesmo snapshot antes de derivar tanto o ranking content-free quanto o snapshot interno com texto e hash. A conferência pontual posterior valida os mesmos snapshots sem scorer ou reranking. | Não inclui configuração real, scorer semântico, busca pgvector, provider, endpoint, persistência ou geração. O conteúdo enriquecido não cruza a API. |
 | `apps/api/src/prescriptive_maintenance/governed_retrieval.py` | Porta RAG interna e exception-total que bloqueia normal/OOD, mapeia ausência, classe não documentada e falha técnica, aplica limiar com identidade SHA-256 e limita o prefixo ranqueado pelos budgets existentes de evidência. | Não chama LLM, não converte para o contrato de geração, não implementa guardrails, não consulta índice diretamente e não está integrada às rotas HTTP. |
 | `apps/api/src/prescriptive_maintenance/prescription_orchestration.py` | Composição interna pura que valida o resultado do modelo, chama recuperação apenas para falha documentável, reutiliza os guardrails RAG, limita o provider síncrono por timeout e slot unitário e devolve estados e metadados allowlisted. | Não executa o modelo, não persiste, não configura provider real, não oferece cancelamento do provider síncrono e não está ligada às rotas HTTP. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
-| `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
+| `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment`, `persistence_backend` e `database_url`, carregados no startup. | `memory` proíbe URL; `postgres` exige URL; `offline` aceita somente memória. |
 | `apps/api/src/prescriptive_maintenance/persistence/` | Metadados imutáveis de análise/documento/versão/chunk/evidência, evolução idempotente de versões, repositórios tipados, unidade transacional, adapter em memória, adapter psycopg e migração inicial reversível. | Não persiste conteúdo, features, vetores ou narrativas e ainda não é chamado pelas rotas HTTP. |
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v2, envelope documental não confiável, gates tipados pré/pós-provider, recusas sanitizadas, validação estrita de citações, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não faz chamada automática, não prova suporte semântico, não elimina a janela após a revalidação final, não lê credenciais e não contém SDK ou configuração de infraestrutura AWS. |
 | `apps/api/src/prescriptive_maintenance/modeling/` | Baseline k-NN em memória sobre 18 features, `StandardScaler` de treino, distância euclidiana, suporte heurístico, política versionada de thresholds, abstenção tipada, adapter `ModelPort` e artefato NumPy/JSON íntegro. | Não está ligada às rotas, não calibra probabilidade, não usa o teste no fit e não usa banco, pgvector ou GPU; a avaliação temporal não aprova o modelo para operação. |
 | `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, persistência, dados, geração e modelo, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | A suíte padrão não acessa materiais originais, serviços externos nem credenciais; a integração PostgreSQL é opcional e usa schema descartável. |
-| `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da liveness. | Não inclui dependências de desenvolvimento nem integra persistência. |
+| `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da readiness. | Não inclui dependências de desenvolvimento; a dependência consultada pela readiness segue o backend configurado. |
 | `apps/web` | Workspace privado, servidor HTTP sem dependências, Dockerfile multi-stage e `GET /health/live`. | Não contém UI, framework, componentes, estilos, assets ou comportamento visual. |
 | `.dockerignore` e `apps/*/Dockerfile.dockerignore` | União segura na raiz e allowlists específicas dos manifests, locks e fontes necessários a cada build. | Excluem todo o restante do monorepo dos contextos; a API inclui somente o README exigido pelos metadados Python. |
 | `compose.yaml` | Topologia API, web e PostgreSQL 17/pgvector 0.8.6, binds em loopback, healthchecks e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
-| `scripts/smoke.py` | Verifica runtimes, importação, `.env.example`, Compose e liveness HTTP; opcionalmente banco/pgvector, contêineres e igualdade do OpenAPI v1. | Não inicia nem encerra serviços e não valida funcionalidades futuras. |
+| `infra/aws/demo/` | Root module Terraform single-AZ com Budget, VPC sem rota pública, endpoints privados, ECR, ECS Fargate, Cloud Map/VPC Link, API Gateway JWT/Cognito, S3/CloudFront OAC, SQS/DLQ, IAM por ação e recurso, logs, alarmes, outputs sanitizados e auditoria do plano JSON. | É somente código não aplicado; ECR, buckets e frontend começam vazios, não há usuário Cognito ou worker executável, e Bedrock fica desabilitado por padrão. |
+| `scripts/smoke.py` | Verifica runtimes, importação, `.env.example`, Compose, liveness e readiness offline por HTTP; opcionalmente banco/pgvector, contêineres e igualdade do OpenAPI v1. | Não inicia nem encerra serviços e não valida funcionalidades futuras. |
 | `data/source-manifest.json` | Nomes, tamanhos e hashes dos materiais locais. | Não contém nem redistribui os arquivos originais. |
 | `data/fixtures/` | Uma fixture tabular e um relato textual, ambos sintéticos. | Não são amostras dos materiais originais nem dados de produção. |
 | `data/inventories/banner/<source-sha>/fault-labels.v1.json` | Inventário categórico determinístico dos 151 raws, com frequência global, normalização, slug, colisões, versões, recibos e ID de conteúdo. | Não contém ocorrência, identificador, tempo, sensor ou medição e não define equivalência semântica. |
@@ -153,6 +155,9 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
   no repositório. A conferência pré/pós-provider revisita apenas as identidades
   exatas já recuperadas e a política governada, sem novo ranking; ela não
   substitui uma transação ou lease operacional.
+- **AWS demo:** o Terraform descreve uma implantação removível da imagem atual,
+  sem tornar AWS, SQS, Cognito ou Bedrock dependências do monólito Python e sem
+  afirmar que qualquer recurso exista antes de um apply autorizado futuro.
 - **Experimentos:** `experiments/` não constitui código de produção.
 
 ## Futuro, não implementado
@@ -166,9 +171,10 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
   índice vetorial, conexão pgvector e uso de vetores pela aplicação, busca
   semântica por similaridade, integração da composição RAG com adapters reais e
   rotas HTTP ou configuração operacional de LLM;
-- autenticação, autorização e endpoint de readiness;
+- autenticação e autorização;
 - frontend, experiência de usuário ou assets visuais;
-- recursos AWS, deploy, ambiente de produção ou observabilidade operacional.
+- recursos AWS aplicados, deploy, ambiente de produção ou observabilidade
+  operacional contínua.
 
 Uma tarefa futura deve atualizar este inventário somente depois que o
 componente correspondente existir e puder ser verificado.

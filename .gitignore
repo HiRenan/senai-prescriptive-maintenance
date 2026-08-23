@@ -101,8 +101,14 @@ site/
 cdk.out/
 .serverless/
 .terraform/
+*.tfplan
+*.tfplan.json
+*.tfvars
+*.tfvars.json
 *.tfstate
 *.tfstate.*
+crash.log
+crash.*.log
 /infra/postgres/data/
 /infra/volumes/
 

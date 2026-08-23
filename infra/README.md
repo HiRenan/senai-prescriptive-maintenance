@@ -2,7 +2,8 @@
 
 O ambiente local usa uma única topologia Compose com PostgreSQL 17/pgvector,
 API e a fronteira web sem interface. Ele não representa credenciais nem dados
-de produção e não inclui filas, armazenamento de objetos ou recursos de nuvem.
+de produção e não inicia filas, armazenamento de objetos ou recursos de nuvem.
+O perfil AWS declarativo e não aplicado vive separadamente em `aws/demo`.
 
 ## Pré-requisitos
 
@@ -198,3 +199,14 @@ docker compose down --volumes --remove-orphans
 
 Esses comandos atuam somente sobre o projeto Compose executado nesta raiz. Não
 use limpeza global do Docker para administrar este ambiente.
+
+## Perfil AWS demo declarativo
+
+[`aws/demo/README.md`](aws/demo/README.md) documenta o único perfil Terraform da
+demo, sua arquitetura, custo limitado por duração, backend S3 parcial, plano
+offline, auditoria JSON e teardown. Ele reutiliza por digest a imagem OCI real da
+API sem alterar o Dockerfile, mantém compute e storage privados e não cria banco,
+UI, Textract, alta disponibilidade ou multiambiente.
+
+A presença do código não representa um ambiente AWS existente. A SEN-67 não
+executa `apply`, não envia imagens e não cria credenciais, usuários ou conteúdo.
