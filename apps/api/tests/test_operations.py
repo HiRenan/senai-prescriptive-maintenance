@@ -22,6 +22,7 @@ from prescriptive_maintenance.contracts import (
 )
 from prescriptive_maintenance.fakes import (
     SYNTHETIC_ANALYSIS_REQUESTS,
+    SyntheticDocumentService,
     SyntheticModelPort,
     SyntheticRetrievalPort,
 )
@@ -601,7 +602,11 @@ def test_422_409_and_503_keep_sanitized_bodies_headers_and_logs(
     private_value = "payload-synthetic-secret"
 
     with TestClient(
-        create_app(settings=_settings("offline"), analysis_service=unavailable_service)
+        create_app(
+            settings=_settings("offline"),
+            analysis_service=unavailable_service,
+            document_service=SyntheticDocumentService(),
+        )
     ) as client:
         invalid = client.post(
             "/analysis",

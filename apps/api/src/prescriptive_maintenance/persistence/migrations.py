@@ -195,9 +195,175 @@ _SIMILARITY_INDEX_UP: Final[tuple[LiteralString, ...]] = (
     """,
 )
 
+
+_DOCUMENT_LIFECYCLE_UP: Final[tuple[LiteralString, ...]] = (
+    """
+    CREATE TABLE document_lifecycle_registries (
+        logical_document_id TEXT PRIMARY KEY,
+        canonical_filename TEXT NOT NULL UNIQUE
+            CHECK (
+                canonical_filename = lower(canonical_filename)
+                AND canonical_filename ~
+                    '^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}[.][Pp][Dd][Ff]$'
+            ),
+        display_filename TEXT NOT NULL
+            CHECK (
+                display_filename ~
+                    '^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}[.][Pp][Dd][Ff]$'
+            ),
+        revision INTEGER NOT NULL CHECK (revision > 0),
+        current_version INTEGER CHECK (current_version > 0),
+        CONSTRAINT document_lifecycle_registry_document_fk
+            FOREIGN KEY (logical_document_id)
+            REFERENCES documents (document_id)
+            ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE document_lifecycle_versions (
+        logical_document_id TEXT NOT NULL,
+        version_number INTEGER NOT NULL CHECK (version_number > 0),
+        document_id TEXT NOT NULL UNIQUE
+            CHECK (document_id ~ '^doc_[a-z0-9_]{3,64}$'),
+        document_version_id TEXT NOT NULL UNIQUE
+            CHECK (document_version_id ~ '^docver_[a-z0-9_]{3,64}$'),
+        media_type TEXT NOT NULL CHECK (media_type = 'application/pdf'),
+        size_bytes INTEGER NOT NULL CHECK (size_bytes BETWEEN 1 AND 25000000),
+        status TEXT NOT NULL CHECK (status IN (
+            'received',
+            'processing',
+            'pending_approval',
+            'approved',
+            'rejected',
+            'failed',
+            'superseded'
+        )),
+        extraction_status TEXT NOT NULL CHECK (extraction_status IN (
+            'pending', 'succeeded', 'failed'
+        )),
+        indexing_status TEXT NOT NULL CHECK (indexing_status IN (
+            'pending', 'succeeded', 'failed'
+        )),
+        updated_at TIMESTAMPTZ NOT NULL,
+        failure_step TEXT CHECK (failure_step IN ('extraction', 'indexing')),
+        failure_code TEXT CHECK (
+            failure_code IS NULL OR char_length(failure_code) BETWEEN 1 AND 80
+        ),
+        failure_reason TEXT CHECK (
+            failure_reason IS NULL OR char_length(failure_reason) BETWEEN 1 AND 500
+        ),
+        failure_actor TEXT CHECK (
+            failure_actor IS NULL OR char_length(failure_actor) BETWEEN 1 AND 200
+        ),
+        failure_occurred_at TIMESTAMPTZ,
+        superseded_by_version INTEGER CHECK (
+            superseded_by_version IS NULL
+            OR superseded_by_version > version_number
+        ),
+        PRIMARY KEY (logical_document_id, version_number),
+        CONSTRAINT document_lifecycle_version_registry_fk
+            FOREIGN KEY (logical_document_id)
+            REFERENCES document_lifecycle_registries (logical_document_id)
+            ON DELETE RESTRICT,
+        CONSTRAINT document_lifecycle_version_metadata_fk
+            FOREIGN KEY (logical_document_id, document_version_id)
+            REFERENCES document_versions (document_id, document_version_id)
+            ON DELETE RESTRICT,
+        CONSTRAINT document_lifecycle_version_superseded_fk
+            FOREIGN KEY (logical_document_id, superseded_by_version)
+            REFERENCES document_lifecycle_versions (
+                logical_document_id,
+                version_number
+            )
+            DEFERRABLE INITIALLY DEFERRED,
+        CONSTRAINT document_lifecycle_version_failure_check CHECK (
+            (
+                status = 'failed'
+                AND failure_step IS NOT NULL
+                AND failure_code IS NOT NULL
+                AND failure_reason IS NOT NULL
+                AND failure_actor IS NOT NULL
+                AND failure_occurred_at IS NOT NULL
+            )
+            OR (
+                status <> 'failed'
+                AND failure_step IS NULL
+                AND failure_code IS NULL
+                AND failure_reason IS NULL
+                AND failure_actor IS NULL
+                AND failure_occurred_at IS NULL
+            )
+        ),
+        CONSTRAINT document_lifecycle_version_supersession_check CHECK (
+            (status = 'superseded' AND superseded_by_version IS NOT NULL)
+            OR (status <> 'superseded' AND superseded_by_version IS NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE document_lifecycle_events (
+        logical_document_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL CHECK (sequence > 0),
+        version_number INTEGER NOT NULL CHECK (version_number > 0),
+        action TEXT NOT NULL CHECK (action IN (
+            'registered',
+            'processing_started',
+            'reprocessing_started',
+            'extraction_succeeded',
+            'indexing_succeeded',
+            'processing_failed',
+            'approved',
+            'rejected',
+            'superseded'
+        )),
+        source_status TEXT CHECK (source_status IS NULL OR source_status IN (
+            'received',
+            'processing',
+            'pending_approval',
+            'approved',
+            'rejected',
+            'failed',
+            'superseded'
+        )),
+        target_status TEXT NOT NULL CHECK (target_status IN (
+            'received',
+            'processing',
+            'pending_approval',
+            'approved',
+            'rejected',
+            'failed',
+            'superseded'
+        )),
+        occurred_at TIMESTAMPTZ NOT NULL,
+        actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+        reason TEXT CHECK (
+            reason IS NULL OR char_length(reason) BETWEEN 1 AND 500
+        ),
+        step TEXT CHECK (step IN ('extraction', 'indexing')),
+        failure_code TEXT CHECK (
+            failure_code IS NULL OR char_length(failure_code) BETWEEN 1 AND 80
+        ),
+        PRIMARY KEY (logical_document_id, sequence),
+        CONSTRAINT document_lifecycle_event_version_fk
+            FOREIGN KEY (logical_document_id, version_number)
+            REFERENCES document_lifecycle_versions (
+                logical_document_id,
+                version_number
+            )
+            ON DELETE RESTRICT
+    )
+    """,
+)
+
 _SIMILARITY_INDEX_DOWN: Final[tuple[LiteralString, ...]] = (
     "DROP TABLE similarity_index_entries",
     "DROP TABLE similarity_indexes",
+)
+
+_DOCUMENT_LIFECYCLE_DOWN: Final[tuple[LiteralString, ...]] = (
+    "DROP TABLE document_lifecycle_events",
+    "DROP TABLE document_lifecycle_versions",
+    "DROP TABLE document_lifecycle_registries",
 )
 
 
@@ -226,6 +392,12 @@ MIGRATIONS: Final[tuple[Migration, ...]] = (
         name="versioned_similarity_index",
         up=_SIMILARITY_INDEX_UP,
         down=_SIMILARITY_INDEX_DOWN,
+    ),
+    Migration(
+        version=3,
+        name="document_lifecycle_registry",
+        up=_DOCUMENT_LIFECYCLE_UP,
+        down=_DOCUMENT_LIFECYCLE_DOWN,
     ),
 )
 LATEST_MIGRATION_VERSION: Final = MIGRATIONS[-1].version

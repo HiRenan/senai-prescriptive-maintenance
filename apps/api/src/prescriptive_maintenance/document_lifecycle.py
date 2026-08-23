@@ -1154,22 +1154,12 @@ class InMemoryDocumentRepository:
         *,
         expected_revision: int,
     ) -> DocumentSnapshot:
-        clean_expected_revision = _validate_expected_revision(expected_revision)
         with self._lock:
             current = self._documents.get(document.identity)
-            actual_revision = 0 if current is None else current.revision
-            if actual_revision != clean_expected_revision:
-                raise DocumentConcurrencyError(
-                    expected_revision=clean_expected_revision,
-                    actual_revision=actual_revision,
-                )
-            if current is None:
-                _validate_initial_document(document)
-            else:
-                _validate_append_only_update(current.document, document)
-            snapshot = DocumentSnapshot(
-                document=document,
-                revision=actual_revision + 1,
+            snapshot = build_document_snapshot_after_compare_and_swap(
+                document,
+                current=current,
+                expected_revision=expected_revision,
             )
             self._documents[document.identity] = snapshot
             return snapshot
@@ -1534,6 +1524,48 @@ def _validate_initial_document(document: GovernedDocument) -> None:
         raise DocumentAuditConflictError(
             "The initial document aggregate is not a valid registration."
         )
+
+
+def build_document_snapshot_after_compare_and_swap(
+    document: GovernedDocument,
+    *,
+    current: DocumentSnapshot | None,
+    expected_revision: int,
+) -> DocumentSnapshot:
+    """Validate one repository CAS and return its next audited snapshot."""
+
+    clean_expected_revision = _validate_expected_revision(expected_revision)
+    if type(document) is not GovernedDocument:
+        raise DocumentAuditConflictError(
+            "The document aggregate must use the canonical domain type."
+        )
+    if current is not None and type(current) is not DocumentSnapshot:
+        raise DocumentAuditConflictError(
+            "The stored document snapshot is not canonical."
+        )
+    actual_revision = 0 if current is None else current.revision
+    if actual_revision != clean_expected_revision:
+        raise DocumentConcurrencyError(
+            expected_revision=clean_expected_revision,
+            actual_revision=actual_revision,
+        )
+    if current is None:
+        _validate_initial_document(document)
+    else:
+        if not is_document_snapshot_audited(current):
+            raise DocumentAuditConflictError(
+                "The stored document snapshot is not fully audited."
+            )
+        _validate_append_only_update(current.document, document)
+    snapshot = DocumentSnapshot(
+        document=document,
+        revision=actual_revision + 1,
+    )
+    if not is_document_snapshot_audited(snapshot):
+        raise DocumentAuditConflictError(
+            "The document aggregate is not the exact replay of its audit history."
+        )
+    return snapshot
 
 
 def _validate_append_only_update(

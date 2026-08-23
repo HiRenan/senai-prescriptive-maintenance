@@ -37,8 +37,11 @@ from prescriptive_maintenance.services import (
     AnalysisNotFoundError,
     AnalysisService,
     AnalysisUnavailableError,
+    DocumentConflictError,
     DocumentLifecycleService,
     DocumentNotFoundError,
+    DocumentServiceUnavailableError,
+    InvalidDocumentRequestError,
     InvalidDocumentTransitionError,
 )
 
@@ -225,7 +228,14 @@ def build_api_router(
         },
     )
     def _register_document(payload: RegisterDocumentRequest) -> ReceivedDocument:
-        return document_service.register(payload)
+        try:
+            return document_service.register(payload)
+        except InvalidDocumentRequestError:
+            _raise_invalid_document_request()
+        except DocumentConflictError:
+            _raise_document_conflict()
+        except DocumentServiceUnavailableError:
+            _raise_document_unavailable()
 
     @router.get(
         "/documents",
@@ -236,7 +246,10 @@ def build_api_router(
         responses=_error_responses(422),
     )
     def _list_documents() -> DocumentListResponse:
-        return document_service.list()
+        try:
+            return document_service.list()
+        except DocumentServiceUnavailableError:
+            _raise_document_unavailable()
 
     @router.get(
         "/documents/{document_id}",
@@ -263,6 +276,8 @@ def build_api_router(
                 "document_not_found",
                 "O documento solicitado não foi encontrado.",
             )
+        except DocumentServiceUnavailableError:
+            _raise_document_unavailable()
 
     @router.post(
         "/documents/{document_id}/approve",
@@ -280,8 +295,14 @@ def build_api_router(
             return document_service.approve(document_id, payload)
         except DocumentNotFoundError:
             _raise_document_not_found()
+        except InvalidDocumentRequestError:
+            _raise_invalid_document_request()
+        except DocumentConflictError:
+            _raise_document_conflict()
         except InvalidDocumentTransitionError:
             _raise_invalid_transition()
+        except DocumentServiceUnavailableError:
+            _raise_document_unavailable()
 
     @router.post(
         "/documents/{document_id}/reject",
@@ -299,8 +320,14 @@ def build_api_router(
             return document_service.reject(document_id, payload)
         except DocumentNotFoundError:
             _raise_document_not_found()
+        except InvalidDocumentRequestError:
+            _raise_invalid_document_request()
+        except DocumentConflictError:
+            _raise_document_conflict()
         except InvalidDocumentTransitionError:
             _raise_invalid_transition()
+        except DocumentServiceUnavailableError:
+            _raise_document_unavailable()
 
     @router.post(
         "/documents/{document_id}/reprocess",
@@ -315,8 +342,12 @@ def build_api_router(
             return document_service.reprocess(document_id)
         except DocumentNotFoundError:
             _raise_document_not_found()
+        except DocumentConflictError:
+            _raise_document_conflict()
         except InvalidDocumentTransitionError:
             _raise_invalid_transition()
+        except DocumentServiceUnavailableError:
+            _raise_document_unavailable()
 
     # Route decorators consume these handlers dynamically; keep that access visible
     # to the repository's strict static analysis as well.
@@ -352,6 +383,30 @@ def _raise_invalid_transition() -> NoReturn:
         status.HTTP_409_CONFLICT,
         "invalid_document_transition",
         "A transição solicitada não é válida para o estado atual.",
+    )
+
+
+def _raise_invalid_document_request() -> NoReturn:
+    _raise_api_error(
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "invalid_request",
+        "A requisição não atende ao contrato da API v1.",
+    )
+
+
+def _raise_document_conflict() -> NoReturn:
+    _raise_api_error(
+        status.HTTP_409_CONFLICT,
+        "document_conflict",
+        "O comando documental conflita com o estado armazenado.",
+    )
+
+
+def _raise_document_unavailable() -> NoReturn:
+    _raise_api_error(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "document_service_unavailable",
+        "O ciclo documental está temporariamente indisponível.",
     )
 
 

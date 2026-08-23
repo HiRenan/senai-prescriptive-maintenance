@@ -63,12 +63,13 @@ referências opacas e uma página positiva, sem título, caminho ou texto bruto.
 `support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
 medida de confiança.
 
-O fluxo HTTP de negócio usa fakes determinísticos e inteiramente sintéticos: ele
-não executa modelo, recuperação, geração, persistência nem leitura de arquivos
-reais. Somente a readiness dos perfis conectados faz o probe PostgreSQL descrito
-abaixo. O módulo de persistência continua como fronteira interna não ligada às
-rotas de negócio. O registro documental recebe somente metadados seguros de um
-PDF e nunca implica aprovação. Para regenerar e conferir o snapshot:
+O fluxo HTTP de análise ainda usa fakes determinísticos e inteiramente
+sintéticos: ele não executa modelo, recuperação ou geração reais. O ciclo
+documental, por outro lado, usa o adapter escolhido por `Settings`: memória nos
+perfis efêmeros ou PostgreSQL quando esse backend é declarado. `POST /documents`
+é um **registro de metadados**, não um upload, e nunca implica aprovação. Nenhuma
+dessas rotas lê arquivos ou materiais originais. Para regenerar e conferir o
+snapshot:
 
 ```powershell
 uv run --frozen python scripts/generate_openapi.py
@@ -135,8 +136,44 @@ reconstrói o comando a partir do novo sufixo de auditoria e exige igualdade do
 agregado inteiro. Assim, não aceita estados fabricados nem uma versão aprovada
 marcada `superseded` sem a
 aprovação atômica da substituta. O prefixo histórico e as identidades das versões
-são append-only. Esse repositório não abre conexão com PostgreSQL, e o domínio
-não processa bytes, cria chunks nem expõe novas rotas.
+são append-only.
+
+### Registro documental na API v1
+
+`prescriptive_maintenance.document_registry` adapta as rotas v1 ao agregado de
+governança, sem duplicar sua máquina de estados. O nome ASCII seguro do PDF,
+normalizado sem distinção de caixa, define a identidade lógica; a primeira
+grafia recebida permanece como metadado de exibição. Trocar apenas a caixa de
+letras, inclusive em `.pdf`, não cria versão. Um nome realmente diferente é um
+novo documento lógico.
+
+Cada versão recebe um `document_id` público opaco e determinístico que cabe no
+regex congelado de v1. Repetir exatamente nome canônico, `media_type`,
+`size_bytes` e `sha256` devolve o recibo imutável do primeiro registro sem criar
+versão, revisão ou evento, inclusive sob concorrência e depois de uma transição.
+Esse `ReceivedDocument` confirma o resultado original do comando; não representa
+o estado atual. `GET /documents/{document_id}` é a projeção vigente e continua
+mostrando, por exemplo, `approved` ou `superseded` após o replay. Divergências
+materiais fecham em conflito; aprovar, rejeitar ou reprocessar repete somente o
+comando semântico exato. As decisões usam a identidade técnica fixa
+`api.v1.document_registry`; uma aprovação sem nota recebe uma razão interna
+estável, sem inventar autoria humana.
+
+Os adapters de memória e PostgreSQL implementam a mesma semântica de CAS. O
+adapter PostgreSQL reconstrói e revalida agregado e auditoria em cada leitura,
+grava metadados, versões e eventos na mesma transação e falha fechado diante de
+estado inconsistente. A migração `document_lifecycle_registry`, versão 3, é
+explícita como as demais migrações da aplicação; o startup não altera schema
+automaticamente.
+
+Há uma limitação deliberada do transporte congelado: `RegisterDocumentRequest`
+contém apenas nome, tipo, tamanho declarado e SHA-256 declarado. Não existem
+bytes, stream, assinatura, identidade de versão fornecida pelo cliente nem
+destino de armazenamento. Portanto, a API v1 **não valida o tamanho ou o hash
+contra bytes**, não grava arquivo local ou S3 e não inicia extração, OCR ou
+indexação. Representar essas garantias corretamente exige uma evolução
+explícita do contrato, como uma v2 multipart ou streaming; ela não está
+implementada aqui.
 
 ## Execução em contêiner
 
@@ -226,11 +263,12 @@ fronteira sobre uma conexão psycopg ociosa com autocommit desabilitado; ela nã
 assume uma transação externa. Uma violação relacional retorna erro de domínio
 sanitizado e marca a unidade como `rollback-only` até `rollback()` ou a saída.
 
-A migração `initial_analysis_metadata`, versão 1, é aplicada por `upgrade()` e
-revertida por `downgrade()`. As duas operações são transacionais, verificam o
-checksum da versão aplicada, serializam concorrência por lock transacional e são
-idempotentes no alvo atual. O bootstrap do Compose continua responsável somente
-pelo pgvector; migrações da aplicação são sempre chamadas explicitamente:
+As migrações `initial_analysis_metadata`, `versioned_similarity_index` e
+`document_lifecycle_registry` são aplicadas por `upgrade()` e revertidas por
+`downgrade()`. As operações são transacionais, verificam o checksum das versões
+aplicadas, serializam concorrência por lock transacional e são idempotentes no
+alvo atual. O bootstrap do Compose continua responsável somente pelo pgvector;
+migrações da aplicação são sempre chamadas explicitamente:
 
 ```python
 from psycopg import Connection
@@ -1007,8 +1045,8 @@ treino e a contagem determinística esperada, enquanto validação deve possuir
 hash distinto. Os arrays reais contêm derivados por registro e nunca
 devem ser versionados ou publicados.
 
-A aplicação HTTP continua injetando fakes sintéticos; a baseline e seu adapter
-não são conectados às rotas nesta tarefa. As decisões e métricas temporais
+A análise HTTP continua injetando fakes sintéticos; a baseline e seu adapter
+não são conectados às rotas. As decisões e métricas temporais
 sanitizadas estão em [`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md)
 e [`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).
 

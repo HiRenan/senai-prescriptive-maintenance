@@ -11,10 +11,8 @@ from fastapi.exceptions import RequestValidationError
 from starlette.types import ExceptionHandler
 
 from prescriptive_maintenance.contracts import API_CONTRACT_VERSION
-from prescriptive_maintenance.fakes import (
-    SyntheticDocumentService,
-    build_synthetic_analysis_service,
-)
+from prescriptive_maintenance.document_registry import RuntimeDocumentLifecycleService
+from prescriptive_maintenance.fakes import build_synthetic_analysis_service
 from prescriptive_maintenance.http_api import (
     ApiContractError,
     build_api_router,
@@ -65,6 +63,13 @@ def create_app(
 ) -> FastAPI:
     """Create an isolated FastAPI application instance."""
 
+    runtime_document_service = (
+        RuntimeDocumentLifecycleService() if document_service is None else None
+    )
+    selected_document_service = document_service or runtime_document_service
+    if selected_document_service is None:
+        raise AssertionError("Document service composition is incomplete.")
+
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
         try:
@@ -79,6 +84,8 @@ def create_app(
                 database_probe=database_probe,
                 timeout_seconds=readiness_timeout_seconds,
             )
+            if runtime_document_service is not None:
+                runtime_document_service.configure(selected_settings)
         except Exception:
             raise ApplicationStartupError(
                 "Application startup configuration is invalid."
@@ -86,6 +93,7 @@ def create_app(
         application.state.readiness = readiness
         application.state.environment = selected_settings.environment
         application.state.persistence_backend = selected_settings.persistence_backend
+        application.state.document_service = selected_document_service
         yield
 
     application = FastAPI(
@@ -117,7 +125,6 @@ def create_app(
     )
 
     selected_analysis_service = analysis_service or build_synthetic_analysis_service()
-    selected_document_service = document_service or SyntheticDocumentService()
     application.include_router(
         build_api_router(
             analysis_service=selected_analysis_service,

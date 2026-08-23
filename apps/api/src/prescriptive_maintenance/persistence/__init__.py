@@ -1,5 +1,9 @@
 """Minimal persistence contracts and adapters."""
 
+from prescriptive_maintenance.persistence.document_registry import (
+    PostgresDocumentRegistryRepository,
+    build_postgres_connection_factory,
+)
 from prescriptive_maintenance.persistence.memory import (
     InMemoryAnalysisRepository,
     InMemoryDocumentRepository,
@@ -61,12 +65,14 @@ __all__ = [
     "PersistenceIntegrityError",
     "PostgresAnalysisRepository",
     "PostgresConnectionFactory",
+    "PostgresDocumentRegistryRepository",
     "PostgresDocumentRepository",
     "PostgresUnitOfWork",
     "TransactionConflictError",
     "TransactionRollbackOnlyError",
     "UnitOfWork",
     "UnitOfWorkStateError",
+    "build_postgres_connection_factory",
     "current_version",
     "downgrade",
     "upgrade",
