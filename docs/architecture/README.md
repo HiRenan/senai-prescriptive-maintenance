@@ -20,7 +20,8 @@ fábricas injetadas e permanece desacoplado das rotas HTTP.
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live` e rotas do contrato HTTP v1. | A liveness verifica apenas o processo; as demais rotas usam fakes sintéticos injetáveis. |
 | `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | A aplicação continua injetando fakes; não conecta a baseline nem adapters de recuperação, geração ou persistência reais. |
 | `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates monotônicos de extração/indexação, auditoria append-only com texto seguro, replay semântico exato, relógio UTC injetável e repositório em memória cujo CAS valida o comando e o agregado completos. | Não processa bytes ou chunks, não implementa adapter PostgreSQL e não altera os endpoints do contrato v1. |
-| `apps/api/src/prescriptive_maintenance/knowledge_retrieval.py` | Configuração externa de classe canônica para documentos opacos com versão, hash semântico e referências validadas; serviço fail-closed que seleciona somente a versão aprovada vigente, confere integridade do chunk antes do scorer e produz ranking limitado, determinístico e sem conteúdo. | Não inclui configuração real, scorer semântico, busca pgvector, provider, endpoint, persistência, geração ou recuperação RAG integrada. |
+| `apps/api/src/prescriptive_maintenance/knowledge_retrieval.py` | Configuração externa de classe canônica para documentos opacos com versão, hash semântico e referências validadas; uma rotina fail-closed seleciona somente a versão aprovada vigente, confere integridade antes do scorer e revalida o mesmo snapshot antes de derivar tanto o ranking content-free quanto o snapshot interno com texto e hash. | Não inclui configuração real, scorer semântico, busca pgvector, provider, endpoint, persistência ou geração. O conteúdo enriquecido não cruza a API. |
+| `apps/api/src/prescriptive_maintenance/governed_retrieval.py` | Porta RAG interna e exception-total que bloqueia normal/OOD, mapeia ausência, classe não documentada e falha técnica, aplica limiar com identidade SHA-256 e limita o prefixo ranqueado pelos budgets existentes de evidência. | Não chama LLM, não converte para o contrato de geração, não implementa guardrails, não consulta índice diretamente e não está integrada às rotas HTTP. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
 | `apps/api/src/prescriptive_maintenance/persistence/` | Metadados imutáveis de análise/documento/versão/chunk/evidência, evolução idempotente de versões, repositórios tipados, unidade transacional, adapter em memória, adapter psycopg e migração inicial reversível. | Não persiste conteúdo, features, vetores ou narrativas e ainda não é chamado pelas rotas HTTP. |
@@ -136,6 +137,11 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 - **Geração:** contratos e providers pertencem ao backend modular; o diagnóstico
   vem do modelo anterior e o domínio usa somente a porta neutra e resultados
   sanitizados, sem importar conceitos do Bedrock.
+- **Recuperação para RAG:** a decisão governada consome o snapshot já filtrado e
+  revalidado pela recuperação documental, nunca faz uma segunda busca por
+  conteúdo e mantém texto somente na fronteira interna. Política e mapeamento
+  permanecem explícitos e auditáveis; não existe configuração operacional real
+  no repositório.
 - **Experimentos:** `experiments/` não constitui código de produção.
 
 ## Futuro, não implementado
@@ -147,8 +153,8 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 - integração das rotas HTTP com os repositórios persistentes;
 - integração operacional do adapter de modelo, scorer real, embedding semântico,
   índice vetorial, conexão pgvector e uso de vetores pela aplicação, busca
-  semântica por similaridade, recuperação RAG integrada ou configuração
-  operacional de LLM;
+  semântica por similaridade, recuperação RAG integrada de ponta a ponta ou
+  configuração operacional de LLM;
 - autenticação, autorização e endpoint de readiness;
 - frontend, experiência de usuário ou assets visuais;
 - recursos AWS, deploy, ambiente de produção ou observabilidade operacional.

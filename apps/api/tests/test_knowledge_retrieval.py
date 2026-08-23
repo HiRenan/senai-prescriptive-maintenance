@@ -28,6 +28,16 @@ from prescriptive_maintenance.document_lifecycle import (
     InMemoryDocumentRepository,
     ProcessingStep,
 )
+from prescriptive_maintenance.generation.contracts import (
+    MAX_EVIDENCE_CONTENT_CHARACTERS,
+    MAX_TOTAL_EVIDENCE_CONTENT_CHARACTERS,
+)
+from prescriptive_maintenance.governed_retrieval import (
+    GovernedKnowledgeRetrievalService,
+    GovernedRetrievalPolicy,
+    GovernedRetrievalStatus,
+    build_governed_retrieval_policy,
+)
 from prescriptive_maintenance.knowledge_retrieval import (
     ApprovedKnowledgeRetrievalService,
     FaultKnowledgeMappingError,
@@ -37,12 +47,15 @@ from prescriptive_maintenance.knowledge_retrieval import (
     KnowledgeRetrievalInputError,
     KnowledgeRetrievalReason,
     KnowledgeRetrievalResult,
+    KnowledgeSnapshotRetrievalResult,
     RankedKnowledgeEvidence,
+    RankedKnowledgeSnapshot,
     build_fault_knowledge_mapping,
     fault_knowledge_mapping_json_bytes,
     load_fault_knowledge_mapping,
     validate_fault_knowledge_mapping,
 )
+from prescriptive_maintenance.ports import ModelDisposition
 
 _FAULT_CLASS = "synthetic-bearing-warning"
 _EMPTY_CLASS = "synthetic-without-coverage"
@@ -56,6 +69,7 @@ _UNKNOWN_DOC = f"doc_{'f' * 64}"
 _HASH_V1 = "1" * 64
 _HASH_V2 = "2" * 64
 _MAPPING_VERSION = "synthetic-fault-knowledge.v1"
+_POLICY_VERSION = "synthetic-governed-retrieval.v1"
 _START = datetime(2038, 2, 3, 4, 5, 6, tzinfo=UTC)
 
 
@@ -120,6 +134,7 @@ class _HostileItems(dict[str, tuple[str, ...]]):
 class _StaticChunkReader:
     records: object
     failure: Exception | None = None
+    calls: int = 0
 
     def list_by_document(
         self,
@@ -128,9 +143,27 @@ class _StaticChunkReader:
         document_version: str | None = None,
     ) -> tuple[IndexedChunk, ...]:
         del document_id, document_version
+        self.calls += 1
         if self.failure is not None:
             raise self.failure
         return cast(tuple[IndexedChunk, ...], self.records)
+
+
+@dataclass(slots=True)
+class _SwappingChunkReader:
+    first: tuple[IndexedChunk, ...]
+    replacement: tuple[IndexedChunk, ...]
+    calls: int = 0
+
+    def list_by_document(
+        self,
+        document_id: str,
+        *,
+        document_version: str | None = None,
+    ) -> tuple[IndexedChunk, ...]:
+        del document_id, document_version
+        self.calls += 1
+        return self.first if self.calls == 1 else self.replacement
 
 
 @dataclass(slots=True)
@@ -145,6 +178,26 @@ class _StaticScorer:
         if self.failure is not None:
             raise self.failure
         return cast(float | None, self.value)
+
+
+@dataclass(slots=True)
+class _StaticApprovedRetriever:
+    result: object
+    failure: Exception | None = None
+    calls: list[tuple[str, int]] = field(
+        default_factory=lambda: list[tuple[str, int]]()
+    )
+
+    def retrieve_snapshots(
+        self,
+        fault_class: str,
+        *,
+        top_k: int,
+    ) -> KnowledgeSnapshotRetrievalResult:
+        self.calls.append((fault_class, top_k))
+        if self.failure is not None:
+            raise self.failure
+        return cast(KnowledgeSnapshotRetrievalResult, self.result)
 
 
 @dataclass(slots=True)
@@ -398,6 +451,56 @@ def _approved_retrieval(
             mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
         ),
         documents,
+    )
+
+
+def _ranked_evidence(
+    *,
+    key: str,
+    score: float,
+    page_number: int,
+    document_id: str = _DOC_APPROVED,
+    source_hash: str = _HASH_V1,
+) -> RankedKnowledgeSnapshot:
+    content = f"Synthetic governed evidence {key}."
+    return RankedKnowledgeSnapshot(
+        document_id=document_id,
+        document_version=f"docver_{source_hash}",
+        chunk_id=f"chunk_{key * 64}",
+        page_number=page_number,
+        section_id=f"section_{key * 64}",
+        content=content,
+        content_sha256=sha256(content.encode("utf-8")).hexdigest(),
+        score=score,
+    )
+
+
+def _knowledge_result(
+    *,
+    fault_class: str = _FAULT_CLASS,
+    evidence: tuple[RankedKnowledgeSnapshot, ...] = (),
+    reason: KnowledgeRetrievalReason | None = None,
+) -> KnowledgeSnapshotRetrievalResult:
+    return KnowledgeSnapshotRetrievalResult(
+        fault_class=fault_class,
+        mapping_version=_MAPPING_VERSION,
+        mapping_sha256="3" * 64,
+        evidence=evidence,
+        reason=reason,
+    )
+
+
+def _governed_retrieval(
+    approved_retrieval: object,
+    *,
+    minimum_score: float = 0.75,
+) -> GovernedKnowledgeRetrievalService:
+    return GovernedKnowledgeRetrievalService(
+        approved_retrieval=cast(_StaticApprovedRetriever, approved_retrieval),
+        policy=build_governed_retrieval_policy(
+            policy_version=_POLICY_VERSION,
+            minimum_score=minimum_score,
+        ),
     )
 
 
@@ -1230,3 +1333,640 @@ def test_scorer_overflow_and_exceptions_return_ranking_failed(
     assert result.evidence == ()
     assert result.reason is KnowledgeRetrievalReason.RANKING_FAILED
     assert scorer.calls == 1
+
+
+def test_governed_policy_identity_is_deterministic_and_semantic() -> None:
+    first = build_governed_retrieval_policy(
+        policy_version=_POLICY_VERSION,
+        minimum_score=0.75,
+    )
+    repeated = build_governed_retrieval_policy(
+        policy_version=_POLICY_VERSION,
+        minimum_score=0.75,
+    )
+    changed = build_governed_retrieval_policy(
+        policy_version=_POLICY_VERSION,
+        minimum_score=0.76,
+    )
+    positive_zero = build_governed_retrieval_policy(
+        policy_version=_POLICY_VERSION,
+        minimum_score=0.0,
+    )
+    negative_zero = build_governed_retrieval_policy(
+        policy_version=_POLICY_VERSION,
+        minimum_score=-0.0,
+    )
+
+    assert first == repeated
+    assert first.policy_sha256 != changed.policy_sha256
+    assert positive_zero == negative_zero
+    assert len(first.policy_sha256) == 64
+    with pytest.raises(ValueError, match="hash"):
+        GovernedRetrievalPolicy(
+            schema_version=first.schema_version,
+            policy_version=first.policy_version,
+            minimum_score=first.minimum_score,
+            policy_sha256="0" * 64,
+        )
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    (ModelDisposition.NORMAL, ModelDisposition.OUT_OF_DISTRIBUTION),
+)
+def test_non_fault_dispositions_skip_governed_search_and_ignore_stale_fault_data(
+    disposition: ModelDisposition,
+) -> None:
+    backend = _StaticApprovedRetriever(
+        result=object(),
+        failure=AssertionError("approved retrieval must not be called"),
+    )
+    service = _governed_retrieval(backend)
+    MatchEveryFault.equality_calls = 0
+
+    result = service.retrieve(
+        disposition=disposition,
+        fault_class=MatchEveryFault(_FAULT_CLASS),
+        top_k=0,
+    )
+
+    assert result.status is GovernedRetrievalStatus.NO_EVIDENCE
+    assert result.fault_class is None
+    assert result.mapping_version is None
+    assert result.mapping_sha256 is None
+    assert result.evidence == ()
+    assert backend.calls == []
+    assert MatchEveryFault.equality_calls == 0
+
+
+def test_missing_and_unmapped_faults_never_reach_search_or_scorer() -> None:
+    missing_backend = _StaticApprovedRetriever(
+        result=object(),
+        failure=AssertionError("missing fault class must not reach retrieval"),
+    )
+    missing = _governed_retrieval(missing_backend).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=None,
+        top_k=3,
+    )
+
+    lifecycle, documents = _governance()
+    del lifecycle
+    reader = _StaticChunkReader(
+        records=(),
+        failure=AssertionError("unmapped fault must not reach indexed search"),
+    )
+    scorer = _StaticScorer(
+        failure=AssertionError("unmapped fault must not reach scorer")
+    )
+    approved = _retrieval(
+        documents=documents,
+        chunks=reader,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: ()},
+    )
+    unmapped = _governed_retrieval(approved).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_UNMAPPED_CLASS,
+        top_k=3,
+    )
+
+    assert missing.status is GovernedRetrievalStatus.UNMAPPED_FAULT
+    assert missing.evidence == ()
+    assert missing_backend.calls == []
+    assert unmapped.status is GovernedRetrievalStatus.UNMAPPED_FAULT
+    assert unmapped.fault_class == _UNMAPPED_CLASS
+    assert unmapped.evidence == ()
+    assert reader.calls == 0
+    assert scorer.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected_status"),
+    (
+        (
+            KnowledgeRetrievalReason.FAULT_CLASS_UNMAPPED,
+            GovernedRetrievalStatus.UNMAPPED_FAULT,
+        ),
+        (
+            KnowledgeRetrievalReason.NO_APPROVED_COVERAGE,
+            GovernedRetrievalStatus.NO_EVIDENCE,
+        ),
+        (
+            KnowledgeRetrievalReason.EMPTY_RANKING,
+            GovernedRetrievalStatus.NO_EVIDENCE,
+        ),
+        (
+            KnowledgeRetrievalReason.INDEX_UNAVAILABLE,
+            GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE,
+        ),
+        (
+            KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED,
+            GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE,
+        ),
+        (
+            KnowledgeRetrievalReason.RANKING_FAILED,
+            GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE,
+        ),
+    ),
+)
+def test_governed_retrieval_maps_empty_and_technical_states_without_ambiguity(
+    reason: KnowledgeRetrievalReason,
+    expected_status: GovernedRetrievalStatus,
+) -> None:
+    backend = _StaticApprovedRetriever(result=_knowledge_result(reason=reason))
+
+    result = _governed_retrieval(backend).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=3,
+    )
+
+    assert result.status is expected_status
+    assert result.fault_class == _FAULT_CLASS
+    assert result.mapping_version == _MAPPING_VERSION
+    assert result.mapping_sha256 == "3" * 64
+    assert result.evidence == ()
+    assert backend.calls == [(_FAULT_CLASS, 3)]
+
+
+def test_governed_threshold_accepts_equality_and_preserves_metadata() -> None:
+    above = _ranked_evidence(key="a", score=0.91, page_number=1)
+    equal = _ranked_evidence(key="b", score=0.75, page_number=2)
+    below = _ranked_evidence(key="c", score=0.749, page_number=3)
+    backend_result = _knowledge_result(evidence=(above, equal, below))
+    backend = _StaticApprovedRetriever(result=backend_result)
+    service = _governed_retrieval(backend, minimum_score=0.75)
+
+    result = service.retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=3,
+    )
+
+    assert result.status is GovernedRetrievalStatus.EVIDENCE
+    assert result.minimum_score == 0.75
+    assert result.policy_version == _POLICY_VERSION
+    assert len(result.policy_sha256) == 64
+    assert result.mapping_version == _MAPPING_VERSION
+    assert tuple(item.chunk_id for item in result.evidence) == (
+        above.chunk_id,
+        equal.chunk_id,
+    )
+    assert tuple(item.page_number for item in result.evidence) == (1, 2)
+    assert all(
+        item.document_id
+        and item.document_version
+        and item.chunk_id
+        and item.section_id
+        and item.content
+        and item.content_sha256 == sha256(item.content.encode("utf-8")).hexdigest()
+        for item in result.evidence
+    )
+    assert backend.calls == [(_FAULT_CLASS, 3)]
+
+    original_content = result.evidence[0].content
+    object.__setattr__(backend_result.evidence[0], "score", 0.1)
+    object.__setattr__(backend_result.evidence[0], "content", "Mutated after return.")
+    assert result.evidence[0].score == 0.91
+    assert result.evidence[0].content == original_content
+
+
+def test_all_scores_below_threshold_are_a_legitimate_no_evidence_result() -> None:
+    backend = _StaticApprovedRetriever(
+        result=_knowledge_result(
+            evidence=(
+                _ranked_evidence(key="a", score=0.74, page_number=1),
+                _ranked_evidence(key="b", score=0.25, page_number=2),
+            )
+        )
+    )
+
+    result = _governed_retrieval(backend, minimum_score=0.75).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=2,
+    )
+
+    assert result.status is GovernedRetrievalStatus.NO_EVIDENCE
+    assert result.mapping_version == _MAPPING_VERSION
+    assert result.evidence == ()
+
+
+def test_governed_content_obeys_existing_individual_and_total_budgets() -> None:
+    oversized_content = "x" * (MAX_EVIDENCE_CONTENT_CHARACTERS + 1)
+    oversized = RankedKnowledgeSnapshot(
+        document_id=_DOC_APPROVED,
+        document_version=f"docver_{_HASH_V1}",
+        chunk_id=f"chunk_{'a' * 64}",
+        page_number=1,
+        section_id=f"section_{'a' * 64}",
+        content=oversized_content,
+        content_sha256=sha256(oversized_content.encode("utf-8")).hexdigest(),
+        score=1.0,
+    )
+    oversized_result = _governed_retrieval(
+        _StaticApprovedRetriever(result=_knowledge_result(evidence=(oversized,))),
+        minimum_score=0.0,
+    ).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+
+    snapshots: list[RankedKnowledgeSnapshot] = []
+    for index, key in enumerate("abcdefg", start=1):
+        content = key * MAX_EVIDENCE_CONTENT_CHARACTERS
+        snapshots.append(
+            RankedKnowledgeSnapshot(
+                document_id=_DOC_APPROVED,
+                document_version=f"docver_{_HASH_V1}",
+                chunk_id=f"chunk_{key * 64}",
+                page_number=index,
+                section_id=f"section_{key * 64}",
+                content=content,
+                content_sha256=sha256(content.encode("utf-8")).hexdigest(),
+                score=1.0 - index / 100,
+            )
+        )
+    bounded_result = _governed_retrieval(
+        _StaticApprovedRetriever(result=_knowledge_result(evidence=tuple(snapshots))),
+        minimum_score=0.0,
+    ).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=len(snapshots),
+    )
+
+    assert oversized_result.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE
+    assert oversized_result.evidence == ()
+    assert bounded_result.status is GovernedRetrievalStatus.EVIDENCE
+    assert sum(len(item.content) for item in bounded_result.evidence) == (
+        MAX_TOTAL_EVIDENCE_CONTENT_CHARACTERS
+    )
+    assert tuple(item.chunk_id for item in bounded_result.evidence) == tuple(
+        item.chunk_id for item in snapshots[:6]
+    )
+
+
+def test_governed_ties_and_repeated_calls_keep_the_canonical_order() -> None:
+    first_tie = _ranked_evidence(key="a", score=0.8, page_number=1)
+    second_tie = _ranked_evidence(key="b", score=0.8, page_number=2)
+    backend = _StaticApprovedRetriever(
+        result=_knowledge_result(evidence=(first_tie, second_tie))
+    )
+    service = _governed_retrieval(backend, minimum_score=0.0)
+
+    first = service.retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=2,
+    )
+    second = service.retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=2,
+    )
+
+    assert first == second
+    assert tuple(item.chunk_id for item in first.evidence) == (
+        first_tie.chunk_id,
+        second_tie.chunk_id,
+    )
+    assert backend.calls == [(_FAULT_CLASS, 2), (_FAULT_CLASS, 2)]
+
+
+@pytest.mark.parametrize("contract_failure", ("order", "duplicate"))
+def test_noncanonical_backend_ranking_fails_closed(contract_failure: str) -> None:
+    first = _ranked_evidence(key="a", score=0.9, page_number=1)
+    second = _ranked_evidence(key="b", score=0.8, page_number=2)
+    evidence = (second, first) if contract_failure == "order" else (first, first)
+    backend = _StaticApprovedRetriever(result=_knowledge_result(evidence=evidence))
+
+    result = _governed_retrieval(backend, minimum_score=0.0).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=2,
+    )
+
+    assert result.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE
+    assert result.evidence == ()
+
+
+def test_backend_exceptions_malformed_results_and_fault_mismatch_are_total() -> None:
+    evidence = (_ranked_evidence(key="a", score=0.9, page_number=1),)
+    backends = (
+        _StaticApprovedRetriever(
+            result=object(),
+            failure=RuntimeError("synthetic retrieval failure"),
+        ),
+        _StaticApprovedRetriever(result=object()),
+        _StaticApprovedRetriever(
+            result=_knowledge_result(
+                fault_class=_EMPTY_CLASS,
+                evidence=evidence,
+            )
+        ),
+    )
+
+    results = tuple(
+        _governed_retrieval(backend, minimum_score=0.0).retrieve(
+            disposition=ModelDisposition.FAULT,
+            fault_class=_FAULT_CLASS,
+            top_k=1,
+        )
+        for backend in backends
+    )
+
+    assert all(
+        result.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE
+        for result in results
+    )
+    assert all(result.evidence == () for result in results)
+    assert "synthetic retrieval failure" not in repr(results)
+
+
+@pytest.mark.parametrize("mutation", ("score", "content"))
+def test_mutated_backend_evidence_is_rejected_at_the_governed_boundary(
+    mutation: str,
+) -> None:
+    backend_result = _knowledge_result(
+        evidence=(_ranked_evidence(key="a", score=0.9, page_number=1),)
+    )
+    if mutation == "score":
+        object.__setattr__(backend_result.evidence[0], "score", float("nan"))
+    else:
+        object.__setattr__(
+            backend_result.evidence[0],
+            "content",
+            "Synthetic content changed without its hash.",
+        )
+    backend = _StaticApprovedRetriever(result=backend_result)
+
+    result = _governed_retrieval(backend, minimum_score=0.0).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+
+    assert result.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE
+    assert result.evidence == ()
+
+
+@pytest.mark.parametrize("top_k", (0, 11, True))
+def test_invalid_governed_top_k_fails_closed_without_calling_backend(
+    top_k: object,
+) -> None:
+    backend = _StaticApprovedRetriever(
+        result=object(),
+        failure=AssertionError("invalid top-k must not reach retrieval"),
+    )
+
+    result = _governed_retrieval(backend).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=top_k,  # type: ignore[arg-type]
+    )
+
+    assert result.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE
+    assert result.evidence == ()
+    assert backend.calls == []
+
+
+def test_empty_approved_coverage_is_no_evidence_without_search_or_scoring() -> None:
+    lifecycle, documents = _governance()
+    del lifecycle
+    reader = _StaticChunkReader(
+        records=(),
+        failure=AssertionError("empty coverage must not reach indexed search"),
+    )
+    scorer = _StaticScorer(
+        failure=AssertionError("empty coverage must not reach scorer")
+    )
+    approved = _retrieval(
+        documents=documents,
+        chunks=reader,
+        scorer=scorer,
+        mappings={_EMPTY_CLASS: ()},
+    )
+
+    result = _governed_retrieval(approved).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_EMPTY_CLASS,
+        top_k=3,
+    )
+
+    assert result.status is GovernedRetrievalStatus.NO_EVIDENCE
+    assert result.evidence == ()
+    assert reader.calls == 0
+    assert scorer.calls == 0
+
+
+def test_governed_retrieval_never_returns_a_rejected_document() -> None:
+    lifecycle, documents = _governance()
+    _approved_document(lifecycle, identity=_DOC_APPROVED)
+    rejected_pending = _pending(
+        lifecycle,
+        _register(lifecycle, identity=_DOC_REJECTED),
+    )
+    lifecycle.reject(
+        identity=_DOC_REJECTED,
+        version=1,
+        actor="synthetic-reviewer",
+        reason="Synthetic rejected evidence.",
+        expected_revision=rejected_pending.revision,
+    )
+    approved_record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="governed_approved",
+        content="Synthetic approved governed evidence.",
+    )
+    rejected_record = _record(
+        document_id=_DOC_REJECTED,
+        source_hash=_HASH_V1,
+        chunk_key="governed_rejected",
+        content="Synthetic rejected governed evidence.",
+    )
+    chunks = InMemoryChunkRepository()
+    chunks.save((approved_record, rejected_record))
+    scorer = _RecordingScorer(
+        scores={
+            approved_record.chunk.chunk_id: 0.8,
+            rejected_record.chunk.chunk_id: 0.99,
+        }
+    )
+    approved = _retrieval(
+        documents=documents,
+        chunks=chunks,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED, _DOC_REJECTED)},
+    )
+
+    result = _governed_retrieval(approved, minimum_score=0.0).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=2,
+    )
+
+    assert result.status is GovernedRetrievalStatus.EVIDENCE
+    assert tuple(item.document_id for item in result.evidence) == (_DOC_APPROVED,)
+    assert tuple(call[1] for call in scorer.calls) == (approved_record.chunk.chunk_id,)
+
+
+def test_governed_retrieval_never_returns_a_superseded_version() -> None:
+    lifecycle, documents = _governance()
+    approved_v1 = _approved_document(lifecycle, identity=_DOC_APPROVED)
+    registered_v2 = _register(
+        lifecycle,
+        identity=_DOC_APPROVED,
+        content_hash=_HASH_V2,
+        version=2,
+        expected_revision=approved_v1.revision,
+    )
+    pending_v2 = _pending(lifecycle, registered_v2, version=2)
+    _approve(lifecycle, pending_v2, version=2)
+    obsolete = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="governed_obsolete",
+        content="Synthetic superseded governed evidence.",
+    )
+    current = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V2,
+        chunk_key="governed_current",
+        content="Synthetic current governed evidence.",
+    )
+    chunks = InMemoryChunkRepository()
+    chunks.save((obsolete, current))
+    scorer = _RecordingScorer(
+        scores={obsolete.chunk.chunk_id: 0.99, current.chunk.chunk_id: 0.8}
+    )
+    approved = _retrieval(
+        documents=documents,
+        chunks=chunks,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+
+    result = _governed_retrieval(approved, minimum_score=0.0).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=2,
+    )
+
+    assert result.status is GovernedRetrievalStatus.EVIDENCE
+    assert tuple(item.document_version for item in result.evidence) == (
+        current.chunk.document_version,
+    )
+    assert tuple(call[1] for call in scorer.calls) == (current.chunk.chunk_id,)
+
+
+def test_content_snapshot_and_content_free_result_share_one_approved_ranking() -> None:
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="shared_ranking",
+        content="Synthetic content available only to the internal RAG boundary.",
+    )
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.83})
+    approved, _documents = _approved_retrieval(records=(record,), scorer=scorer)
+
+    content_free = approved.retrieve(_FAULT_CLASS, top_k=1)
+    snapshot = approved.retrieve_snapshots(_FAULT_CLASS, top_k=1)
+
+    assert content_free.reason is None
+    assert snapshot.reason is None
+    assert len(content_free.evidence) == len(snapshot.evidence) == 1
+    assert content_free.evidence[0].chunk_id == snapshot.evidence[0].chunk_id
+    assert not hasattr(content_free.evidence[0], "content")
+    assert snapshot.evidence[0].content == record.chunk.content
+    assert snapshot.evidence[0].content_sha256 == record.chunk.content_sha256
+    assert scorer.calls == [
+        (_FAULT_CLASS, record.chunk.chunk_id, record.chunk.content),
+        (_FAULT_CLASS, record.chunk.chunk_id, record.chunk.content),
+    ]
+
+
+def test_internal_snapshot_content_is_never_exposed_by_representations() -> None:
+    marker = "SENSITIVE_SYNTHETIC_MARKER"
+    snapshot = RankedKnowledgeSnapshot(
+        document_id=_DOC_APPROVED,
+        document_version=f"docver_{_HASH_V1}",
+        chunk_id=f"chunk_{'a' * 64}",
+        page_number=1,
+        section_id=f"section_{'a' * 64}",
+        content=marker,
+        content_sha256=sha256(marker.encode("utf-8")).hexdigest(),
+        score=0.9,
+    )
+    snapshot_result = _knowledge_result(evidence=(snapshot,))
+    governed = _governed_retrieval(
+        _StaticApprovedRetriever(result=snapshot_result),
+        minimum_score=0.0,
+    ).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+    failed = _governed_retrieval(
+        _StaticApprovedRetriever(
+            result=object(),
+            failure=RuntimeError(marker),
+        ),
+        minimum_score=0.0,
+    ).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+
+    assert snapshot.content == marker
+    assert governed.evidence[0].content == marker
+    assert marker not in repr(snapshot)
+    assert marker not in repr(snapshot_result)
+    assert marker not in repr(governed)
+    assert failed.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE
+    assert failed.evidence == ()
+    assert marker not in repr(failed)
+
+
+def test_concurrent_content_replacement_fails_before_governed_materialization() -> None:
+    lifecycle, documents = _governance()
+    _approved_document(lifecycle, identity=_DOC_APPROVED)
+    original = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="content_before_race",
+        content="Synthetic content scored before the concurrent replacement.",
+    )
+    replacement = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="content_after_race",
+        content="Synthetic replacement observed during final revalidation.",
+    )
+    reader = _SwappingChunkReader(first=(original,), replacement=(replacement,))
+    scorer = _RecordingScorer(scores={original.chunk.chunk_id: 0.9})
+    approved = _retrieval(
+        documents=documents,
+        chunks=reader,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+
+    result = _governed_retrieval(approved, minimum_score=0.0).retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+
+    assert reader.calls == 2
+    assert scorer.calls == [
+        (_FAULT_CLASS, original.chunk.chunk_id, original.chunk.content)
+    ]
+    assert result.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE
+    assert result.evidence == ()
+    assert original.chunk.content not in repr(result)
+    assert replacement.chunk.content not in repr(result)

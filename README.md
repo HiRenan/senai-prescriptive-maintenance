@@ -71,7 +71,11 @@ A versão atual contém:
 - uma configuração externa e auditável de classes canônicas para documentos
   lógicos opacos, com versão e SHA-256 determinístico, e um serviço interno que
   filtra lifecycle e integridade antes de um scorer injetado, limita o top-k e
-  devolve somente proveniência navegável sem conteúdo;
+  preserva um resultado navegável sem conteúdo para as fronteiras públicas;
+- uma porta interna de recuperação governada que bloqueia normal e OOD antes da
+  busca, distingue ausência, classe não mapeada e indisponibilidade, aplica
+  limiar identificado por política e entrega ao futuro RAG somente snapshots de
+  conteúdo íntegros, aprovados, vigentes e limitados pelos budgets de geração;
 - um catálogo v2 das 26 colunas e um contrato Pandera estrito, ordenado e sem
   coerção implícita, acompanhado de relatórios sanitizados de violação;
 - um profiler determinístico sobre DataFrames já carregados, com indicadores
@@ -109,7 +113,7 @@ A versão atual contém:
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
 aplicação, integração da baseline ou dos adapters persistentes ao fluxo HTTP,
 busca semântica real por vizinhos, vetores integrados à aplicação, recuperação
-RAG integrada, chamada automática a LLM, autenticação, readiness,
+RAG integrada de ponta a ponta, chamada automática a LLM, autenticação, readiness,
 infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
@@ -124,7 +128,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada e porta RAG interna governada, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco e aplicações em contêineres são opcionais. |
@@ -349,7 +353,8 @@ implementadas**:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou orquestração do pipeline canônico pela aplicação;
 - integração das rotas HTTP com a persistência, a baseline e o uso de vetores;
-- busca semântica real por similaridade, recuperação RAG integrada ou
+- busca semântica real por similaridade, recuperação RAG integrada de ponta a
+  ponta ou
   configuração operacional de LLM;
 - autenticação, autorização, readiness e observabilidade de produção;
 - frontend ou qualquer experiência de usuário;

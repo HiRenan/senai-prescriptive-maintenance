@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 from math import isfinite
@@ -66,6 +66,12 @@ class FaultKnowledgeReferenceError(FaultKnowledgeMappingError):
 
 class KnowledgeRetrievalInputError(Exception):
     """Raised when a retrieval request violates the internal contract."""
+
+
+def canonical_fault_class(value: object) -> str:
+    """Validate one canonical fault class for retrieval boundaries."""
+
+    return _validate_fault_class(value, mapping_error=False)
 
 
 class KnowledgeRetrievalReason(StrEnum):
@@ -152,7 +158,7 @@ class FaultKnowledgeMapping:
     def document_ids_for(self, fault_class: str) -> tuple[str, ...] | None:
         """Return exact configured coverage without normalization or fallback."""
 
-        clean_fault_class = _validate_fault_class(fault_class, mapping_error=False)
+        clean_fault_class = canonical_fault_class(fault_class)
         for entry in self.mappings:
             if entry.fault_class == clean_fault_class:
                 return entry.document_ids
@@ -185,6 +191,76 @@ class RankedKnowledgeEvidence:
             raise ValueError("Knowledge evidence page number must be positive.")
         if type(self.score) is not float or not isfinite(self.score):
             raise ValueError("Knowledge evidence score must be finite.")
+
+
+def ranked_knowledge_evidence_order_key(
+    evidence: RankedKnowledgeEvidence,
+) -> tuple[float, str, str, int, str, str]:
+    """Return the canonical total ordering used by approved retrieval."""
+
+    if type(evidence) is not RankedKnowledgeEvidence:
+        raise ValueError("Knowledge evidence is invalid.")
+    return _ranking_order_key(
+        score=evidence.score,
+        document_id=evidence.document_id,
+        document_version=evidence.document_version,
+        page_number=evidence.page_number,
+        section_id=evidence.section_id,
+        chunk_id=evidence.chunk_id,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RankedKnowledgeSnapshot:
+    """Exact ranked content retained only at the internal RAG boundary."""
+
+    document_id: str
+    document_version: str
+    chunk_id: str
+    page_number: int
+    section_id: str
+    content: str = field(repr=False)
+    content_sha256: str
+    score: float
+
+    def __post_init__(self) -> None:
+        RankedKnowledgeEvidence(
+            document_id=self.document_id,
+            document_version=self.document_version,
+            chunk_id=self.chunk_id,
+            page_number=self.page_number,
+            section_id=self.section_id,
+            score=self.score,
+        )
+        if type(self.content) is not str or not self.content:
+            raise ValueError("Knowledge snapshot content is invalid.")
+        if not _matches_text_pattern(self.content_sha256, _SHA256_PATTERN):
+            raise ValueError("Knowledge snapshot content hash is invalid.")
+        try:
+            content_sha256 = sha256(
+                self.content.encode("utf-8", errors="strict")
+            ).hexdigest()
+        except Exception:
+            raise ValueError("Knowledge snapshot content is invalid.") from None
+        if self.content_sha256 != content_sha256:
+            raise ValueError("Knowledge snapshot content hash does not match content.")
+
+
+def ranked_knowledge_snapshot_order_key(
+    snapshot: RankedKnowledgeSnapshot,
+) -> tuple[float, str, str, int, str, str]:
+    """Return the same canonical order for enriched internal snapshots."""
+
+    if type(snapshot) is not RankedKnowledgeSnapshot:
+        raise ValueError("Knowledge snapshot is invalid.")
+    return _ranking_order_key(
+        score=snapshot.score,
+        document_id=snapshot.document_id,
+        document_version=snapshot.document_version,
+        page_number=snapshot.page_number,
+        section_id=snapshot.section_id,
+        chunk_id=snapshot.chunk_id,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +302,47 @@ class KnowledgeRetrievalResult:
             raise ValueError("Empty retrieval requires a typed reason.")
 
 
+@dataclass(frozen=True, slots=True)
+class KnowledgeSnapshotRetrievalResult:
+    """Auditable internal result whose evidence includes exact chunk content."""
+
+    fault_class: str
+    mapping_version: str
+    mapping_sha256: str
+    evidence: tuple[RankedKnowledgeSnapshot, ...]
+    reason: KnowledgeRetrievalReason | None
+
+    def __post_init__(self) -> None:
+        canonical_fault_class(self.fault_class)
+        if not _matches_text_pattern(
+            self.mapping_version, _VERSION_PATTERN
+        ) or not _matches_text_pattern(self.mapping_sha256, _SHA256_PATTERN):
+            raise ValueError("Knowledge snapshot mapping identity is invalid.")
+        if type(self.evidence) is not tuple or len(self.evidence) > MAX_TOP_K:
+            raise ValueError("Knowledge snapshot evidence is invalid.")
+        canonical_evidence: list[RankedKnowledgeSnapshot] = []
+        for item in cast(tuple[object, ...], self.evidence):
+            if type(item) is not RankedKnowledgeSnapshot:
+                raise ValueError("Knowledge snapshot evidence is invalid.")
+            canonical_evidence.append(
+                RankedKnowledgeSnapshot(
+                    document_id=item.document_id,
+                    document_version=item.document_version,
+                    chunk_id=item.chunk_id,
+                    page_number=item.page_number,
+                    section_id=item.section_id,
+                    content=item.content,
+                    content_sha256=item.content_sha256,
+                    score=item.score,
+                )
+            )
+        object.__setattr__(self, "evidence", tuple(canonical_evidence))
+        if self.evidence and self.reason is not None:
+            raise ValueError("Successful snapshot retrieval cannot contain a reason.")
+        if not self.evidence and type(self.reason) is not KnowledgeRetrievalReason:
+            raise ValueError("Empty snapshot retrieval requires a typed reason.")
+
+
 class IndexedChunkReader(Protocol):
     """Read only the exact document version selected by lifecycle governance."""
 
@@ -247,6 +364,15 @@ class KnowledgeChunkScorer(Protocol):
 class _ScoredChunk:
     snapshot: _IndexedRecordSnapshot
     score: float
+
+
+@dataclass(frozen=True, slots=True)
+class _ApprovedRankingResult:
+    fault_class: str
+    mapping_version: str
+    mapping_sha256: str
+    ranked: tuple[_ScoredChunk, ...]
+    reason: KnowledgeRetrievalReason | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,7 +573,88 @@ class ApprovedKnowledgeRetrievalService:
     def retrieve(self, fault_class: str, *, top_k: int) -> KnowledgeRetrievalResult:
         """Return only approved current evidence from the exact mapped class."""
 
-        clean_fault_class = _validate_fault_class(fault_class, mapping_error=False)
+        ranking = self._rank(fault_class, top_k=top_k)
+        if ranking.reason is not None:
+            return self._empty(
+                ranking.fault_class,
+                ranking.reason,
+                mapping_version=ranking.mapping_version,
+                mapping_sha256=ranking.mapping_sha256,
+            )
+        try:
+            evidence = tuple(
+                RankedKnowledgeEvidence(
+                    document_id=item.snapshot.evidence.document_id,
+                    document_version=item.snapshot.evidence.document_version,
+                    chunk_id=item.snapshot.evidence.chunk_id,
+                    page_number=item.snapshot.evidence.page_number,
+                    section_id=item.snapshot.evidence.section_id,
+                    score=item.score,
+                )
+                for item in ranking.ranked
+            )
+            return KnowledgeRetrievalResult(
+                fault_class=ranking.fault_class,
+                mapping_version=ranking.mapping_version,
+                mapping_sha256=ranking.mapping_sha256,
+                evidence=evidence,
+                reason=None,
+            )
+        except Exception:
+            return self._empty(
+                ranking.fault_class,
+                KnowledgeRetrievalReason.RANKING_FAILED,
+                mapping_version=ranking.mapping_version,
+                mapping_sha256=ranking.mapping_sha256,
+            )
+
+    def retrieve_snapshots(
+        self,
+        fault_class: str,
+        *,
+        top_k: int,
+    ) -> KnowledgeSnapshotRetrievalResult:
+        """Return exact content from the same approved, revalidated ranking."""
+
+        ranking = self._rank(fault_class, top_k=top_k)
+        if ranking.reason is not None:
+            return self._empty_snapshot(
+                ranking.fault_class,
+                ranking.reason,
+                mapping_version=ranking.mapping_version,
+                mapping_sha256=ranking.mapping_sha256,
+            )
+        try:
+            evidence = tuple(
+                RankedKnowledgeSnapshot(
+                    document_id=item.snapshot.evidence.document_id,
+                    document_version=item.snapshot.evidence.document_version,
+                    chunk_id=item.snapshot.evidence.chunk_id,
+                    page_number=item.snapshot.evidence.page_number,
+                    section_id=item.snapshot.evidence.section_id,
+                    content=item.snapshot.record.chunk.content,
+                    content_sha256=item.snapshot.record.chunk.content_sha256,
+                    score=item.score,
+                )
+                for item in ranking.ranked
+            )
+            return KnowledgeSnapshotRetrievalResult(
+                fault_class=ranking.fault_class,
+                mapping_version=ranking.mapping_version,
+                mapping_sha256=ranking.mapping_sha256,
+                evidence=evidence,
+                reason=None,
+            )
+        except Exception:
+            return self._empty_snapshot(
+                ranking.fault_class,
+                KnowledgeRetrievalReason.RANKING_FAILED,
+                mapping_version=ranking.mapping_version,
+                mapping_sha256=ranking.mapping_sha256,
+            )
+
+    def _rank(self, fault_class: str, *, top_k: int) -> _ApprovedRankingResult:
+        clean_fault_class = canonical_fault_class(fault_class)
         if type(top_k) is not int or not 1 <= top_k <= MAX_TOP_K:
             raise KnowledgeRetrievalInputError(
                 f"Top-k must be an integer between 1 and {MAX_TOP_K}."
@@ -456,14 +663,14 @@ class ApprovedKnowledgeRetrievalService:
         mapping_sha256 = self._mapping.mapping_sha256
         document_ids = self._mapping.document_ids_for(clean_fault_class)
         if document_ids is None:
-            return self._empty(
+            return self._empty_ranking(
                 clean_fault_class,
                 KnowledgeRetrievalReason.FAULT_CLASS_UNMAPPED,
                 mapping_version=mapping_version,
                 mapping_sha256=mapping_sha256,
             )
         if not document_ids:
-            return self._empty(
+            return self._empty_ranking(
                 clean_fault_class,
                 KnowledgeRetrievalReason.NO_APPROVED_COVERAGE,
                 mapping_version=mapping_version,
@@ -472,14 +679,14 @@ class ApprovedKnowledgeRetrievalService:
 
         candidates, failure = self._eligible_candidates(document_ids)
         if failure is not None:
-            return self._empty(
+            return self._empty_ranking(
                 clean_fault_class,
                 failure,
                 mapping_version=mapping_version,
                 mapping_sha256=mapping_sha256,
             )
         if not candidates:
-            return self._empty(
+            return self._empty_ranking(
                 clean_fault_class,
                 KnowledgeRetrievalReason.NO_APPROVED_COVERAGE,
                 mapping_version=mapping_version,
@@ -498,7 +705,7 @@ class ApprovedKnowledgeRetrievalService:
                     ),
                 )
             except Exception:
-                return self._empty(
+                return self._empty_ranking(
                     clean_fault_class,
                     KnowledgeRetrievalReason.RANKING_FAILED,
                     mapping_version=mapping_version,
@@ -517,7 +724,7 @@ class ApprovedKnowledgeRetrievalService:
                 or not rescored.eligible
                 or rescored != candidate
             ):
-                return self._empty(
+                return self._empty_ranking(
                     clean_fault_class,
                     KnowledgeRetrievalReason.RANKING_FAILED,
                     mapping_version=mapping_version,
@@ -531,21 +738,21 @@ class ApprovedKnowledgeRetrievalService:
                 try:
                     score = float(raw_score)
                 except Exception:
-                    return self._empty(
+                    return self._empty_ranking(
                         clean_fault_class,
                         KnowledgeRetrievalReason.RANKING_FAILED,
                         mapping_version=mapping_version,
                         mapping_sha256=mapping_sha256,
                     )
             else:
-                return self._empty(
+                return self._empty_ranking(
                     clean_fault_class,
                     KnowledgeRetrievalReason.RANKING_FAILED,
                     mapping_version=mapping_version,
                     mapping_sha256=mapping_sha256,
                 )
             if not isfinite(score):
-                return self._empty(
+                return self._empty_ranking(
                     clean_fault_class,
                     KnowledgeRetrievalReason.RANKING_FAILED,
                     mapping_version=mapping_version,
@@ -558,7 +765,7 @@ class ApprovedKnowledgeRetrievalService:
                 )
             )
         if not scored:
-            return self._empty(
+            return self._empty_ranking(
                 clean_fault_class,
                 KnowledgeRetrievalReason.EMPTY_RANKING,
                 mapping_version=mapping_version,
@@ -567,7 +774,7 @@ class ApprovedKnowledgeRetrievalService:
 
         current_candidates, final_failure = self._eligible_candidates(document_ids)
         if final_failure is not None or current_candidates != candidates:
-            return self._empty(
+            return self._empty_ranking(
                 clean_fault_class,
                 final_failure or KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED,
                 mapping_version=mapping_version,
@@ -575,27 +782,15 @@ class ApprovedKnowledgeRetrievalService:
             )
 
         try:
-            ranked = sorted(scored, key=_scored_order_key)[:top_k]
-            evidence = tuple(
-                RankedKnowledgeEvidence(
-                    document_id=item.snapshot.evidence.document_id,
-                    document_version=item.snapshot.evidence.document_version,
-                    chunk_id=item.snapshot.evidence.chunk_id,
-                    page_number=item.snapshot.evidence.page_number,
-                    section_id=item.snapshot.evidence.section_id,
-                    score=item.score,
-                )
-                for item in ranked
-            )
-            return KnowledgeRetrievalResult(
+            return _ApprovedRankingResult(
                 fault_class=clean_fault_class,
                 mapping_version=mapping_version,
                 mapping_sha256=mapping_sha256,
-                evidence=evidence,
+                ranked=tuple(sorted(scored, key=_scored_order_key)[:top_k]),
                 reason=None,
             )
         except Exception:
-            return self._empty(
+            return self._empty_ranking(
                 clean_fault_class,
                 KnowledgeRetrievalReason.RANKING_FAILED,
                 mapping_version=mapping_version,
@@ -654,6 +849,22 @@ class ApprovedKnowledgeRetrievalService:
                     candidates[key] = assessed
         return tuple(candidates[key] for key in sorted(candidates)), None
 
+    def _empty_ranking(
+        self,
+        fault_class: str,
+        reason: KnowledgeRetrievalReason,
+        *,
+        mapping_version: str,
+        mapping_sha256: str,
+    ) -> _ApprovedRankingResult:
+        return _ApprovedRankingResult(
+            fault_class=fault_class,
+            mapping_version=mapping_version,
+            mapping_sha256=mapping_sha256,
+            ranked=(),
+            reason=reason,
+        )
+
     def _empty(
         self,
         fault_class: str,
@@ -663,6 +874,22 @@ class ApprovedKnowledgeRetrievalService:
         mapping_sha256: str,
     ) -> KnowledgeRetrievalResult:
         return KnowledgeRetrievalResult(
+            fault_class=fault_class,
+            mapping_version=mapping_version,
+            mapping_sha256=mapping_sha256,
+            evidence=(),
+            reason=reason,
+        )
+
+    def _empty_snapshot(
+        self,
+        fault_class: str,
+        reason: KnowledgeRetrievalReason,
+        *,
+        mapping_version: str,
+        mapping_sha256: str,
+    ) -> KnowledgeSnapshotRetrievalResult:
+        return KnowledgeSnapshotRetrievalResult(
             fault_class=fault_class,
             mapping_version=mapping_version,
             mapping_sha256=mapping_sha256,
@@ -1235,11 +1462,30 @@ def _evidence_key(record: _EvidenceSnapshot) -> tuple[str, str, str]:
 def _scored_order_key(
     item: _ScoredChunk,
 ) -> tuple[float, str, str, int, str, str]:
+    return _ranking_order_key(
+        score=item.score,
+        document_id=item.snapshot.evidence.document_id,
+        document_version=item.snapshot.evidence.document_version,
+        page_number=item.snapshot.evidence.page_number,
+        section_id=item.snapshot.evidence.section_id,
+        chunk_id=item.snapshot.evidence.chunk_id,
+    )
+
+
+def _ranking_order_key(
+    *,
+    score: float,
+    document_id: str,
+    document_version: str,
+    page_number: int,
+    section_id: str,
+    chunk_id: str,
+) -> tuple[float, str, str, int, str, str]:
     return (
-        -item.score,
-        item.snapshot.evidence.document_id,
-        item.snapshot.evidence.document_version,
-        item.snapshot.evidence.page_number,
-        item.snapshot.evidence.section_id,
-        item.snapshot.evidence.chunk_id,
+        -score,
+        document_id,
+        document_version,
+        page_number,
+        section_id,
+        chunk_id,
     )
