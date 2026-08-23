@@ -97,6 +97,14 @@ class DocumentLifecycleService(Protocol):
     def reprocess(self, document_id: str) -> ProcessingDocument: ...
 
 
+class AnalysisLifecycleService(Protocol):
+    """Create and query one frozen API v1 analysis response."""
+
+    def analyze(self, request: AnalysisRequest) -> AnalysisResponse: ...
+
+    def get(self, analysis_id: str) -> AnalysisResponse: ...
+
+
 class AnalysisService:
     """Coordinate the three internal ports and preserve state invariants."""
 

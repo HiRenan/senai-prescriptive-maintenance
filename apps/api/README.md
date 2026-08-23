@@ -63,9 +63,11 @@ referências opacas e uma página positiva, sem título, caminho ou texto bruto.
 `support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
 medida de confiança.
 
-O fluxo HTTP de análise ainda usa fakes determinísticos e inteiramente
-sintéticos: ele não executa modelo, recuperação ou geração reais. O ciclo
-documental, por outro lado, usa o adapter escolhido por `Settings`: memória nos
+Por padrão, o fluxo HTTP de análise usa fakes determinísticos e inteiramente
+sintéticos. A factory aceita a injeção explícita de `IntegratedAnalysisService`,
+que compõe modelo, índice, recuperação, guardrails e persistência somente quando
+todo o binding está autorizado; nenhum artefato real é selecionado ou descoberto
+automaticamente. O ciclo documental usa o adapter escolhido por `Settings`: memória nos
 perfis efêmeros ou PostgreSQL quando esse backend é declarado. `POST /documents`
 é um **registro de metadados**, não um upload, e nunca implica aprovação. Nenhuma
 dessas rotas lê arquivos ou materiais originais. Para regenerar e conferir o
@@ -878,8 +880,9 @@ somente a colisão estrutural de identidades; uma saída de insuficiência ou
 `evidence_conflict` é tratada como recusa segura, não como prova semântica. A
 resposta determinística do provider fake valida contratos e repetibilidade, mas
 não demonstra resistência semântica universal a prompt injection. A
-fronteira não persiste resultados, não configura infraestrutura AWS e não está
-integrada à API ou ao `AnalysisService`.
+fronteira isolada não persiste resultados nem configura infraestrutura AWS. A
+composição explícita da SEN-46 a reutiliza sem mover essas responsabilidades para
+o guardrail.
 
 ## Orquestração prescritiva interna
 
@@ -927,10 +930,28 @@ delta transborda fecha como `timing_unavailable` e descarta a geração.
 A composição é pura em relação ao domínio: não persiste, não mantém cache
 global, não repete a chamada e não produz efeito além do provider explicitamente
 injetado. A suíte padrão usa o `FakeGenerationProvider` e doubles sintéticos;
-nenhuma chamada Bedrock live ocorre. A camada ainda não executa o modelo, não é
-instanciada pelas rotas e não elimina a janela depois da segunda revalidação de
-vigência. Suporte estrutural e citações válidas também não provam, por si sós, a
-correção semântica de uma prescrição.
+nenhuma chamada Bedrock live ocorre. `IntegratedAnalysisService` executa o
+modelo antes desta camada e a injeta na rota somente por composição explícita;
+o runtime padrão continua sintético. A segunda revalidação de vigência não
+elimina uma alteração posterior. Suporte estrutural e citações válidas também
+não provam, por si sós, a correção semântica de uma prescrição.
+
+## Integração explícita da análise
+
+`IntegratedAnalysisService` fecha a jornada de `POST /analysis` sem alterar o
+OpenAPI v1. Uma autorização imutável liga exatamente dataset, modelo, índice,
+policy de recuperação, mapeamento documental, prompt, provider, timeout e a
+política sem fallback que projeta falha para prioridade pública. O binding da
+recuperação vem da policy interna e da `FaultKnowledgeMapping` realmente
+carregada, sendo conferido no construtor e novamente por resultado.
+
+Modelo e índice devem devolver o mesmo ranking por identidade, posição, classe
+e distância finita dentro de `1e-6`. Citações públicas incluem somente a união
+das evidências usadas pela geração aceita; a auditoria persiste todas as
+referências recuperadas sem conteúdo. Projeção e cópias defensivas precedem o
+commit, e o cache process-local só é publicado depois dele. O relatório com a
+matriz dos cinco estados, decisões, testes e riscos está em
+[`docs/validation/analysis-integration.md`](../../docs/validation/analysis-integration.md).
 
 ## Pipeline canônico local
 
@@ -1045,8 +1066,10 @@ treino e a contagem determinística esperada, enquanto validação deve possuir
 hash distinto. Os arrays reais contêm derivados por registro e nunca
 devem ser versionados ou publicados.
 
-A análise HTTP continua injetando fakes sintéticos; a baseline e seu adapter
-não são conectados às rotas. As decisões e métricas temporais
+A factory HTTP padrão continua injetando fakes sintéticos. O adapter real pode
+participar apenas de uma composição explícita cuja autorização também vincule o
+índice equivalente; nenhum artefato real está aprovado ou conectado por padrão.
+As decisões e métricas temporais
 sanitizadas estão em [`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md)
 e [`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).
 

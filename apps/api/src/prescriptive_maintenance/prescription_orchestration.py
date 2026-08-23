@@ -13,6 +13,7 @@ from typing import Final, Protocol, cast
 
 from prescriptive_maintenance.contracts import (
     MAX_TOP_K,
+    Citation,
     OpaqueNeighbor,
 )
 from prescriptive_maintenance.contracts import (
@@ -43,6 +44,7 @@ from prescriptive_maintenance.generation.provider import (
     ProviderResponse,
 )
 from prescriptive_maintenance.governed_retrieval import (
+    GovernedRetrievalBinding,
     GovernedRetrievalResult,
     GovernedRetrievalStatus,
     RagKnowledgeRetrievalPort,
@@ -57,7 +59,10 @@ from prescriptive_maintenance.ports import (
 MAX_PROVIDER_TIMEOUT_SECONDS: Final = 120.0
 
 _MODEL_ID_PATTERN: Final = re.compile(r"model_[a-z0-9_.-]{3,64}")
+_PROMPT_ID_PATTERN: Final = re.compile(r"prompt_[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _PROVIDER_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+_VERSION_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_SHA256_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
 
 
 class PrescriptionOrchestrationStatus(StrEnum):
@@ -175,6 +180,39 @@ class PrescriptionOrchestrationConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PrescriptionOrchestrationBinding:
+    """Effective prompt, provider and retrieval binding exposed for composition."""
+
+    prompt_id: str
+    provider_id: str
+    provider_timeout_seconds: float
+    retrieval_policy_version: str
+    retrieval_policy_sha256: str
+    mapping_version: str
+    mapping_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.prompt_id) is not str
+            or _PROMPT_ID_PATTERN.fullmatch(self.prompt_id) is None
+            or type(self.provider_id) is not str
+            or _PROVIDER_ID_PATTERN.fullmatch(self.provider_id) is None
+            or type(self.provider_timeout_seconds) is not float
+            or not isfinite(self.provider_timeout_seconds)
+            or not 0.0 < self.provider_timeout_seconds <= MAX_PROVIDER_TIMEOUT_SECONDS
+            or type(self.retrieval_policy_version) is not str
+            or _VERSION_ID_PATTERN.fullmatch(self.retrieval_policy_version) is None
+            or type(self.retrieval_policy_sha256) is not str
+            or _SHA256_PATTERN.fullmatch(self.retrieval_policy_sha256) is None
+            or type(self.mapping_version) is not str
+            or _VERSION_ID_PATTERN.fullmatch(self.mapping_version) is None
+            or type(self.mapping_sha256) is not str
+            or _SHA256_PATTERN.fullmatch(self.mapping_sha256) is None
+        ):
+            raise ValueError("Prescription orchestration binding is invalid.")
+
+
+@dataclass(frozen=True, slots=True)
 class PrescriptionOrchestrationNotice:
     """Allowlisted explanation for a skipped, refused, or degraded result."""
 
@@ -230,6 +268,102 @@ class PrescriptionRunMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class PrescriptionEvidenceReference:
+    """One content-free governed source retained for API traceability."""
+
+    document_id: str
+    document_version_id: str
+    chunk_ref: str
+    page_number: int
+    rank: int
+
+    def __post_init__(self) -> None:
+        if type(self.rank) is not int or not 1 <= self.rank <= MAX_TOP_K:
+            raise ValueError("Prescription evidence rank is invalid.")
+        try:
+            citation = Citation(
+                document_id=self.document_id,
+                document_version=self.document_version_id,
+                chunk=self.chunk_ref,
+                page_number=self.page_number,
+            )
+        except Exception:
+            raise ValueError("Prescription evidence reference is invalid.") from None
+        object.__setattr__(self, "document_id", citation.document_id)
+        object.__setattr__(
+            self,
+            "document_version_id",
+            citation.document_version,
+        )
+        object.__setattr__(self, "chunk_ref", citation.chunk)
+        object.__setattr__(self, "page_number", citation.page_number)
+
+
+@dataclass(frozen=True, slots=True)
+class PrescriptionRetrievalTrace:
+    """Content-free identity of the governed retrieval used by one run."""
+
+    status: GovernedRetrievalStatus
+    policy_schema_version: int
+    policy_version: str
+    policy_sha256: str
+    mapping_version: str | None
+    mapping_sha256: str | None
+    evidence: tuple[PrescriptionEvidenceReference, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not GovernedRetrievalStatus:
+            raise ValueError("Prescription retrieval trace status is invalid.")
+        if type(self.evidence) is not tuple:
+            raise ValueError("Prescription retrieval trace evidence is invalid.")
+        copied = tuple(
+            PrescriptionEvidenceReference(
+                document_id=item.document_id,
+                document_version_id=item.document_version_id,
+                chunk_ref=item.chunk_ref,
+                page_number=item.page_number,
+                rank=item.rank,
+            )
+            for item in self.evidence
+            if type(item) is PrescriptionEvidenceReference
+        )
+        if len(copied) != len(self.evidence):
+            raise ValueError("Prescription retrieval trace evidence is invalid.")
+        if tuple(item.rank for item in copied) != tuple(range(1, len(copied) + 1)):
+            raise ValueError("Prescription retrieval trace rank order is invalid.")
+        identities = tuple(
+            (item.document_id, item.document_version_id, item.chunk_ref)
+            for item in copied
+        )
+        if len(identities) != len(set(identities)):
+            raise ValueError("Prescription retrieval trace evidence is duplicated.")
+        if (
+            type(self.policy_schema_version) is not int
+            or self.policy_schema_version < 1
+            or type(self.policy_version) is not str
+            or _VERSION_ID_PATTERN.fullmatch(self.policy_version) is None
+            or type(self.policy_sha256) is not str
+            or _SHA256_PATTERN.fullmatch(self.policy_sha256) is None
+            or (self.mapping_version is None) != (self.mapping_sha256 is None)
+            or (
+                self.mapping_version is not None
+                and (
+                    _VERSION_ID_PATTERN.fullmatch(self.mapping_version) is None
+                    or self.mapping_sha256 is None
+                    or _SHA256_PATTERN.fullmatch(self.mapping_sha256) is None
+                )
+            )
+        ):
+            raise ValueError("Prescription retrieval trace identity is invalid.")
+        if self.status is GovernedRetrievalStatus.EVIDENCE:
+            if not copied or self.mapping_version is None:
+                raise ValueError("Successful retrieval trace requires evidence.")
+        elif copied:
+            raise ValueError("Empty retrieval trace cannot contain evidence.")
+        object.__setattr__(self, "evidence", copied)
+
+
+@dataclass(frozen=True, slots=True)
 class PrescriptionOrchestrationResult:
     """Content-free orchestration result preserving validated model context."""
 
@@ -242,6 +376,10 @@ class PrescriptionOrchestrationResult:
     guardrail: GuardedGenerationResult | None = field(repr=False)
     metadata: PrescriptionRunMetadata | None
     notice: PrescriptionOrchestrationNotice | None
+    retrieval_trace: PrescriptionRetrievalTrace | None = field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if type(self.status) is not PrescriptionOrchestrationStatus:
@@ -305,6 +443,20 @@ class PrescriptionOrchestrationResult:
                 next_action=notice.next_action,
             )
             object.__setattr__(self, "notice", notice)
+        retrieval_trace = self.retrieval_trace
+        if retrieval_trace is not None:
+            if type(retrieval_trace) is not PrescriptionRetrievalTrace:
+                raise ValueError("Prescription retrieval trace is invalid.")
+            retrieval_trace = PrescriptionRetrievalTrace(
+                status=retrieval_trace.status,
+                policy_schema_version=retrieval_trace.policy_schema_version,
+                policy_version=retrieval_trace.policy_version,
+                policy_sha256=retrieval_trace.policy_sha256,
+                mapping_version=retrieval_trace.mapping_version,
+                mapping_sha256=retrieval_trace.mapping_sha256,
+                evidence=retrieval_trace.evidence,
+            )
+            object.__setattr__(self, "retrieval_trace", retrieval_trace)
         if metadata is not None and guardrail is None:
             raise ValueError("Prescription metadata requires one guardrail result.")
         if guardrail is not None and not _guardrail_matches_public_diagnosis(
@@ -513,12 +665,26 @@ class PrescriptionOrchestrationService:
                 raise TypeError
         except Exception:
             raise ValueError("Prescription monotonic clock is invalid.") from None
+        try:
+            raw_retrieval_binding = retrieval.runtime_binding
+            if type(raw_retrieval_binding) is not GovernedRetrievalBinding:
+                raise TypeError
+            retrieval_binding = GovernedRetrievalBinding(
+                policy_schema_version=raw_retrieval_binding.policy_schema_version,
+                policy_version=raw_retrieval_binding.policy_version,
+                policy_sha256=raw_retrieval_binding.policy_sha256,
+                mapping_version=raw_retrieval_binding.mapping_version,
+                mapping_sha256=raw_retrieval_binding.mapping_sha256,
+            )
+        except Exception:
+            raise ValueError("Prescription retrieval binding is unavailable.") from None
 
         self._retrieval = retrieval
         self._config = PrescriptionOrchestrationConfig(
             provider_id=config.provider_id,
             provider_timeout_seconds=config.provider_timeout_seconds,
         )
+        self._retrieval_binding = retrieval_binding
         self._clock = clock
         self._bounded_provider = _BoundedGenerationProvider(
             provider=provider,
@@ -527,6 +693,20 @@ class PrescriptionOrchestrationService:
         self._guardrails = RagGuardrailService(
             provider=self._bounded_provider,
             snapshot_currentness=snapshot_currentness,
+        )
+
+    @property
+    def runtime_binding(self) -> PrescriptionOrchestrationBinding:
+        """Return a defensive snapshot of the effective generation binding."""
+
+        return PrescriptionOrchestrationBinding(
+            prompt_id=f"prompt_{GENERATION_SYSTEM_PROMPT_VERSION}",
+            provider_id=self._config.provider_id,
+            provider_timeout_seconds=self._config.provider_timeout_seconds,
+            retrieval_policy_version=self._retrieval_binding.policy_version,
+            retrieval_policy_sha256=self._retrieval_binding.policy_sha256,
+            mapping_version=self._retrieval_binding.mapping_version,
+            mapping_sha256=self._retrieval_binding.mapping_sha256,
         )
 
     def orchestrate(
@@ -587,23 +767,34 @@ class PrescriptionOrchestrationService:
                 PrescriptionOrchestrationStatus.DEGRADED,
                 PrescriptionOrchestrationReason.RETRIEVAL_UNAVAILABLE,
             )
+        retrieval_trace = _retrieval_trace(retrieval)
+        if not _retrieval_matches_binding(retrieval, self._retrieval_binding):
+            return _result(
+                clean_prediction,
+                PrescriptionOrchestrationStatus.DEGRADED,
+                PrescriptionOrchestrationReason.RETRIEVAL_UNAVAILABLE,
+                retrieval_trace=retrieval_trace,
+            )
         if retrieval.status is GovernedRetrievalStatus.NO_EVIDENCE:
             return _result(
                 clean_prediction,
                 PrescriptionOrchestrationStatus.SKIPPED,
                 PrescriptionOrchestrationReason.NO_EVIDENCE,
+                retrieval_trace=retrieval_trace,
             )
         if retrieval.status is GovernedRetrievalStatus.UNMAPPED_FAULT:
             return _result(
                 clean_prediction,
                 PrescriptionOrchestrationStatus.SKIPPED,
                 PrescriptionOrchestrationReason.UNMAPPED_FAULT,
+                retrieval_trace=retrieval_trace,
             )
         if retrieval.status is GovernedRetrievalStatus.RETRIEVAL_UNAVAILABLE:
             return _result(
                 clean_prediction,
                 PrescriptionOrchestrationStatus.DEGRADED,
                 PrescriptionOrchestrationReason.RETRIEVAL_UNAVAILABLE,
+                retrieval_trace=retrieval_trace,
             )
 
         started_at = _clock_value(self._clock)
@@ -612,6 +803,7 @@ class PrescriptionOrchestrationService:
                 clean_prediction,
                 PrescriptionOrchestrationStatus.DEGRADED,
                 PrescriptionOrchestrationReason.TIMING_UNAVAILABLE,
+                retrieval_trace=retrieval_trace,
             )
 
         self._bounded_provider.reset_attempt()
@@ -627,6 +819,7 @@ class PrescriptionOrchestrationService:
                 clean_prediction,
                 PrescriptionOrchestrationStatus.DEGRADED,
                 PrescriptionOrchestrationReason.TIMING_UNAVAILABLE,
+                retrieval_trace=retrieval_trace,
             )
 
         metadata = (
@@ -648,6 +841,7 @@ class PrescriptionOrchestrationService:
                 PrescriptionOrchestrationReason.PROVIDER_TIMEOUT,
                 guardrail=guarded,
                 metadata=metadata,
+                retrieval_trace=retrieval_trace,
             )
         if outcome is _ProviderAttemptOutcome.BUSY:
             return _result(
@@ -655,6 +849,7 @@ class PrescriptionOrchestrationService:
                 PrescriptionOrchestrationStatus.DEGRADED,
                 PrescriptionOrchestrationReason.PROVIDER_BUSY,
                 guardrail=guarded,
+                retrieval_trace=retrieval_trace,
             )
         if outcome is _ProviderAttemptOutcome.DISABLED:
             return _result(
@@ -663,6 +858,7 @@ class PrescriptionOrchestrationService:
                 PrescriptionOrchestrationReason.PROVIDER_DISABLED,
                 guardrail=guarded,
                 metadata=metadata,
+                retrieval_trace=retrieval_trace,
             )
         if outcome is _ProviderAttemptOutcome.FAILED:
             return _result(
@@ -671,12 +867,14 @@ class PrescriptionOrchestrationService:
                 PrescriptionOrchestrationReason.PROVIDER_ERROR,
                 guardrail=guarded,
                 metadata=metadata,
+                retrieval_trace=retrieval_trace,
             )
         if guarded.status is RagGuardrailStatus.ACCEPTED:
             return _generated_result(
                 clean_prediction,
                 guardrail=guarded,
                 metadata=metadata,
+                retrieval_trace=retrieval_trace,
             )
 
         refusal_code = guarded.refusal.code if guarded.refusal is not None else None
@@ -692,6 +890,7 @@ class PrescriptionOrchestrationService:
             reason,
             guardrail=guarded,
             metadata=metadata,
+            retrieval_trace=retrieval_trace,
         )
 
     def _retrieve(
@@ -829,6 +1028,49 @@ def _copy_retrieval(value: object) -> GovernedRetrievalResult | None:
         )
     except Exception:
         return None
+
+
+def _retrieval_trace(
+    retrieval: GovernedRetrievalResult,
+) -> PrescriptionRetrievalTrace:
+    return PrescriptionRetrievalTrace(
+        status=retrieval.status,
+        policy_schema_version=retrieval.policy_schema_version,
+        policy_version=retrieval.policy_version,
+        policy_sha256=retrieval.policy_sha256,
+        mapping_version=retrieval.mapping_version,
+        mapping_sha256=retrieval.mapping_sha256,
+        evidence=tuple(
+            PrescriptionEvidenceReference(
+                document_id=item.document_id,
+                document_version_id=item.document_version,
+                chunk_ref=item.chunk_id,
+                page_number=item.page_number,
+                rank=rank,
+            )
+            for rank, item in enumerate(retrieval.evidence, start=1)
+        ),
+    )
+
+
+def _retrieval_matches_binding(
+    retrieval: GovernedRetrievalResult,
+    binding: GovernedRetrievalBinding,
+) -> bool:
+    """Reject an unapproved retrieval identity before any provider call."""
+
+    return (
+        retrieval.policy_schema_version == binding.policy_schema_version
+        and retrieval.policy_version == binding.policy_version
+        and retrieval.policy_sha256 == binding.policy_sha256
+        and (
+            retrieval.mapping_version is None
+            or (
+                retrieval.mapping_version == binding.mapping_version
+                and retrieval.mapping_sha256 == binding.mapping_sha256
+            )
+        )
+    )
 
 
 def _generation_diagnosis(
@@ -1063,6 +1305,7 @@ def _result(
     *,
     guardrail: GuardedGenerationResult | None = None,
     metadata: PrescriptionRunMetadata | None = None,
+    retrieval_trace: PrescriptionRetrievalTrace | None = None,
 ) -> PrescriptionOrchestrationResult:
     return PrescriptionOrchestrationResult(
         status=status,
@@ -1074,6 +1317,7 @@ def _result(
         guardrail=guardrail,
         metadata=metadata,
         notice=_notice(reason),
+        retrieval_trace=retrieval_trace,
     )
 
 
@@ -1082,12 +1326,14 @@ def _generated_result(
     *,
     guardrail: GuardedGenerationResult,
     metadata: PrescriptionRunMetadata | None,
+    retrieval_trace: PrescriptionRetrievalTrace,
 ) -> PrescriptionOrchestrationResult:
     if metadata is None:
         return _result(
             prediction,
             PrescriptionOrchestrationStatus.DEGRADED,
             PrescriptionOrchestrationReason.TIMING_UNAVAILABLE,
+            retrieval_trace=retrieval_trace,
         )
     return PrescriptionOrchestrationResult(
         status=PrescriptionOrchestrationStatus.GENERATED,
@@ -1099,4 +1345,5 @@ def _generated_result(
         guardrail=guardrail,
         metadata=metadata,
         notice=None,
+        retrieval_trace=retrieval_trace,
     )

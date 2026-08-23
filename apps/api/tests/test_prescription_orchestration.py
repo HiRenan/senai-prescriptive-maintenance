@@ -23,6 +23,7 @@ from prescriptive_maintenance.generation import (
     RagRefusalCode,
 )
 from prescriptive_maintenance.governed_retrieval import (
+    GovernedRetrievalBinding,
     GovernedRetrievalResult,
     GovernedRetrievalStatus,
     build_governed_retrieval_policy,
@@ -191,6 +192,19 @@ class _Retrieval:
     result: object = field(default_factory=_retrieval_result)
     failure: BaseException | None = None
     calls: int = 0
+    binding: GovernedRetrievalBinding = field(
+        default_factory=lambda: GovernedRetrievalBinding(
+            policy_schema_version=_POLICY.schema_version,
+            policy_version=_POLICY.policy_version,
+            policy_sha256=_POLICY.policy_sha256,
+            mapping_version=_MAPPING_VERSION,
+            mapping_sha256=_MAPPING_SHA256,
+        )
+    )
+
+    @property
+    def runtime_binding(self) -> GovernedRetrievalBinding:
+        return replace(self.binding)
 
     def retrieve(
         self,
@@ -313,6 +327,47 @@ def _service(
         ),
         monotonic_clock=cast(_Clock, clock or _Clock([1.0, 1.025])),
     )
+
+
+def test_runtime_binding_includes_effective_retrieval_dependency() -> None:
+    retrieval = _Retrieval()
+
+    binding = _service(retrieval=retrieval).runtime_binding
+
+    assert binding.prompt_id == f"prompt_{GENERATION_SYSTEM_PROMPT_VERSION}"
+    assert binding.provider_id == "fake-generation.v1"
+    assert binding.provider_timeout_seconds == 0.5
+    assert binding.retrieval_policy_version == retrieval.binding.policy_version
+    assert binding.retrieval_policy_sha256 == retrieval.binding.policy_sha256
+    assert binding.mapping_version == retrieval.binding.mapping_version
+    assert binding.mapping_sha256 == retrieval.binding.mapping_sha256
+
+
+def test_retrieval_result_identity_mismatch_blocks_provider() -> None:
+    provider = _RecordingProvider()
+    different_policy = build_governed_retrieval_policy(
+        policy_version="synthetic-rag-policy.v2",
+        minimum_score=0.8,
+    )
+    retrieval = _Retrieval(
+        binding=GovernedRetrievalBinding(
+            policy_schema_version=different_policy.schema_version,
+            policy_version=different_policy.policy_version,
+            policy_sha256=different_policy.policy_sha256,
+            mapping_version=_MAPPING_VERSION,
+            mapping_sha256=_MAPPING_SHA256,
+        )
+    )
+
+    result = _service(retrieval=retrieval, provider=provider).orchestrate(
+        _prediction(),
+        top_k=2,
+    )
+
+    assert result.status is PrescriptionOrchestrationStatus.DEGRADED
+    assert result.notice is not None
+    assert result.notice.code is PrescriptionOrchestrationReason.RETRIEVAL_UNAVAILABLE
+    assert provider.call_count == 0
 
 
 def test_documented_fault_generates_once_with_allowlisted_metadata() -> None:

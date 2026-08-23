@@ -109,6 +109,10 @@ A versão atual contém:
   documental sem provider, limita chamadas síncronas por timeout e capacidade
   unitária e registra apenas prompt, provider, latência monotônica e uso
   allowlisted;
+- uma composição explícita da análise HTTP que liga modelo, índice,
+  recuperação, guardrails e UoW somente sob uma autorização imutável, confere
+  paridade do ranking, projeta os cinco estados sem fallback, publica apenas
+  citações efetivamente usadas e grava o cache local depois do commit;
 - um pipeline canônico local e determinístico para `banner.csv`, com 18 features
   de inferência, ledger completo de disposições, agrupamento temporal de
   ocorrências independente do target, partições cronológicas com purga e
@@ -135,11 +139,12 @@ A versão atual contém:
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, upload ou armazenamento de bytes documentais, integração da baseline,
-do índice de similaridade, da composição RAG ou da persistência de análises ao
-fluxo HTTP, busca semântica real por vizinhos, vetores integrados à aplicação,
-configuração operacional ou chamada automática a LLM, autenticação,
-infraestrutura AWS aplicada, deploy ou interface web.
+aplicação, upload ou armazenamento de bytes documentais, composição operacional
+autorizada com artefatos reais, busca semântica real por vizinhos, configuração
+operacional ou chamada automática a LLM, autenticação, infraestrutura AWS
+aplicada, deploy ou interface web. A factory HTTP padrão permanece inteiramente
+sintética; a integração real exige injeção explícita e nenhum modelo avaliado
+está aprovado para automação.
 
 ## Arquitetura atual
 
@@ -153,7 +158,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1, análise sintética injetável, registro documental governado com adapters em memória/PostgreSQL, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima, baseline e recuperação de vizinhos em memória/pgvector, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1, análise sintética padrão e composição integrada injetável sob autorização exata, registro documental governado com adapters em memória/PostgreSQL, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima, baseline e recuperação de vizinhos em memória/pgvector, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
@@ -389,11 +394,8 @@ implementadas**:
 - ingestão contínua ou orquestração do pipeline canônico pela aplicação;
 - upload multipart/streaming, validação de hash/tamanho contra bytes e
   armazenamento documental local ou S3;
-- integração das rotas de análise com a persistência, a baseline e o uso de
-  vetores;
-- busca semântica real por similaridade, integração operacional do índice e da
-  composição RAG com modelo, adapters reais e API ou configuração operacional
-  de LLM;
+- composição operacional autorizada com artefato de modelo aprovado, busca
+  semântica real, adapters reais, vetores e configuração de LLM;
 - autenticação, autorização, métricas e exportação de telemetria;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS aplicada, pipeline de deploy, release publicada ou
@@ -418,6 +420,8 @@ sem enfraquecer a fronteira dos materiais locais.
   protocolo e evidências agregadas da avaliação temporal SEN-53;
 - [`docs/model-cards/temporal-knn-v2.md`](docs/model-cards/temporal-knn-v2.md):
   decisão de uso e limitações do motor k-NN v2.
+- [`docs/validation/analysis-integration.md`](docs/validation/analysis-integration.md):
+  binding autorizado, cinco estados, persistência e limites da SEN-46.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 
