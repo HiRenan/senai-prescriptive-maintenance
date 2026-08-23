@@ -122,6 +122,11 @@ A versão atual contém:
 - um índice de similaridade local derivado somente do artefato k-NN já
   verificado, com manifesto de compatibilidade e hashes, porta única, adapters
   equivalentes em memória e PostgreSQL/pgvector e migração reversível;
+- um harness de avaliação temporal com plano materializado antes da leitura
+  feita pela tarefa, ranking exato em lote, métricas em escopos total e de
+  classes conhecidas, benchmark de latência e pico de memória do processo, além
+  de model card que registra a observação histórica do teste e não aprova o
+  motor para automação;
 - CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
   request e integridade Git de releases, além de verificações de segurança com
   CodeQL, revisão de dependências e varredura de segredos;
@@ -178,7 +183,8 @@ sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md)
 ├── docs/
 │   ├── adr/          # decisões arquiteturais
 │   ├── architecture/ # inventário da arquitetura implementada
-│   └── data/         # visões humanas derivadas de contratos de dados
+│   ├── data/         # visões humanas derivadas de contratos de dados
+│   └── model-cards/  # condições de uso e limites dos modelos avaliados
 ├── experiments/      # estudos isolados do código de produção
 ├── infra/            # PostgreSQL local e perfil Terraform AWS demo
 └── scripts/          # automação cross-platform exposta pelo Poe
@@ -407,7 +413,11 @@ sem enfraquecer a fronteira dos materiais locais.
 - [`docs/validation/document-pipeline.md`](docs/validation/document-pipeline.md):
   decisões, evidências e limites do pipeline documental governado da SEN-4;
 - [`docs/validation/similarity-index.md`](docs/validation/similarity-index.md):
-  contrato, integridade e paridade sintética do índice de similaridade SEN-52.
+  contrato, integridade e paridade sintética do índice de similaridade SEN-52;
+- [`docs/validation/model-evaluation.md`](docs/validation/model-evaluation.md):
+  protocolo e evidências agregadas da avaliação temporal SEN-53;
+- [`docs/model-cards/temporal-knn-v2.md`](docs/model-cards/temporal-knn-v2.md):
+  decisão de uso e limitações do motor k-NN v2.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 
