@@ -20,6 +20,8 @@ from prescriptive_maintenance.data.document_indexing import (
     EmbeddingStatus,
     ExtractionProvenance,
     IndexedChunk,
+    document_chunk_id,
+    document_section_id,
 )
 from prescriptive_maintenance.data.source_documents import (
     SOURCE_DOCUMENT_EXTRACTION_SCHEMA_VERSION,
@@ -35,6 +37,7 @@ from prescriptive_maintenance.document_lifecycle import (
     LifecycleEvent,
     ProcessingIntegrity,
     ProcessingStepStatus,
+    is_document_snapshot_audited,
 )
 
 FAULT_KNOWLEDGE_MAPPING_SCHEMA_VERSION: Final = 1
@@ -202,6 +205,21 @@ class KnowledgeRetrievalResult:
             raise ValueError("Knowledge retrieval mapping identity is invalid.")
         if type(self.evidence) is not tuple or len(self.evidence) > MAX_TOP_K:
             raise ValueError("Knowledge retrieval evidence is invalid.")
+        canonical_evidence: list[RankedKnowledgeEvidence] = []
+        for item in cast(tuple[object, ...], self.evidence):
+            if type(item) is not RankedKnowledgeEvidence:
+                raise ValueError("Knowledge retrieval evidence is invalid.")
+            canonical_evidence.append(
+                RankedKnowledgeEvidence(
+                    document_id=item.document_id,
+                    document_version=item.document_version,
+                    chunk_id=item.chunk_id,
+                    page_number=item.page_number,
+                    section_id=item.section_id,
+                    score=item.score,
+                )
+            )
+        object.__setattr__(self, "evidence", tuple(canonical_evidence))
         if self.evidence and self.reason is not None:
             raise ValueError("Successful retrieval cannot contain an empty reason.")
         if not self.evidence and type(self.reason) is not KnowledgeRetrievalReason:
@@ -227,7 +245,7 @@ class KnowledgeChunkScorer(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _ScoredChunk:
-    evidence: _EvidenceSnapshot
+    snapshot: _IndexedRecordSnapshot
     score: float
 
 
@@ -245,7 +263,7 @@ class _IndexedRecordSnapshot:
     record: IndexedChunk
     evidence: _EvidenceSnapshot
     source_sha256: str
-    fingerprint: bytes
+    document_revision: int
     eligible: bool
 
 
@@ -254,6 +272,7 @@ class _EligibleDocumentSnapshot:
     document_id: str
     document_version: str
     source_sha256: str
+    revision: int
 
 
 def build_fault_knowledge_mapping(
@@ -490,12 +509,13 @@ class ApprovedKnowledgeRetrievalService:
                 document_id=candidate.evidence.document_id,
                 document_version=candidate.evidence.document_version,
                 source_sha256=candidate.source_sha256,
+                document_revision=candidate.document_revision,
             )
             if (
                 corrupted
                 or rescored is None
                 or not rescored.eligible
-                or rescored.fingerprint != candidate.fingerprint
+                or rescored != candidate
             ):
                 return self._empty(
                     clean_fault_class,
@@ -533,7 +553,7 @@ class ApprovedKnowledgeRetrievalService:
                 )
             scored.append(
                 _ScoredChunk(
-                    evidence=candidate.evidence,
+                    snapshot=candidate,
                     score=0.0 if score == 0.0 else score,
                 )
             )
@@ -545,15 +565,24 @@ class ApprovedKnowledgeRetrievalService:
                 mapping_sha256=mapping_sha256,
             )
 
+        current_candidates, final_failure = self._eligible_candidates(document_ids)
+        if final_failure is not None or current_candidates != candidates:
+            return self._empty(
+                clean_fault_class,
+                final_failure or KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED,
+                mapping_version=mapping_version,
+                mapping_sha256=mapping_sha256,
+            )
+
         try:
             ranked = sorted(scored, key=_scored_order_key)[:top_k]
             evidence = tuple(
                 RankedKnowledgeEvidence(
-                    document_id=item.evidence.document_id,
-                    document_version=item.evidence.document_version,
-                    chunk_id=item.evidence.chunk_id,
-                    page_number=item.evidence.page_number,
-                    section_id=item.evidence.section_id,
+                    document_id=item.snapshot.evidence.document_id,
+                    document_version=item.snapshot.evidence.document_version,
+                    chunk_id=item.snapshot.evidence.chunk_id,
+                    page_number=item.snapshot.evidence.page_number,
+                    section_id=item.snapshot.evidence.section_id,
                     score=item.score,
                 )
                 for item in ranked
@@ -613,6 +642,7 @@ class ApprovedKnowledgeRetrievalService:
                     document_id=document_id,
                     document_version=eligible.document_version,
                     source_sha256=eligible.source_sha256,
+                    document_revision=eligible.revision,
                 )
                 if corrupted or assessed is None:
                     return (), KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
@@ -873,6 +903,7 @@ def _is_expected_document_reference(value: object, document_id: str) -> bool:
             or any(
                 type(event) is not LifecycleEvent for event in value.document.history
             )
+            or not is_document_snapshot_audited(value)
         ):
             return False
     except Exception:
@@ -930,6 +961,7 @@ def _eligible_document_snapshot(
                 document_id=document_id,
                 document_version=f"docver_{eligible.sha256}",
                 source_sha256=eligible.sha256,
+                revision=snapshot.revision,
             ),
             None,
         )
@@ -943,6 +975,7 @@ def _snapshot_indexed_record(
     document_id: str,
     document_version: str,
     source_sha256: str,
+    document_revision: int,
 ) -> tuple[_IndexedRecordSnapshot | None, bool]:
     try:
         if (
@@ -994,6 +1027,30 @@ def _snapshot_indexed_record(
             chunk.content.encode("utf-8", errors="strict")
         ).hexdigest()
         if chunk.content_sha256 != content_sha256:
+            return None, True
+        expected_section_id = document_section_id(
+            document_id=chunk.document_id,
+            document_version=chunk.document_version,
+            page_number=chunk.page_number,
+            section_index=chunk.section_index,
+            section_title=chunk.section_title,
+        )
+        if chunk.section_id != expected_section_id:
+            return None, True
+        expected_chunk_id = document_chunk_id(
+            content_sha256=chunk.content_sha256,
+            document_id=chunk.document_id,
+            document_version=chunk.document_version,
+            page_number=chunk.page_number,
+            section_id=chunk.section_id,
+            section_index=chunk.section_index,
+            ordinal=chunk.ordinal,
+            section_chunk_index=chunk.section_chunk_index,
+            character_start=chunk.character_start,
+            character_end=chunk.character_end,
+            chunking_configuration_id=chunk.chunking_configuration_id,
+        )
+        if chunk.chunk_id != expected_chunk_id:
             return None, True
 
         if (
@@ -1076,55 +1133,8 @@ def _snapshot_indexed_record(
         elif vector is not None or not _is_nonempty_exact_text(embedding.failure_code):
             return None, True
 
-        safe_provenance = ExtractionProvenance(
-            source_name=provenance.source_name,
-            source_sha256=provenance.source_sha256,
-            source_version=provenance.source_version,
-            source_size_bytes=provenance.source_size_bytes,
-            pdf_version=provenance.pdf_version,
-            extraction_schema_version=provenance.extraction_schema_version,
-            extractor_version=provenance.extractor_version,
-            document_extraction_status=provenance.document_extraction_status,
-            document_failure_code=provenance.document_failure_code,
-            page_number=provenance.page_number,
-            page_extraction_method=provenance.page_extraction_method,
-            page_extraction_status=provenance.page_extraction_status,
-            page_failure_code=provenance.page_failure_code,
-            ocr_trigger_codes=tuple(provenance.ocr_trigger_codes),
-            quality_signals=tuple(provenance.quality_signals),
-            pdfium_version=provenance.pdfium_version,
-            ocr_adapter_name=provenance.ocr_adapter_name,
-            ocr_adapter_version=provenance.ocr_adapter_version,
-        )
-        safe_chunk = DocumentChunk(
-            schema_version=chunk.schema_version,
-            chunk_id=chunk.chunk_id,
-            document_id=chunk.document_id,
-            document_version=chunk.document_version,
-            content=chunk.content,
-            content_sha256=chunk.content_sha256,
-            page_number=chunk.page_number,
-            section_id=chunk.section_id,
-            section_index=chunk.section_index,
-            section_title=chunk.section_title,
-            ordinal=chunk.ordinal,
-            section_chunk_index=chunk.section_chunk_index,
-            character_start=chunk.character_start,
-            character_end=chunk.character_end,
-            chunking_configuration_id=chunk.chunking_configuration_id,
-            provenance=safe_provenance,
-        )
-        safe_embedding = ChunkEmbedding(
-            chunk_id=embedding.chunk_id,
-            provider_id=embedding.provider_id,
-            representation_version=embedding.representation_version,
-            dimension=embedding.dimension,
-            status=embedding.status,
-            vector=None if vector is None else tuple(vector),
-            failure_code=embedding.failure_code,
-        )
-        safe_record = IndexedChunk(chunk=safe_chunk, embedding=safe_embedding)
-        fingerprint = _indexed_record_fingerprint(safe_record)
+        safe_record = _clone_indexed_record(record)
+        safe_chunk = safe_record.chunk
         eligible = document_extracted and page_extracted and embedding_available
         return (
             _IndexedRecordSnapshot(
@@ -1137,7 +1147,7 @@ def _snapshot_indexed_record(
                     section_id=safe_chunk.section_id,
                 ),
                 source_sha256=source_sha256,
-                fingerprint=fingerprint,
+                document_revision=document_revision,
                 eligible=eligible,
             ),
             False,
@@ -1214,62 +1224,6 @@ def _clone_indexed_record(record: IndexedChunk) -> IndexedChunk:
     )
 
 
-def _indexed_record_fingerprint(record: IndexedChunk) -> bytes:
-    chunk = record.chunk
-    provenance = chunk.provenance
-    embedding = record.embedding
-    return _canonical_json_bytes(
-        {
-            "chunk": {
-                "character_end": chunk.character_end,
-                "character_start": chunk.character_start,
-                "chunk_id": chunk.chunk_id,
-                "chunking_configuration_id": chunk.chunking_configuration_id,
-                "content": chunk.content,
-                "content_sha256": chunk.content_sha256,
-                "document_id": chunk.document_id,
-                "document_version": chunk.document_version,
-                "ordinal": chunk.ordinal,
-                "page_number": chunk.page_number,
-                "provenance": {
-                    "document_extraction_status": provenance.document_extraction_status,
-                    "document_failure_code": provenance.document_failure_code,
-                    "extraction_schema_version": provenance.extraction_schema_version,
-                    "extractor_version": provenance.extractor_version,
-                    "ocr_adapter_name": provenance.ocr_adapter_name,
-                    "ocr_adapter_version": provenance.ocr_adapter_version,
-                    "ocr_trigger_codes": list(provenance.ocr_trigger_codes),
-                    "page_extraction_method": provenance.page_extraction_method,
-                    "page_extraction_status": provenance.page_extraction_status,
-                    "page_failure_code": provenance.page_failure_code,
-                    "page_number": provenance.page_number,
-                    "pdf_version": provenance.pdf_version,
-                    "pdfium_version": provenance.pdfium_version,
-                    "quality_signals": list(provenance.quality_signals),
-                    "source_name": provenance.source_name,
-                    "source_sha256": provenance.source_sha256,
-                    "source_size_bytes": provenance.source_size_bytes,
-                    "source_version": provenance.source_version,
-                },
-                "schema_version": chunk.schema_version,
-                "section_chunk_index": chunk.section_chunk_index,
-                "section_id": chunk.section_id,
-                "section_index": chunk.section_index,
-                "section_title": chunk.section_title,
-            },
-            "embedding": {
-                "chunk_id": embedding.chunk_id,
-                "dimension": embedding.dimension,
-                "failure_code": embedding.failure_code,
-                "provider_id": embedding.provider_id,
-                "representation_version": embedding.representation_version,
-                "status": embedding.status.value,
-                "vector": None if embedding.vector is None else list(embedding.vector),
-            },
-        }
-    )
-
-
 def _evidence_key(record: _EvidenceSnapshot) -> tuple[str, str, str]:
     return (
         record.document_id,
@@ -1283,9 +1237,9 @@ def _scored_order_key(
 ) -> tuple[float, str, str, int, str, str]:
     return (
         -item.score,
-        item.evidence.document_id,
-        item.evidence.document_version,
-        item.evidence.page_number,
-        item.evidence.section_id,
-        item.evidence.chunk_id,
+        item.snapshot.evidence.document_id,
+        item.snapshot.evidence.document_version,
+        item.snapshot.evidence.page_number,
+        item.snapshot.evidence.section_id,
+        item.snapshot.evidence.chunk_id,
     )

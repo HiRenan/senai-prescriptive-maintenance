@@ -18,6 +18,8 @@ from prescriptive_maintenance.data.document_indexing import (
     ExtractionProvenance,
     IndexedChunk,
     InMemoryChunkRepository,
+    document_chunk_id,
+    document_section_id,
 )
 from prescriptive_maintenance.document_lifecycle import (
     DocumentGovernanceService,
@@ -34,6 +36,7 @@ from prescriptive_maintenance.knowledge_retrieval import (
     KnowledgeChunkScorer,
     KnowledgeRetrievalInputError,
     KnowledgeRetrievalReason,
+    KnowledgeRetrievalResult,
     RankedKnowledgeEvidence,
     build_fault_knowledge_mapping,
     fault_knowledge_mapping_json_bytes,
@@ -155,6 +158,25 @@ class _MutatingScorer:
         return 0.75
 
 
+@dataclass(slots=True)
+class _ApprovingScorer:
+    lifecycle: DocumentGovernanceService
+    pending: DocumentSnapshot
+    calls: int = 0
+
+    def score(self, *, fault_class: str, chunk: IndexedChunk) -> float | None:
+        del fault_class, chunk
+        self.calls += 1
+        self.pending = self.lifecycle.approve(
+            identity=self.pending.document.identity,
+            version=2,
+            actor="synthetic-racing-approver",
+            reason="Synthetic concurrent approval during scoring.",
+            expected_revision=self.pending.revision,
+        )
+        return 0.75
+
+
 def _governance() -> tuple[DocumentGovernanceService, InMemoryDocumentRepository]:
     repository = InMemoryDocumentRepository()
     return (
@@ -253,23 +275,51 @@ def _record(
     embedding_status: EmbeddingStatus = EmbeddingStatus.EMBEDDED,
     provider_id: str = "synthetic-embedding",
 ) -> IndexedChunk:
-    chunk_id = f"chunk_{chunk_key}"
+    document_version = f"docver_{source_hash}"
+    content_sha256 = sha256(content.encode("utf-8")).hexdigest()
+    section_index = 1
+    section_title = f"SYNTHETIC SECTION {chunk_key.upper()}"
+    ordinal = page_number
+    section_chunk_index = 1
+    character_start = 0
+    character_end = len(content)
+    chunking_configuration_id = f"chunkcfg_{'9' * 64}"
+    section_id = document_section_id(
+        document_id=document_id,
+        document_version=document_version,
+        page_number=page_number,
+        section_index=section_index,
+        section_title=section_title,
+    )
+    chunk_id = document_chunk_id(
+        content_sha256=content_sha256,
+        document_id=document_id,
+        document_version=document_version,
+        page_number=page_number,
+        section_id=section_id,
+        section_index=section_index,
+        ordinal=ordinal,
+        section_chunk_index=section_chunk_index,
+        character_start=character_start,
+        character_end=character_end,
+        chunking_configuration_id=chunking_configuration_id,
+    )
     chunk = DocumentChunk(
         schema_version=1,
         chunk_id=chunk_id,
         document_id=document_id,
-        document_version=f"docver_{source_hash}",
+        document_version=document_version,
         content=content,
-        content_sha256=sha256(content.encode("utf-8")).hexdigest(),
+        content_sha256=content_sha256,
         page_number=page_number,
-        section_id=f"section_{chunk_key}",
-        section_index=1,
-        section_title="SYNTHETIC SECTION",
-        ordinal=page_number,
-        section_chunk_index=1,
-        character_start=0,
-        character_end=len(content),
-        chunking_configuration_id=f"chunkcfg_{'9' * 64}",
+        section_id=section_id,
+        section_index=section_index,
+        section_title=section_title,
+        ordinal=ordinal,
+        section_chunk_index=section_chunk_index,
+        character_start=character_start,
+        character_end=character_end,
+        chunking_configuration_id=chunking_configuration_id,
         provenance=ExtractionProvenance(
             source_name="SyntheticManual.pdf",
             source_sha256=source_hash,
@@ -579,11 +629,14 @@ def test_lifecycle_and_chunk_integrity_filter_before_scoring() -> None:
     result = service.retrieve(_FAULT_CLASS, top_k=5)
 
     assert result.reason is None
-    assert tuple(item.chunk_id for item in result.evidence) == ("chunk_approved_valid",)
+    approved = records[0]
+    assert tuple(item.chunk_id for item in result.evidence) == (
+        approved.chunk.chunk_id,
+    )
     assert scorer.calls == [
         (
             _FAULT_CLASS,
-            "chunk_approved_valid",
+            approved.chunk.chunk_id,
             "Synthetic approved content.",
         )
     ]
@@ -641,6 +694,48 @@ def test_atomic_approval_replaces_old_version_without_candidate_leakage() -> Non
     assert tuple(call[1] for call in scorer.calls) == (new.chunk.chunk_id,)
 
 
+def test_concurrent_approval_during_scoring_invalidates_the_scored_revision() -> None:
+    lifecycle, documents = _governance()
+    approved_v1 = _approved_document(lifecycle, identity=_DOC_APPROVED)
+    registered_v2 = _register(
+        lifecycle,
+        identity=_DOC_APPROVED,
+        content_hash=_HASH_V2,
+        version=2,
+        expected_revision=approved_v1.revision,
+    )
+    pending_v2 = _pending(lifecycle, registered_v2, version=2)
+    old = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="racing_version_one",
+        content="Synthetic version one scored before a concurrent approval.",
+    )
+    replacement = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V2,
+        chunk_key="racing_version_two",
+        content="Synthetic version two approved while scoring is in progress.",
+    )
+    chunks = InMemoryChunkRepository()
+    chunks.save((old, replacement))
+    scorer = _ApprovingScorer(lifecycle=lifecycle, pending=pending_v2)
+    service = _retrieval(
+        documents=documents,
+        chunks=chunks,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert scorer.calls == 1
+    assert scorer.pending.document.current_version == 2
+    assert scorer.pending.document.version(1).status is DocumentStatus.SUPERSEDED
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
+
+
 def test_ranking_ties_top_k_and_repetition_are_deterministic() -> None:
     lifecycle, documents = _governance()
     _approved_document(lifecycle, identity=_DOC_APPROVED)
@@ -667,13 +762,14 @@ def test_ranking_ties_top_k_and_repetition_are_deterministic() -> None:
             page_number=1,
         ),
     )
+    tie_b, highest, tie_a = records
     chunks = InMemoryChunkRepository()
     chunks.save(records)
     scorer = _RecordingScorer(
         scores={
-            "chunk_tie_a": 0.7,
-            "chunk_tie_b": 0.7,
-            "chunk_highest": 0.9,
+            tie_a.chunk.chunk_id: 0.7,
+            tie_b.chunk.chunk_id: 0.7,
+            highest.chunk.chunk_id: 0.9,
         }
     )
     service = _retrieval(
@@ -688,8 +784,8 @@ def test_ranking_ties_top_k_and_repetition_are_deterministic() -> None:
 
     assert first == second
     assert tuple(item.chunk_id for item in first.evidence) == (
-        "chunk_highest",
-        "chunk_tie_a",
+        highest.chunk.chunk_id,
+        tie_a.chunk.chunk_id,
     )
     assert len(first.evidence) == 2
     assert (
@@ -704,6 +800,37 @@ def test_ranking_ties_top_k_and_repetition_are_deterministic() -> None:
         "score",
     }
     assert all(item.score == item.score for item in first.evidence)
+
+
+def test_retrieval_result_copies_and_validates_nested_evidence() -> None:
+    original = RankedKnowledgeEvidence(
+        document_id=_DOC_APPROVED,
+        document_version=f"docver_{_HASH_V1}",
+        chunk_id=f"chunk_{'a' * 64}",
+        page_number=1,
+        section_id=f"section_{'b' * 64}",
+        score=0.75,
+    )
+    result = KnowledgeRetrievalResult(
+        fault_class=_FAULT_CLASS,
+        mapping_version=_MAPPING_VERSION,
+        mapping_sha256="3" * 64,
+        evidence=(original,),
+        reason=None,
+    )
+
+    assert result.evidence[0] is not original
+    object.__setattr__(original, "score", 0.1)
+    assert result.evidence[0].score == 0.75
+
+    with pytest.raises(ValueError, match="evidence"):
+        KnowledgeRetrievalResult(
+            fault_class=_FAULT_CLASS,
+            mapping_version=_MAPPING_VERSION,
+            mapping_sha256="3" * 64,
+            evidence=(cast(RankedKnowledgeEvidence, object()),),
+            reason=None,
+        )
 
 
 def test_empty_and_invalid_scores_never_produce_partial_ranking() -> None:
@@ -897,6 +1024,38 @@ def test_any_cryptographic_chunk_corruption_aborts_before_scoring(
     assert scorer.calls == []
 
 
+@pytest.mark.parametrize("identity", ["section_id", "chunk_id"])
+def test_syntactically_valid_but_reassigned_index_identity_fails_closed(
+    identity: str,
+) -> None:
+    intact = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key=f"reassigned_{identity}",
+        content="Synthetic content whose deterministic identity was reassigned.",
+    )
+    if identity == "section_id":
+        tampered = replace(
+            intact,
+            chunk=replace(intact.chunk, section_id=f"section_{'e' * 64}"),
+        )
+    else:
+        reassigned_chunk_id = f"chunk_{'f' * 64}"
+        tampered = replace(
+            intact,
+            chunk=replace(intact.chunk, chunk_id=reassigned_chunk_id),
+            embedding=replace(intact.embedding, chunk_id=reassigned_chunk_id),
+        )
+    scorer = _RecordingScorer(scores={tampered.chunk.chunk_id: 0.9})
+    service, _documents = _approved_retrieval(records=(tampered,), scorer=scorer)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
+    assert scorer.calls == []
+
+
 def test_non_string_index_identity_is_an_integrity_failure_before_scoring() -> None:
     malformed = _record(
         document_id=_DOC_APPROVED,
@@ -934,6 +1093,39 @@ def test_malformed_repository_snapshot_is_sanitized_as_integrity_failure(
         return malformed
 
     monkeypatch.setattr(documents, "get", malformed_get)
+
+    result = service.retrieve(_FAULT_CLASS, top_k=1)
+
+    assert result.evidence == ()
+    assert result.reason is KnowledgeRetrievalReason.INDEX_INTEGRITY_FAILED
+    assert scorer.calls == []
+
+
+def test_truncated_lifecycle_history_cannot_authorize_approved_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="truncated_lifecycle",
+        content="Synthetic evidence backed by a truncated lifecycle history.",
+    )
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.8})
+    service, documents = _approved_retrieval(records=(record,), scorer=scorer)
+    approved = documents.get(_DOC_APPROVED)
+    assert approved is not None
+    truncated = DocumentSnapshot(
+        document=replace(
+            approved.document,
+            history=(approved.document.history[0],),
+        ),
+        revision=approved.revision,
+    )
+
+    def truncated_get(_identity: str) -> DocumentSnapshot:
+        return truncated
+
+    monkeypatch.setattr(documents, "get", truncated_get)
 
     result = service.retrieve(_FAULT_CLASS, top_k=1)
 

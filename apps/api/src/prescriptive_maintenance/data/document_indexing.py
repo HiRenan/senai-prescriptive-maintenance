@@ -1001,13 +1001,32 @@ def _section_id(
     page_number: int,
     section: _Section,
 ) -> str:
+    return document_section_id(
+        document_id=document_id,
+        document_version=document_version,
+        page_number=page_number,
+        section_index=section.index,
+        section_title=section.title,
+    )
+
+
+def document_section_id(
+    *,
+    document_id: str,
+    document_version: str,
+    page_number: int,
+    section_index: int,
+    section_title: str | None,
+) -> str:
+    """Derive the canonical identity for one indexed document section."""
+
     digest = _digest_payload(
         {
             "document_id": document_id,
             "document_version": document_version,
             "page_number": page_number,
-            "section_index": section.index,
-            "section_title": section.title,
+            "section_index": section_index,
+            "section_title": section_title,
         }
     )
     return f"{_SECTION_ID_PREFIX}{digest}"
@@ -1027,11 +1046,42 @@ def _build_chunk_id(
     character_end: int,
     configuration_id: str,
 ) -> str:
+    return document_chunk_id(
+        content_sha256=content_sha256,
+        document_id=document_id,
+        document_version=document_version,
+        page_number=page_number,
+        section_id=section_id,
+        section_index=section_index,
+        ordinal=ordinal,
+        section_chunk_index=section_chunk_index,
+        character_start=character_start,
+        character_end=character_end,
+        chunking_configuration_id=configuration_id,
+    )
+
+
+def document_chunk_id(
+    *,
+    content_sha256: str,
+    document_id: str,
+    document_version: str,
+    page_number: int,
+    section_id: str,
+    section_index: int,
+    ordinal: int,
+    section_chunk_index: int,
+    character_start: int,
+    character_end: int,
+    chunking_configuration_id: str,
+) -> str:
+    """Derive the canonical identity for one indexed document chunk."""
+
     digest = _digest_payload(
         {
             "character_end": character_end,
             "character_start": character_start,
-            "chunking_configuration_id": configuration_id,
+            "chunking_configuration_id": chunking_configuration_id,
             "content_sha256": content_sha256,
             "document_id": document_id,
             "document_version": document_version,
