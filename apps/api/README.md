@@ -1097,6 +1097,42 @@ padrão permanece offline. Nenhum artefato real é instalado pelos testes. A
 justificativa e os limites estão em
 [`docs/validation/similarity-index.md`](../../docs/validation/similarity-index.md).
 
+## Avaliação temporal reproduzível
+
+`prescriptive_maintenance.modeling.evaluation` congela identidades, hashes,
+política, métricas e metodologia antes de abrir um holdout. O plano é
+serializado canonicamente e seu SHA-256 é verificado antes do opener. O cálculo
+usa distância euclidiana exata em lotes com memória de trabalho limitada, aplica
+a mesma decisão do modelo e audita uma amostra contra `predict_candidate()`.
+
+O relatório contém somente agregados para todas as linhas e para classes que
+existem no treino: top-1, Hit/Recall@K, MRR, baseline majoritária, cobertura,
+abstenção e acurácia seletiva. Latência é medida após warmup e com cache
+aquecido. O pico primário usa working set do processo no Windows ou
+`ru_maxrss` no Unix; `tracemalloc` aparece apenas como complemento. Plataforma
+sem suporte declara a métrica indisponível.
+
+O CLI exige derivados já aprovados, não oferece flags de tuning e nunca
+sobrescreve um relatório existente:
+
+```powershell
+uv run --frozen python -m prescriptive_maintenance.modeling.evaluation `
+  --dataset-manifest "<derivado>/manifest.json" `
+  --holdout "<derivado>/test.parquet" `
+  --model-artifact "<artefato-knn-v2>" `
+  --index-artifact "<indice-versionado>" `
+  --report-output "data/processed/sen-53-evaluation/evaluation-report.json"
+```
+
+Artefatos e relatórios reais permanecem ignorados. O índice é validado como
+âncora de identidade e compatibilidade; o benchmark avalia o k-NN exato em
+memória, não PostgreSQL/pgvector. A execução da SEN-53 não alterou parâmetros
+após observar o teste, mas o mesmo holdout já tinha agregados publicados por uma
+tarefa anterior e, portanto, não constitui estimativa independente. O
+[relatório](../../docs/validation/model-evaluation.md) e o
+[model card](../../docs/model-cards/temporal-knn-v2.md) registram o limite e a
+decisão de não aprovar o modelo para automação.
+
 ## Verificações
 
 As verificações canônicas são executadas a partir da raiz:

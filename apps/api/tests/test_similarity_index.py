@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
@@ -291,8 +292,16 @@ def test_bounded_reader_rejects_in_place_change_during_read(
             index_module.os.fsync(descriptor)
         return original_fstat(descriptor)
 
+    def coarse_file_state(_metadata: os.stat_result) -> tuple[int, int, int]:
+        return 8, 1, 1
+
+    def coarse_portable_state(_metadata: os.stat_result) -> tuple[int, int]:
+        return 8, 1
+
     monkeypatch.setattr(index_module.os, "open", open_for_test)
     monkeypatch.setattr(index_module.os, "fstat", mutate_before_final_fstat)
+    monkeypatch.setattr(index_module, "_file_state", coarse_file_state)
+    monkeypatch.setattr(index_module, "_portable_file_state", coarse_portable_state)
     reader = cast(
         Callable[[Path, int], bytes],
         vars(index_module)["_read_bounded_regular_file"],
@@ -300,6 +309,30 @@ def test_bounded_reader_rejects_in_place_change_during_read(
 
     with pytest.raises(SimilarityIndexArtifactError, match="changed"):
         reader(path, 100)
+
+
+def test_bounded_reader_accepts_stable_file_with_coarse_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "artifact.json"
+    payload = b"synthetic-stable-artifact"
+    path.write_bytes(payload)
+
+    def coarse_file_state(_metadata: os.stat_result) -> tuple[int, int, int]:
+        return len(payload), 1, 1
+
+    def coarse_portable_state(_metadata: os.stat_result) -> tuple[int, int]:
+        return len(payload), 1
+
+    monkeypatch.setattr(index_module, "_file_state", coarse_file_state)
+    monkeypatch.setattr(index_module, "_portable_file_state", coarse_portable_state)
+    reader = cast(
+        Callable[[Path, int], bytes],
+        vars(index_module)["_read_bounded_regular_file"],
+    )
+
+    assert reader(path, 100) == payload
 
 
 def test_bounded_reader_sanitizes_descriptor_close_failure(

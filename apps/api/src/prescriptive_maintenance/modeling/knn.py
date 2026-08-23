@@ -180,6 +180,17 @@ class KnnCandidate:
     neighbors: tuple[KnnCandidateNeighbor, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class KnnEvaluationSnapshot:
+    """Defensive train-state copy for exact offline evaluation."""
+
+    labels: tuple[KnnLabel, ...]
+    training_vectors: FloatMatrix
+    target_indices: TargetIndexVector
+    neighbor_refs: TextVector
+    class_counts: tuple[int, ...]
+
+
 class InMemoryKnnModel:
     """Exact Euclidean k-NN search over train-only standardized vectors."""
 
@@ -294,6 +305,23 @@ class InMemoryKnnModel:
     def preprocessor_state(self) -> KnnPreprocessorState:
         return self._preprocessor_state
 
+    def evaluation_snapshot(self) -> KnnEvaluationSnapshot:
+        """Return immutable copies without exposing the model's owned arrays."""
+
+        vectors = np.array(self._training_vectors, copy=True, order="C")
+        target_indices = np.array(self._target_indices, copy=True, order="C")
+        neighbor_refs = np.array(self._neighbor_refs, copy=True, order="C")
+        vectors.flags.writeable = False
+        target_indices.flags.writeable = False
+        neighbor_refs.flags.writeable = False
+        return KnnEvaluationSnapshot(
+            labels=self._labels,
+            training_vectors=vectors,
+            target_indices=target_indices,
+            neighbor_refs=neighbor_refs,
+            class_counts=self._class_counts,
+        )
+
     def predict_candidate(
         self,
         features: Mapping[str, float],
@@ -324,6 +352,70 @@ class InMemoryKnnModel:
             top_k=max(self._default_top_k, requested_top_k),
             error_type=KnnInputError,
         )
+        return self._candidate_from_neighbors(neighbors, requested_top_k)
+
+    def candidate_from_ranked_neighbors(
+        self,
+        positions: Sequence[object],
+        distances: Sequence[object],
+    ) -> KnnCandidate:
+        """Apply the frozen decision policy to an exact offline ranking."""
+
+        if (
+            isinstance(positions, (str, bytes))
+            or isinstance(distances, (str, bytes))
+            or len(positions) != self._default_top_k
+            or len(distances) != self._default_top_k
+        ):
+            raise KnnInputError("Evaluation neighbor ranking is incompatible.")
+        normalized_positions: list[int] = []
+        normalized_distances: list[float] = []
+        for position, distance in zip(positions, distances, strict=True):
+            if (
+                type(position) is not int
+                or position < 0
+                or position >= self.sample_count
+                or isinstance(distance, bool)
+                or not isinstance(distance, (int, float))
+                or not isfinite(float(distance))
+                or float(distance) < 0.0
+            ):
+                raise KnnInputError("Evaluation neighbor ranking is incompatible.")
+            normalized_positions.append(position)
+            normalized_distances.append(float(distance))
+        if len(set(normalized_positions)) != len(normalized_positions):
+            raise KnnInputError("Evaluation neighbor ranking is incompatible.")
+        ordered_keys = tuple(
+            (distance, str(self._neighbor_refs[position]))
+            for position, distance in zip(
+                normalized_positions,
+                normalized_distances,
+                strict=True,
+            )
+        )
+        if ordered_keys != tuple(sorted(ordered_keys)):
+            raise KnnInputError("Evaluation neighbor ranking is incompatible.")
+        neighbors = tuple(
+            KnnCandidateNeighbor(
+                neighbor_ref=str(self._neighbor_refs[position]),
+                rank=rank,
+                target_slug=self._labels[
+                    int(self._target_indices[position])
+                ].target_slug,
+                distance=distance,
+            )
+            for rank, (position, distance) in enumerate(
+                zip(normalized_positions, normalized_distances, strict=True),
+                start=1,
+            )
+        )
+        return self._candidate_from_neighbors(neighbors, self._default_top_k)
+
+    def _candidate_from_neighbors(
+        self,
+        neighbors: tuple[KnnCandidateNeighbor, ...],
+        requested_top_k: int,
+    ) -> KnnCandidate:
         decision_neighbors = neighbors[: min(self._default_top_k, len(neighbors))]
         target_slug, winning_vote_share, vote_margin = _select_candidate(
             decision_neighbors
