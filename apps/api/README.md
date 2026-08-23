@@ -826,36 +826,58 @@ locais e ignorados.
 ## Baseline k-NN local
 
 `prescriptive_maintenance.modeling` implementa a baseline determinística da
-SEN-42. `fit_knn_model()` aceita somente uma partição com as 18 features na ordem
-canônica e `y`; qualquer coluna, ordem, tipo ou número não finito divergente é
-recusado. O contrato canônico não admite ausências, portanto a baseline não
-imputa. `StandardScaler` é ajustado exclusivamente no DataFrame de treino
-recebido, e o mesmo estado serializado transforma toda inferência.
+SEN-42 e a política de abstenção da SEN-51. `fit_knn_model()` aceita a partição
+de treino com as 18 features na ordem canônica e `y`, seu hash SHA-256 e,
+opcionalmente, a validação acompanhada do próprio hash. Qualquer coluna, ordem,
+tipo ou número não finito divergente é recusado. O contrato canônico não admite
+ausências, portanto a baseline não imputa. `StandardScaler` é ajustado
+exclusivamente no treino; validação nunca refaz seu estado.
 
 A busca exata em memória usa apenas distância euclidiana no espaço padronizado.
-`top_k` respeita o limite público de 1 a 10 e a quantidade de linhas disponível;
-distâncias empatadas usam a referência opaca e votos empatados usam soma de
-distâncias e depois o target canônico. O suporte é somente a proporção de votos
-da classe vencedora no top-k, explicitamente não probabilística.
+O `default_top_k` versionado define o conjunto decisório calibrado. O `top_k`
+público, entre 1 e 10, controla somente quantos vizinhos opacos são devolvidos
+como evidência; alterar esse valor não muda target, suporte, margem, disposição
+ou motivo de abstenção. A busca calcula o maior dos dois limites, decide com os
+primeiros `default_top_k` disponíveis e recorta apenas a evidência solicitada.
+Distâncias empatadas usam a referência opaca e votos empatados usam soma de
+distâncias e depois o target canônico. O suporte heurístico combina a proporção
+de votos da classe vencedora e a menor distância em relação ao limiar; não é
+probabilidade ou autorização para agir. A margem de voto registra a diferença
+normalizada entre a primeira e a segunda classe.
+
+Os limiares são congelados com até 512 posições determinísticas de validação.
+Sem validação, cenários locais e sintéticos com pelo menos duas linhas usam
+somente leave-one-out real do treino; uma linha isolada falha em vez de ser
+rotulada como leave-one-out. O teste não faz parte da assinatura do fit.
+Distância estritamente acima
+do limiar, classe candidata rara ou margem menor ou igual ao limiar geram,
+respectivamente, `distance_out_of_distribution`, `rare_class_support` ou
+`inconclusive_vote`. A política, os quantis, os limites e os hashes das
+partições fazem parte do `model_id`.
 
 O núcleo preserva `target_slug` internamente. `KnnModelPortAdapter` traduz cada
 classe por uma tabela bijetiva de `fault_code` seguro, construída no fit,
 validada contra colisões e serializada. `normal_target_labels` é configuração
-explícita e deve ser subconjunto das classes de treino. O adapter produz apenas
-`NORMAL` ou `FAULT`; não implementa abstenção ou `OUT_OF_DISTRIBUTION`.
+explícita e deve ser subconjunto das classes de treino. Um candidato aceito
+produz `NORMAL` ou `FAULT`. Uma abstenção produz `OUT_OF_DISTRIBUTION`, sem
+diagnóstico e sem chave de recuperação: disponibilidade documental não altera a
+decisão do modelo.
 
 `save_knn_model()` grava somente `manifest.json` e três arrays `.npy`, sempre em
 destino ignorado quando está dentro de uma worktree. O manifesto fixa schema,
 compatibilidade, configuração, labels, estado completo do `StandardScaler`,
-hashes e `model_id`. `load_knn_model()` usa `allow_pickle=False`, rejeita arquivo
-ausente ou extra, bytes alterados, campos duplicados, versões incompatíveis,
-arrays inválidos e identidade divergente. Os arrays reais contêm derivados por
-registro e nunca devem ser versionados ou publicados.
+política de abstenção, hashes e `model_id`. `load_knn_model()` usa
+`allow_pickle=False`, rejeita arquivo ausente ou extra, bytes alterados, campos
+duplicados, thresholds inválidos, versões incompatíveis, arrays inválidos e
+identidade divergente. A carga também exige que leave-one-out use o hash do
+treino e a contagem determinística esperada, enquanto validação deve possuir
+hash distinto. Os arrays reais contêm derivados por registro e nunca
+devem ser versionados ou publicados.
 
 A aplicação HTTP continua injetando fakes sintéticos; a baseline e seu adapter
 não são conectados às rotas nesta tarefa. As decisões e métricas temporais
-sanitizadas estão em
-[`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md).
+sanitizadas estão em [`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md)
+e [`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).
 
 ## Verificações
 

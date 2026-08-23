@@ -131,6 +131,14 @@ class AnalysisService:
         top_k: int,
     ) -> AnalysisResult:
         if prediction.disposition is ModelDisposition.OUT_OF_DISTRIBUTION:
+            if (
+                prediction.abstention_reason is None
+                or prediction.diagnosis is not None
+                or prediction.retrieval_key is not None
+            ):
+                raise AnalysisUnavailableError(
+                    "The analysis model returned an incomplete abstention."
+                )
             return OutOfDistributionAnalysisResult(
                 analysis_id="ana_synthetic_out_of_distribution",
                 outcome=AnalysisOutcome.OUT_OF_DISTRIBUTION,
@@ -155,6 +163,11 @@ class AnalysisService:
                         message="Nenhuma prescrição foi produzida.",
                     ),
                 ),
+            )
+
+        if prediction.abstention_reason is not None:
+            raise AnalysisUnavailableError(
+                "The analysis model returned a contradictory abstention."
             )
 
         diagnosis = prediction.diagnosis

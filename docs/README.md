@@ -17,6 +17,7 @@ sem repetir extensamente a mesma orientação.
 | [`validation/foundation-clean-room.md`](validation/foundation-clean-room.md) | Evidências históricas da validação da Foundation em clone público limpo e adendo sobre o fluxo de promoção. |
 | [`validation/data-pipeline.md`](validation/data-pipeline.md) | Encerramento da EPIC 2: decisões, gates e evidências sanitizadas do pipeline canônico SEN-41. |
 | [`validation/knn-baseline.md`](validation/knn-baseline.md) | Decisões, integridade e avaliação temporal sanitizada da baseline k-NN SEN-42. |
+| [`validation/knn-abstention.md`](validation/knn-abstention.md) | Política versionada de suporte, novidade e abstenção do k-NN SEN-51, com avaliação temporal agregada. |
 | [`../data/README.md`](../data/README.md) | Preparação local, integridade e fronteira dos materiais e fixtures. |
 
 ## Idioma
