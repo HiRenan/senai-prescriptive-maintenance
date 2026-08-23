@@ -45,6 +45,7 @@ _GIT_COMMAND_TIMEOUT_SECONDS: Final = 10
 _WINDOWS_REPARSE_POINT_ATTRIBUTE: Final = cast(
     int, getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 )
+_MISSING_FILE_ATTRIBUTES: Final = object()
 
 
 class SourceDocumentError(Exception):
@@ -374,12 +375,33 @@ def _reject_unsafe_output_components(path: Path) -> None:
         try:
             is_symlink = stat.S_ISLNK(metadata.st_mode)
             is_junction = current.is_junction()
-            file_attributes = cast(int, getattr(metadata, "st_file_attributes", 0))
-            is_reparse_point = bool(file_attributes & _WINDOWS_REPARSE_POINT_ATTRIBUTE)
         except (AttributeError, OSError, TypeError, ValueError):
             raise SourceDocumentOutputError("Local output path is unsafe.") from None
+        is_reparse_point = _metadata_is_reparse_point(metadata)
         if is_symlink or is_junction or is_reparse_point:
             raise SourceDocumentOutputError("Local output path is unsafe.")
+
+
+def _metadata_is_reparse_point(metadata: os.stat_result) -> bool:
+    try:
+        file_attributes = getattr(
+            metadata,
+            "st_file_attributes",
+            _MISSING_FILE_ATTRIBUTES,
+        )
+    except Exception:
+        raise SourceDocumentOutputError("Local output path is unsafe.") from None
+    if file_attributes is _MISSING_FILE_ATTRIBUTES:
+        if _is_windows_platform():
+            raise SourceDocumentOutputError("Local output path is unsafe.")
+        return False
+    if type(file_attributes) is not int:
+        raise SourceDocumentOutputError("Local output path is unsafe.")
+    return bool(file_attributes & _WINDOWS_REPARSE_POINT_ATTRIBUTE)
+
+
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
 
 
 def _require_git_ignored(artifact_path: Path) -> None:

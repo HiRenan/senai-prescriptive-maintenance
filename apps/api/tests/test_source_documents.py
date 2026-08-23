@@ -62,6 +62,15 @@ class _MalformedOcrAdapter:
         return OcrPageResult(text=cast(str, 42), confidences=(0.99,))
 
 
+class _UnreadableFileAttributes:
+    def __init__(self, st_mode: int) -> None:
+        self.st_mode = st_mode
+
+    @property
+    def st_file_attributes(self) -> int:
+        raise OSError
+
+
 def _escape_pdf_text(text: str) -> bytes:
     return (text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")).encode(
         "ascii"
@@ -358,6 +367,90 @@ def test_rejects_synthetic_reparse_component_before_writing(
 
     assert str(raised.value) == "Local output path is unsafe."
     assert not output_directory.exists()
+
+
+@pytest.mark.parametrize(
+    "metadata_case",
+    ("missing", "bool", "invalid_type", "read_error"),
+)
+def test_windows_rejects_invalid_file_attributes_before_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata_case: str,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path
+    )
+    inspected_component = output_directory.parent
+    original_lstat = Path.lstat
+
+    def lstat_with_invalid_file_attributes(path: Path) -> os.stat_result:
+        metadata = original_lstat(path)
+        if path != inspected_component:
+            return metadata
+        if metadata_case == "missing":
+            synthetic_metadata: object = SimpleNamespace(st_mode=metadata.st_mode)
+        elif metadata_case == "bool":
+            synthetic_metadata = SimpleNamespace(
+                st_mode=metadata.st_mode,
+                st_file_attributes=False,
+            )
+        elif metadata_case == "invalid_type":
+            synthetic_metadata = SimpleNamespace(
+                st_mode=metadata.st_mode,
+                st_file_attributes="1024",
+            )
+        else:
+            synthetic_metadata = _UnreadableFileAttributes(metadata.st_mode)
+        return cast(os.stat_result, synthetic_metadata)
+
+    monkeypatch.setattr(Path, "lstat", lstat_with_invalid_file_attributes)
+    monkeypatch.setattr(
+        "prescriptive_maintenance.data.source_documents._is_windows_platform",
+        lambda: True,
+    )
+
+    with pytest.raises(SourceDocumentOutputError) as raised:
+        extract_source_documents(
+            source_directory=source_directory,
+            manifest_path=manifest_path,
+            output_directory=output_directory,
+        )
+
+    assert str(raised.value) == "Local output path is unsafe."
+    assert not output_directory.exists()
+
+
+def test_non_windows_allows_missing_file_attributes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory, manifest_path, output_directory = _prepare_synthetic_sources(
+        tmp_path
+    )
+    inspected_component = output_directory.parent
+    original_lstat = Path.lstat
+
+    def lstat_without_file_attributes(path: Path) -> os.stat_result:
+        metadata = original_lstat(path)
+        if path != inspected_component:
+            return metadata
+        return cast(os.stat_result, SimpleNamespace(st_mode=metadata.st_mode))
+
+    monkeypatch.setattr(Path, "lstat", lstat_without_file_attributes)
+    monkeypatch.setattr(
+        "prescriptive_maintenance.data.source_documents._is_windows_platform",
+        lambda: False,
+    )
+
+    result = extract_source_documents(
+        source_directory=source_directory,
+        manifest_path=manifest_path,
+        output_directory=output_directory,
+    )
+
+    assert result.status is SourceDocumentInventoryStatus.COMPLETED
+    assert result.inventory_path.exists()
 
 
 def test_fails_closed_when_output_component_inspection_errors(
