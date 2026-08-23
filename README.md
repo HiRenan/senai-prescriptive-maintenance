@@ -394,7 +394,9 @@ sem enfraquecer a fronteira dos materiais locais.
 - [`docs/README.md`](docs/README.md): índice e convenções da documentação;
 - [`docs/adr/README.md`](docs/adr/README.md): decisões arquiteturais;
 - [`docs/architecture/README.md`](docs/architecture/README.md): estado técnico
-  implementado.
+  implementado;
+- [`docs/validation/document-pipeline.md`](docs/validation/document-pipeline.md):
+  decisões, evidências e limites do pipeline documental governado da SEN-4;
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 
