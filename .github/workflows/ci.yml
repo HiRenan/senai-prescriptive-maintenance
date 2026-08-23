@@ -70,6 +70,9 @@ jobs:
       - name: Run quality checks
         run: uv run --frozen poe check
 
+      - name: Run product golden E2E
+        run: uv run --frozen poe golden-e2e
+
       - name: Run repository hooks
         run: uv run --frozen poe hooks
 
@@ -127,6 +130,9 @@ jobs:
 
       - name: Run essential tests
         run: uv run --frozen poe test
+
+      - name: Run product golden E2E
+        run: uv run --frozen poe golden-e2e
 
       - name: Run cross-platform smoke
         run: uv run --frozen poe smoke

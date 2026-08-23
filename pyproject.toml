@@ -78,6 +78,10 @@ sequence = [
   "test",
 ]
 
+[tool.poe.tasks.golden-e2e]
+help = "Executa o golden set sintético dos cinco estados e do ciclo documental."
+script = "scripts.product_golden:main()"
+
 [tool.poe.tasks.data-build]
 help = "Constrói o dataset canônico local em destino explícito."
 cmd = "python -m prescriptive_maintenance.data.cli build --input ${input} --manifest ${manifest} --inventory ${inventory} --baseline-json ${baseline_json} --baseline-markdown ${baseline_markdown} --lock ${lock} --output ${output}"
