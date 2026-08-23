@@ -291,6 +291,58 @@ def test_provider_cannot_replace_the_model_diagnosis() -> None:
     assert private_fault_code not in repr(result)
 
 
+@pytest.mark.parametrize("warning_code", ["evidence_gap", "evidence_conflict"])
+def test_supported_output_rejects_evidence_limitation_warnings(
+    warning_code: str,
+) -> None:
+    output = json.loads(_valid_output_text())
+    output["warnings"] = [
+        {
+            "code": warning_code,
+            "message": "Synthetic evidence limitation contradicts support.",
+            "citations": [],
+        }
+    ]
+    output_text = json.dumps(output)
+
+    with pytest.raises(InvalidProviderOutputError):
+        validate_provider_output(
+            output_text,
+            allowed_evidence_ids=frozenset({"synthetic-evidence-1"}),
+            expected_fault_code="synthetic-bearing-fault",
+        )
+
+    result = generate_prescription(
+        _synthetic_request(),
+        FakeGenerationProvider(response_text=output_text),
+    )
+
+    assert result.status is GenerationStatus.INVALID_OUTPUT
+    assert result.diagnostic_support is None
+    assert result.prescriptions == ()
+    assert result.warnings[0].code == "invalid_output"
+
+
+def test_supported_output_allows_generic_warnings() -> None:
+    output = json.loads(_valid_output_text())
+    output["warnings"] = [
+        {
+            "code": "synthetic_notice",
+            "message": "Synthetic generic provider notice.",
+            "citations": [],
+        }
+    ]
+
+    result = generate_prescription(
+        _synthetic_request(),
+        FakeGenerationProvider(response_text=json.dumps(output)),
+    )
+
+    assert result.status is GenerationStatus.GENERATED
+    assert result.prescriptions
+    assert result.warnings[0].code == "synthetic_notice"
+
+
 def test_insufficient_evidence_cannot_include_a_prescription() -> None:
     invalid_output = json.dumps(
         {
@@ -327,7 +379,10 @@ def test_insufficient_evidence_cannot_include_a_prescription() -> None:
     assert result.prescriptions == ()
 
 
-def test_valid_evidence_gap_has_an_explicit_non_generated_outcome() -> None:
+@pytest.mark.parametrize("warning_code", ["evidence_gap", "evidence_conflict"])
+def test_valid_evidence_limitation_has_an_explicit_non_generated_outcome(
+    warning_code: str,
+) -> None:
     gap_output = json.dumps(
         {
             "schema_version": GENERATION_CONTRACT_VERSION,
@@ -340,7 +395,7 @@ def test_valid_evidence_gap_has_an_explicit_non_generated_outcome() -> None:
             "prescriptions": [],
             "warnings": [
                 {
-                    "code": "evidence_gap",
+                    "code": warning_code,
                     "message": "Synthetic evidence is insufficient.",
                     "citations": [],
                 }

@@ -184,22 +184,27 @@ class ProviderOutput(_StrictContractModel):
     warnings: tuple[GenerationWarning, ...]
 
     @model_validator(mode="after")
-    def validate_evidence_gap_shape(self) -> Self:
+    def validate_evidence_limitation_shape(self) -> Self:
+        warning_codes = {warning.code for warning in self.warnings}
+        evidence_limitation_codes = warning_codes.intersection(
+            {EVIDENCE_GAP_WARNING_CODE, EVIDENCE_CONFLICT_WARNING_CODE}
+        )
         if self.diagnostic_support.status is DiagnosticSupportStatus.SUPPORTED:
+            if evidence_limitation_codes:
+                raise ValueError(
+                    "Supported diagnosis cannot contain evidence limitation warnings."
+                )
             if not self.prescriptions:
                 raise ValueError(
                     "A supported diagnosis requires at least one prescription."
                 )
             return self
 
-        warning_codes = {warning.code for warning in self.warnings}
         if self.prescriptions:
             raise ValueError(
                 "Insufficient evidence cannot produce maintenance prescriptions."
             )
-        if not warning_codes.intersection(
-            {EVIDENCE_GAP_WARNING_CODE, EVIDENCE_CONFLICT_WARNING_CODE}
-        ):
+        if not evidence_limitation_codes:
             raise ValueError(
                 "Insufficient evidence requires an evidence limitation warning."
             )
