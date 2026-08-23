@@ -125,7 +125,7 @@ def _bedrock_response(
     return response
 
 
-def test_prompt_v1_requires_only_evidence_citations_and_explicit_gaps() -> None:
+def test_prompt_v2_requires_untrusted_evidence_citations_and_explicit_gaps() -> None:
     normalized_prompt = GENERATION_SYSTEM_PROMPT.text.casefold()
 
     assert GENERATION_SYSTEM_PROMPT.version == GENERATION_SYSTEM_PROMPT_VERSION
@@ -137,6 +137,7 @@ def test_prompt_v1_requires_only_evidence_citations_and_explicit_gaps() -> None:
     assert "conhecimento externo" in normalized_prompt
     assert "dado imutável" in normalized_prompt
     assert "nunca prescreva sem evidência citada" in normalized_prompt
+    assert "untrusted-document-envelope.v1" in GENERATION_SYSTEM_PROMPT.text
 
 
 def test_generation_request_rejects_duplicate_evidence_ids() -> None:

@@ -51,8 +51,8 @@ class Evidence(_StrictContractModel):
 
     evidence_id: Identifier
     source_id: Identifier
-    locator: ShortText
-    content: EvidenceText
+    locator: ShortText = Field(repr=False)
+    content: EvidenceText = Field(repr=False)
 
     @field_validator("locator", "content")
     @classmethod
@@ -64,7 +64,7 @@ class Diagnosis(_StrictContractModel):
     """Immutable diagnosis produced upstream by the diagnostic model."""
 
     fault_code: Identifier
-    technical_summary: DiagnosticText
+    technical_summary: DiagnosticText = Field(repr=False)
 
     @field_validator("technical_summary")
     @classmethod
@@ -76,7 +76,7 @@ class GenerationRequest(_StrictContractModel):
     """Upstream diagnosis plus evidence supplied by a retrieval boundary."""
 
     diagnosis: Diagnosis
-    evidence: tuple[Evidence, ...] = ()
+    evidence: tuple[Evidence, ...] = Field(default=(), repr=False)
 
     @model_validator(mode="after")
     def validate_evidence_budget(self) -> Self:
@@ -111,7 +111,7 @@ class DiagnosticSupport(_StrictContractModel):
 
     fault_code: Identifier
     status: DiagnosticSupportStatus
-    assessment: NarrativeText | None
+    assessment: NarrativeText | None = Field(repr=False)
     citations: tuple[Citation, ...] = ()
 
     @field_validator("assessment")
@@ -138,8 +138,8 @@ class DiagnosticSupport(_StrictContractModel):
 class Prescription(_StrictContractModel):
     """One evidence-grounded maintenance action and its rationale."""
 
-    action: NarrativeText
-    rationale: NarrativeText
+    action: NarrativeText = Field(repr=False)
+    rationale: NarrativeText = Field(repr=False)
     citations: tuple[Citation, ...]
 
     @field_validator("action", "rationale")
@@ -160,7 +160,7 @@ class GenerationWarning(_StrictContractModel):
     """Bounded warning that can optionally reference supplied evidence."""
 
     code: Identifier
-    message: ShortText
+    message: ShortText = Field(repr=False)
     citations: tuple[Citation, ...] = ()
 
     @field_validator("message")

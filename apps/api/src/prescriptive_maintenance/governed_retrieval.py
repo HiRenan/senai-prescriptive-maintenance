@@ -214,6 +214,19 @@ class ApprovedKnowledgeRetriever(Protocol):
     ) -> KnowledgeSnapshotRetrievalResult: ...
 
 
+class ApprovedSnapshotCurrentness(Protocol):
+    """Exact snapshot check offered by the approved retrieval implementation."""
+
+    def snapshots_are_current(
+        self,
+        *,
+        fault_class: str,
+        mapping_version: str,
+        mapping_sha256: str,
+        evidence: tuple[RankedKnowledgeSnapshot, ...],
+    ) -> bool | None: ...
+
+
 class RagKnowledgeRetrievalPort(Protocol):
     """Retrieval decision consumed by future RAG orchestration."""
 
@@ -338,6 +351,62 @@ class GovernedKnowledgeRetrievalService:
             mapping_sha256=result.mapping_sha256,
             evidence=tuple(evidence),
         )
+
+    def snapshots_are_current(
+        self,
+        *,
+        fault_class: str,
+        policy_schema_version: int,
+        policy_version: str,
+        minimum_score: float,
+        policy_sha256: str,
+        mapping_version: str,
+        mapping_sha256: str,
+        evidence: tuple[RankedKnowledgeSnapshot, ...],
+    ) -> bool | None:
+        """Revalidate one exact governed result without search or reranking."""
+
+        try:
+            candidate = GovernedRetrievalResult(
+                status=GovernedRetrievalStatus.EVIDENCE,
+                fault_class=fault_class,
+                policy_schema_version=policy_schema_version,
+                policy_version=policy_version,
+                minimum_score=minimum_score,
+                policy_sha256=policy_sha256,
+                mapping_version=mapping_version,
+                mapping_sha256=mapping_sha256,
+                evidence=evidence,
+            )
+        except Exception:
+            return False
+        if (
+            candidate.policy_schema_version != self._policy.schema_version
+            or candidate.policy_version != self._policy.policy_version
+            or candidate.minimum_score != self._policy.minimum_score
+            or candidate.policy_sha256 != self._policy.policy_sha256
+            or candidate.fault_class is None
+            or candidate.mapping_version is None
+            or candidate.mapping_sha256 is None
+        ):
+            return False
+        try:
+            currentness = cast(
+                ApprovedSnapshotCurrentness,
+                self._approved_retrieval,
+            )
+            current = cast(
+                object,
+                currentness.snapshots_are_current(
+                    fault_class=candidate.fault_class,
+                    mapping_version=candidate.mapping_version,
+                    mapping_sha256=candidate.mapping_sha256,
+                    evidence=candidate.evidence,
+                ),
+            )
+            return current if type(current) is bool or current is None else None
+        except Exception:
+            return None
 
     def _result(
         self,

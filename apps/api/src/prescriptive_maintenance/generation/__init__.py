@@ -26,9 +26,18 @@ from prescriptive_maintenance.generation.contracts import (
     ProviderOutput,
     ProviderUsage,
 )
+from prescriptive_maintenance.generation.guardrails import (
+    GuardedGenerationResult,
+    RagGuardrailService,
+    RagGuardrailStatus,
+    RagRefusal,
+    RagRefusalCode,
+    SnapshotCurrentnessPort,
+)
 from prescriptive_maintenance.generation.prompt import (
     GENERATION_SYSTEM_PROMPT,
     GENERATION_SYSTEM_PROMPT_VERSION,
+    UNTRUSTED_DOCUMENT_ENVELOPE_VERSION,
     VersionedPrompt,
     build_provider_request,
 )
@@ -58,6 +67,7 @@ __all__ = [
     "MAX_EVIDENCE_CONTENT_CHARACTERS",
     "MAX_EVIDENCE_ITEMS",
     "MAX_TOTAL_EVIDENCE_CONTENT_CHARACTERS",
+    "UNTRUSTED_DOCUMENT_ENVELOPE_VERSION",
     "BedrockClientFactory",
     "BedrockGenerationProvider",
     "BedrockProviderConfig",
@@ -74,6 +84,7 @@ __all__ = [
     "GenerationResult",
     "GenerationStatus",
     "GenerationWarning",
+    "GuardedGenerationResult",
     "InvalidProviderOutputError",
     "Prescription",
     "ProviderConfigurationError",
@@ -84,6 +95,11 @@ __all__ = [
     "ProviderRequest",
     "ProviderResponse",
     "ProviderUsage",
+    "RagGuardrailService",
+    "RagGuardrailStatus",
+    "RagRefusal",
+    "RagRefusalCode",
+    "SnapshotCurrentnessPort",
     "VersionedPrompt",
     "build_provider_request",
     "generate_prescription",

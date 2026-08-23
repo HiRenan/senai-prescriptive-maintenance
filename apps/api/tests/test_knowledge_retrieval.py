@@ -28,6 +28,15 @@ from prescriptive_maintenance.document_lifecycle import (
     InMemoryDocumentRepository,
     ProcessingStep,
 )
+from prescriptive_maintenance.generation import (
+    GENERATION_CONTRACT_VERSION,
+    Diagnosis,
+    ProviderRequest,
+    ProviderResponse,
+    RagGuardrailService,
+    RagGuardrailStatus,
+    RagRefusalCode,
+)
 from prescriptive_maintenance.generation.contracts import (
     MAX_EVIDENCE_CONTENT_CHARACTERS,
     MAX_TOTAL_EVIDENCE_CONTENT_CHARACTERS,
@@ -487,6 +496,31 @@ def _knowledge_result(
         mapping_sha256="3" * 64,
         evidence=evidence,
         reason=reason,
+    )
+
+
+def _supported_provider_response(request: ProviderRequest) -> ProviderResponse:
+    citation = {"evidence_id": request.allowed_evidence_ids[0]}
+    return ProviderResponse(
+        output_text=json.dumps(
+            {
+                "schema_version": GENERATION_CONTRACT_VERSION,
+                "diagnostic_support": {
+                    "fault_code": request.diagnosis_fault_code,
+                    "status": "supported",
+                    "assessment": "Synthetic evidence supports the diagnosis.",
+                    "citations": [citation],
+                },
+                "prescriptions": [
+                    {
+                        "action": "Inspect the synthetic asset.",
+                        "rationale": "The cited synthetic source warrants review.",
+                        "citations": [citation],
+                    }
+                ],
+                "warnings": [],
+            }
+        )
     )
 
 
@@ -1970,3 +2004,235 @@ def test_concurrent_content_replacement_fails_before_governed_materialization() 
     assert result.evidence == ()
     assert original.chunk.content not in repr(result)
     assert replacement.chunk.content not in repr(result)
+
+
+def test_exact_snapshot_currentness_revalidates_without_rescoring_or_reranking() -> (
+    None
+):
+    lifecycle, documents = _governance()
+    approved_v1 = _approved_document(lifecycle, identity=_DOC_APPROVED)
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="currentness",
+        content="Synthetic evidence revalidated around generation.",
+    )
+    chunks = InMemoryChunkRepository()
+    chunks.save((record,))
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.9})
+    approved = _retrieval(
+        documents=documents,
+        chunks=chunks,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+    retrieved = approved.retrieve_snapshots(_FAULT_CLASS, top_k=1)
+
+    assert retrieved.reason is None
+    assert (
+        approved.snapshots_are_current(
+            fault_class=retrieved.fault_class,
+            mapping_version=retrieved.mapping_version,
+            mapping_sha256=retrieved.mapping_sha256,
+            evidence=retrieved.evidence,
+        )
+        is True
+    )
+    assert scorer.calls == [(_FAULT_CLASS, record.chunk.chunk_id, record.chunk.content)]
+
+    registered_v2 = _register(
+        lifecycle,
+        identity=_DOC_APPROVED,
+        content_hash=_HASH_V2,
+        version=2,
+        expected_revision=approved_v1.revision,
+    )
+    pending_v2 = _pending(lifecycle, registered_v2, version=2)
+    _approve(lifecycle, pending_v2, version=2)
+
+    assert (
+        approved.snapshots_are_current(
+            fault_class=retrieved.fault_class,
+            mapping_version=retrieved.mapping_version,
+            mapping_sha256=retrieved.mapping_sha256,
+            evidence=retrieved.evidence,
+        )
+        is False
+    )
+    assert scorer.calls == [(_FAULT_CLASS, record.chunk.chunk_id, record.chunk.content)]
+
+
+def test_guardrail_rejects_real_lifecycle_change_during_provider_call() -> None:
+    lifecycle, documents = _governance()
+    approved_v1 = _approved_document(lifecycle, identity=_DOC_APPROVED)
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="provider_race",
+        content="Synthetic v1 evidence current before provider execution.",
+    )
+    chunks = InMemoryChunkRepository()
+    chunks.save((record,))
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.9})
+    approved = _retrieval(
+        documents=documents,
+        chunks=chunks,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+    governed = GovernedKnowledgeRetrievalService(
+        approved_retrieval=approved,
+        policy=build_governed_retrieval_policy(
+            policy_version=_POLICY_VERSION,
+            minimum_score=0.75,
+        ),
+    )
+    retrieval = governed.retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+
+    class ApprovingV2Provider:
+        call_count = 0
+
+        def generate(self, request: ProviderRequest) -> ProviderResponse:
+            self.call_count += 1
+            registered_v2 = _register(
+                lifecycle,
+                identity=_DOC_APPROVED,
+                content_hash=_HASH_V2,
+                version=2,
+                expected_revision=approved_v1.revision,
+            )
+            pending_v2 = _pending(lifecycle, registered_v2, version=2)
+            _approve(lifecycle, pending_v2, version=2)
+            return _supported_provider_response(request)
+
+    provider = ApprovingV2Provider()
+    result = RagGuardrailService(
+        provider=provider,
+        snapshot_currentness=governed,
+    ).generate(
+        diagnosis=Diagnosis(
+            fault_code=_FAULT_CLASS,
+            technical_summary="Synthetic immutable diagnostic result.",
+        ),
+        retrieval=retrieval,
+    )
+
+    assert retrieval.status is GovernedRetrievalStatus.EVIDENCE
+    assert provider.call_count == 1
+    assert result.status is RagGuardrailStatus.REFUSED
+    assert result.generation is None
+    assert result.refusal is not None
+    assert result.refusal.code is RagRefusalCode.STALE_EVIDENCE
+    assert scorer.calls == [(_FAULT_CLASS, record.chunk.chunk_id, record.chunk.content)]
+    assert record.chunk.content not in repr(result)
+
+
+def test_guardrail_maps_real_index_unavailability_before_provider() -> None:
+    lifecycle, documents = _governance()
+    _approved_document(lifecycle, identity=_DOC_APPROVED)
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="pre_currentness_unavailable",
+        content="Synthetic evidence hidden by a pre-provider index failure.",
+    )
+    chunks = _StaticChunkReader(records=(record,))
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.9})
+    approved = _retrieval(
+        documents=documents,
+        chunks=chunks,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+    governed = _governed_retrieval(approved)
+    retrieval = governed.retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+    private_marker = "SYNTHETIC_PRIVATE_PRE_INDEX_FAILURE"
+    chunks.failure = RuntimeError(private_marker)
+
+    class UnexpectedProvider:
+        call_count = 0
+
+        def generate(self, request: ProviderRequest) -> ProviderResponse:
+            self.call_count += 1
+            return _supported_provider_response(request)
+
+    provider = UnexpectedProvider()
+    result = RagGuardrailService(
+        provider=provider,
+        snapshot_currentness=governed,
+    ).generate(
+        diagnosis=Diagnosis(
+            fault_code=_FAULT_CLASS,
+            technical_summary="Synthetic immutable diagnostic result.",
+        ),
+        retrieval=retrieval,
+    )
+
+    assert provider.call_count == 0
+    assert result.status is RagGuardrailStatus.REFUSED
+    assert result.refusal is not None
+    assert result.refusal.code is RagRefusalCode.CURRENTNESS_UNAVAILABLE
+    assert private_marker not in repr(result)
+    assert record.chunk.content not in repr(result)
+
+
+def test_guardrail_maps_real_index_unavailability_after_provider() -> None:
+    lifecycle, documents = _governance()
+    _approved_document(lifecycle, identity=_DOC_APPROVED)
+    record = _record(
+        document_id=_DOC_APPROVED,
+        source_hash=_HASH_V1,
+        chunk_key="post_currentness_unavailable",
+        content="Synthetic evidence hidden by a post-provider index failure.",
+    )
+    chunks = _StaticChunkReader(records=(record,))
+    scorer = _RecordingScorer(scores={record.chunk.chunk_id: 0.9})
+    approved = _retrieval(
+        documents=documents,
+        chunks=chunks,
+        scorer=scorer,
+        mappings={_FAULT_CLASS: (_DOC_APPROVED,)},
+    )
+    governed = _governed_retrieval(approved)
+    retrieval = governed.retrieve(
+        disposition=ModelDisposition.FAULT,
+        fault_class=_FAULT_CLASS,
+        top_k=1,
+    )
+    private_marker = "SYNTHETIC_PRIVATE_POST_INDEX_FAILURE"
+
+    class FailingIndexProvider:
+        call_count = 0
+
+        def generate(self, request: ProviderRequest) -> ProviderResponse:
+            self.call_count += 1
+            chunks.failure = RuntimeError(private_marker)
+            return _supported_provider_response(request)
+
+    provider = FailingIndexProvider()
+    result = RagGuardrailService(
+        provider=provider,
+        snapshot_currentness=governed,
+    ).generate(
+        diagnosis=Diagnosis(
+            fault_code=_FAULT_CLASS,
+            technical_summary="Synthetic immutable diagnostic result.",
+        ),
+        retrieval=retrieval,
+    )
+
+    assert provider.call_count == 1
+    assert result.status is RagGuardrailStatus.REFUSED
+    assert result.generation is None
+    assert result.refusal is not None
+    assert result.refusal.code is RagRefusalCode.CURRENTNESS_UNAVAILABLE
+    assert private_marker not in repr(result)
+    assert record.chunk.content not in repr(result)
