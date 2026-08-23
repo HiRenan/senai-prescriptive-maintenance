@@ -51,6 +51,10 @@ A versão atual contém:
   `consume_banner_source_audited()` vincula a baseline aos fingerprints
   efetivamente observados no recibo pre/post, enquanto
   `consume_banner_source()` preserva a interface compatível;
+- uma porta tipada e somente leitura para inventariar e extrair `Doc1.pdf` a
+  `Doc6.pdf`, com validação pre/post pelo manifesto, rastreabilidade e qualidade
+  por página, extração nativa preferencial e adapter RapidOCR local, explícito e
+  lazy; as saídas reais ficam somente em diretório ignorado;
 - um catálogo v2 das 26 colunas e um contrato Pandera estrito, ordenado e sem
   coerção implícita, acompanhado de relatórios sanitizados de violação;
 - um profiler determinístico sobre DataFrames já carregados, com indicadores
@@ -95,7 +99,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, settings, camada de dados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, settings, camada de dados com extração local rastreável dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |

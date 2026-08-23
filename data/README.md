@@ -139,6 +139,23 @@ para gerar o manifesto; ela não concede licença para publicar esses materiais.
 Todos os valores e textos das fixtures são sintéticos e independentes dos
 materiais originais.
 
+## Derivados locais dos documentos PDF
+
+A porta `extract_source_documents()` pode gravar o inventário e as extrações
+de `Doc1.pdf` a `Doc6.pdf` em um destino explícito sob
+`data/processed/documents/`. Antes de executar contra materiais reais,
+confirme a proteção do destino:
+
+```powershell
+git check-ignore -v data/processed/documents/inventory.v1.json
+```
+
+O inventário contém metadados e estados por documento; cada artefato de
+extração contém o texto derivado e as métricas por página. Ambos permanecem
+locais e ignorados. Não use `git add -f`, não publique esses JSON e não copie
+seu conteúdo para logs, testes ou documentação. Os testes da porta constroem
+PDFs, engines e respostas OCR inteiramente sintéticos em diretórios temporários.
+
 ## Artefatos públicos derivados aprovados
 
 A baseline pública é o par exato abaixo, identificado pelo SHA-256 aprovado no
