@@ -1,0 +1,152 @@
+name: AWS demo plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "SHA completo igual ao HEAD atual de main"
+        required: true
+        type: string
+      confirmation:
+        description: "Confirmação explícita da operação sem apply"
+        required: true
+        type: choice
+        options:
+          - PLAN-AWS-DEMO
+
+permissions: {}
+
+concurrency:
+  group: aws-demo-state
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: AWS demo / Plan preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Reject unauthorized repository, event, ref, or input
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_REF: refs/heads/main
+          EXPECTED_REPOSITORY: HiRenan/senai-prescriptive-maintenance
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]
+          [[ "$GITHUB_REPOSITORY" == "$EXPECTED_REPOSITORY" ]]
+          [[ "$GITHUB_REF" == "$EXPECTED_REF" ]]
+          [[ "$CONFIRMATION" == "PLAN-AWS-DEMO" ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" == "$GITHUB_SHA" ]]
+
+      - name: Check out main for ancestry verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: main
+
+      - name: Require the immutable SHA to equal the checked out main HEAD
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+
+      - name: Require the protected plan environment before OIDC
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python infra/aws/demo/scripts/github_environment_gate.py aws-demo-plan
+
+  plan:
+    name: AWS demo / Protected plan
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: aws-demo-plan
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the immutable source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Revalidate the current main revision after approval
+        shell: bash
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_NO_REPLACE_OBJECTS: "1"
+          GIT_TERMINAL_PROMPT: "0"
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags --no-recurse-submodules --depth=1 \
+            origin refs/heads/main:refs/remotes/origin/main
+          [[ "$(git rev-parse --verify HEAD)" == "$SOURCE_SHA" ]]
+          [[ "$(git rev-parse --verify refs/remotes/origin/main)" == "$SOURCE_SHA" ]]
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up Terraform 1.15.9
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.15.9"
+          terraform_wrapper: false
+
+      - name: Assume the plan role through OIDC
+        id: aws-creds
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          action-timeout-s: 120
+          allowed-account-ids: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          aws-region: ${{ vars.AWS_DEMO_REGION }}
+          mask-aws-account-id: true
+          retry-max-attempts: 3
+          output-credentials: true
+          role-duration-seconds: 3600
+          role-session-name: sen68-plan-${{ github.run_id }}
+          role-to-assume: ${{ vars.AWS_DEMO_PLAN_ROLE_ARN }}
+          unset-current-credentials: true
+
+      - name: Produce and audit a private plan without apply
+        shell: bash
+        env:
+          AWS_DEMO_ACCOUNT_ID: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          AWS_DEMO_SESSION_EXPIRATION: ${{ steps.aws-creds.outputs.aws-expiration }}
+          AWS_DEMO_SOURCE_SHA: ${{ inputs.source_sha }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEMO_REGION }}
+          AWS_REGION: ${{ vars.AWS_DEMO_REGION }}
+          TF_STATE_BUCKET: ${{ vars.AWS_DEMO_STATE_BUCKET }}
+          TF_STATE_KEY: demo/sen-67/terraform.tfstate
+          TF_VAR_availability_zone: ${{ vars.AWS_DEMO_AVAILABILITY_ZONE }}
+          TF_VAR_aws_account_id: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          TF_VAR_aws_region: ${{ vars.AWS_DEMO_REGION }}
+          TF_VAR_budget_alert_email: ${{ secrets.AWS_DEMO_BUDGET_ALERT_EMAIL }}
+          TF_VAR_enable_bedrock: "false"
+          TF_VAR_frontend_certificate_arn: ${{ vars.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}
+          TF_VAR_frontend_domain_name: ${{ vars.AWS_DEMO_FRONTEND_DOMAIN_NAME }}
+          TF_VAR_monthly_budget_usd: "15"
+          TF_VAR_name_prefix: senai-pm
+          TF_VAR_owner: demo-team
+        run: |
+          set -euo pipefail
+          python infra/aws/demo/scripts/aws_delivery.py plan

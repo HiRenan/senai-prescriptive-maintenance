@@ -1,0 +1,991 @@
+{
+  "schema_version": "aws-demo-delivery.v1",
+  "sen46_baseline_sha": "d45bcabfb6de89c6bac2ec2aa6180bce353be7c1",
+  "repository": {
+    "full_name": "HiRenan/senai-prescriptive-maintenance",
+    "owner_id": "107653306",
+    "repository_id": "1342357031",
+    "deployment_ref": "refs/heads/main",
+    "immutable_subject_required": true
+  },
+  "deploy_modes": {
+    "foundation": {
+      "command": "foundation",
+      "confirmation": "FOUNDATION-AWS-DEMO",
+      "requires_buildx_context": false,
+      "requires_sen46_baseline": false,
+      "requires_smoke_token": false
+    },
+    "runtime": {
+      "command": "deploy",
+      "confirmation": "DEPLOY-AWS-DEMO",
+      "requires_buildx_context": true,
+      "requires_sen46_baseline": true,
+      "requires_smoke_token": true
+    }
+  },
+  "terraform_backend": {
+    "state_key": "demo/sen-67/terraform.tfstate",
+    "lock_suffix": ".tflock",
+    "plan_requires_initialized_state": true,
+    "use_lockfile": true
+  },
+  "actions": [
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+    "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c",
+    "docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e",
+    "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e"
+  ],
+  "roles": {
+    "plan": {
+      "environment": "aws-demo-plan",
+      "role_variable": "AWS_DEMO_PLAN_ROLE_ARN",
+      "subject": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-plan",
+      "trust_policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowGitHubActionsPlan",
+            "Effect": "Allow",
+            "Principal": {
+              "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {
+              "StringEquals": {
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                "token.actions.githubusercontent.com:sub": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-plan"
+              }
+            }
+          }
+        ]
+      },
+      "permission_policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadStateBucket",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetBucketLocation",
+              "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}"
+          },
+          {
+            "Sid": "ReadStateObject",
+            "Effect": "Allow",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}/${TF_STATE_KEY}"
+          },
+          {
+            "Sid": "ManageStateLockOnly",
+            "Effect": "Allow",
+            "Action": [
+              "s3:DeleteObject",
+              "s3:GetObject",
+              "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}/${TF_STATE_KEY}.tflock"
+          },
+          {
+            "Sid": "ReadDemoBucketLocations",
+            "Effect": "Allow",
+            "Action": "s3:GetBucketLocation",
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-documents-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+            ]
+          },
+          {
+            "Sid": "ReadDemoBuckets",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetBucketCORS",
+              "s3:GetBucketOwnershipControls",
+              "s3:GetBucketPolicy",
+              "s3:GetBucketPublicAccessBlock",
+              "s3:GetBucketTagging",
+              "s3:GetBucketVersioning",
+              "s3:GetEncryptionConfiguration",
+              "s3:GetLifecycleConfiguration"
+            ],
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-documents-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+            ]
+          },
+          {
+            "Sid": "ReadDemoEcrRepository",
+            "Effect": "Allow",
+            "Action": [
+              "ecr:DescribeRepositories",
+              "ecr:GetLifecyclePolicy",
+              "ecr:ListTagsForResource"
+            ],
+            "Resource": "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${NAME_PREFIX}-demo/api"
+          },
+          {
+            "Sid": "ReadDemoIamRoles",
+            "Effect": "Allow",
+            "Action": [
+              "iam:GetRole",
+              "iam:GetRolePolicy",
+              "iam:ListAttachedRolePolicies",
+              "iam:ListRolePolicies",
+              "iam:ListRoleTags"
+            ],
+            "Resource": [
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-execution",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-task",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-worker-task"
+            ]
+          },
+          {
+            "Sid": "ReadDemoResources",
+            "Effect": "Allow",
+            "Action": [
+              "apigateway:GET",
+              "budgets:ViewBudget",
+              "cloudfront:GetCachePolicy",
+              "cloudfront:GetDistribution",
+              "cloudfront:GetOriginAccessControl",
+              "cloudfront:GetResponseHeadersPolicy",
+              "cloudfront:ListTagsForResource",
+              "cloudwatch:DescribeAlarms",
+              "cloudwatch:ListTagsForResource",
+              "cognito-idp:DescribeUserPool",
+              "cognito-idp:DescribeUserPoolClient",
+              "cognito-idp:ListTagsForResource",
+              "ec2:DescribeAvailabilityZones",
+              "ec2:DescribeRouteTables",
+              "ec2:DescribeSecurityGroupRules",
+              "ec2:DescribeSecurityGroups",
+              "ec2:DescribeSubnets",
+              "ec2:DescribeVpcAttribute",
+              "ec2:DescribeVpcEndpoints",
+              "ec2:DescribeVpcs",
+              "ecs:DescribeClusters",
+              "ecs:DescribeServices",
+              "ecs:DescribeTaskDefinition",
+              "ecs:ListTagsForResource",
+              "logs:DescribeLogGroups",
+              "logs:ListTagsForResource",
+              "servicediscovery:GetNamespace",
+              "servicediscovery:GetService",
+              "servicediscovery:ListTagsForResource",
+              "sqs:GetQueueAttributes",
+              "sqs:GetQueueUrl",
+              "sqs:ListQueueTags",
+              "sts:GetCallerIdentity"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+    },
+    "deploy": {
+      "environment": "aws-demo-deploy",
+      "role_variable": "AWS_DEMO_DEPLOY_ROLE_ARN",
+      "subject": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-deploy",
+      "trust_policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowGitHubActionsDeploy",
+            "Effect": "Allow",
+            "Principal": {
+              "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {
+              "StringEquals": {
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                "token.actions.githubusercontent.com:sub": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-deploy"
+              }
+            }
+          }
+        ]
+      },
+      "permission_policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadStateBucket",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetBucketLocation",
+              "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}"
+          },
+          {
+            "Sid": "ManageStateObject",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject",
+              "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}/${TF_STATE_KEY}"
+          },
+          {
+            "Sid": "ManageStateLockOnly",
+            "Effect": "Allow",
+            "Action": [
+              "s3:DeleteObject",
+              "s3:GetObject",
+              "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}/${TF_STATE_KEY}.tflock"
+          },
+          {
+            "Sid": "S3Locs",
+            "Effect": "Allow",
+            "Action": "s3:GetBucketLocation",
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-documents-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+            ]
+          },
+          {
+            "Sid": "EcrAuth",
+            "Effect": "Allow",
+            "Action": "ecr:GetAuthorizationToken",
+            "Resource": "*"
+          },
+          {
+            "Sid": "ApiSlr",
+            "Effect": "Allow",
+            "Action": "iam:CreateServiceLinkedRole",
+            "Resource": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/aws-service-role/ops.apigateway.amazonaws.com/AWSServiceRoleForAPIGateway*",
+            "Condition": {
+              "StringEquals": {
+                "iam:AWSServiceName": "ops.apigateway.amazonaws.com"
+              }
+            }
+          },
+          {
+            "Sid": "EcsSlr",
+            "Effect": "Allow",
+            "Action": "iam:CreateServiceLinkedRole",
+            "Resource": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS*",
+            "Condition": {
+              "StringEquals": {
+                "iam:AWSServiceName": "ecs.amazonaws.com"
+              }
+            }
+          },
+          {
+            "Sid": "Buckets",
+            "Effect": "Allow",
+            "Action": [
+              "s3:CreateBucket",
+              "s3:GetBucketCORS",
+              "s3:GetBucketOwnershipControls",
+              "s3:GetBucketPolicy",
+              "s3:GetBucketPublicAccessBlock",
+              "s3:GetBucketTagging",
+              "s3:GetBucketVersioning",
+              "s3:GetEncryptionConfiguration",
+              "s3:GetLifecycleConfiguration",
+              "s3:ListBucket",
+              "s3:PutBucketOwnershipControls",
+              "s3:PutBucketPolicy",
+              "s3:PutBucketPublicAccessBlock",
+              "s3:PutBucketTagging",
+              "s3:PutBucketVersioning",
+              "s3:PutEncryptionConfiguration",
+              "s3:PutLifecycleConfiguration"
+            ],
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-documents-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+            ]
+          },
+          {
+            "Sid": "EcrReads",
+            "Effect": "Allow",
+            "Action": [
+              "ecr:BatchGetImage",
+              "ecr:DescribeImages",
+              "ecr:DescribeRepositories",
+              "ecr:GetLifecyclePolicy",
+              "ecr:ListTagsForResource"
+            ],
+            "Resource": "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${NAME_PREFIX}-demo/api"
+          },
+          {
+            "Sid": "EcrCreate",
+            "Effect": "Allow",
+            "Action": [
+              "ecr:CreateRepository",
+              "ecr:TagResource"
+            ],
+            "Resource": "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${NAME_PREFIX}-demo/api",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "EcrWrites",
+            "Effect": "Allow",
+            "Action": [
+              "ecr:BatchCheckLayerAvailability",
+              "ecr:CompleteLayerUpload",
+              "ecr:InitiateLayerUpload",
+              "ecr:PutImage",
+              "ecr:PutImageTagMutability",
+              "ecr:PutLifecyclePolicy",
+              "ecr:UploadLayerPart"
+            ],
+            "Resource": "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${NAME_PREFIX}-demo/api",
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "ReadDemoIamRoles",
+            "Effect": "Allow",
+            "Action": [
+              "iam:GetRole",
+              "iam:GetRolePolicy",
+              "iam:ListAttachedRolePolicies",
+              "iam:ListRolePolicies",
+              "iam:ListRoleTags"
+            ],
+            "Resource": [
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-execution",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-task",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-worker-task"
+            ]
+          },
+          {
+            "Sid": "IamCreate",
+            "Effect": "Allow",
+            "Action": [
+              "iam:CreateRole",
+              "iam:TagRole"
+            ],
+            "Resource": [
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-execution",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-task",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-worker-task"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "IamWrites",
+            "Effect": "Allow",
+            "Action": [
+              "iam:PutRolePolicy",
+              "iam:UpdateAssumeRolePolicy"
+            ],
+            "Resource": [
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-execution",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-task",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-worker-task"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "PassEcs",
+            "Effect": "Allow",
+            "Action": "iam:PassRole",
+            "Resource": [
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-execution",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-task",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-worker-task"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "iam:PassedToService": "ecs-tasks.amazonaws.com"
+              }
+            }
+          },
+          {
+            "Sid": "GlobalReads",
+            "Effect": "Allow",
+            "Action": [
+              "apigateway:GET",
+              "budgets:ViewBudget",
+              "cloudfront:GetCachePolicy",
+              "cloudfront:GetDistribution",
+              "cloudfront:GetOriginAccessControl",
+              "cloudfront:GetResponseHeadersPolicy",
+              "cloudfront:ListTagsForResource",
+              "cloudwatch:DescribeAlarms",
+              "cloudwatch:ListTagsForResource",
+              "cognito-idp:DescribeUserPool",
+              "cognito-idp:DescribeUserPoolClient",
+              "cognito-idp:ListTagsForResource",
+              "ec2:DescribeAvailabilityZones",
+              "ec2:DescribeRouteTables",
+              "ec2:DescribeSecurityGroupRules",
+              "ec2:DescribeSecurityGroups",
+              "ec2:DescribeSubnets",
+              "ec2:DescribeVpcAttribute",
+              "ec2:DescribeVpcEndpoints",
+              "ec2:DescribeVpcs",
+              "ecs:DescribeClusters",
+              "ecs:DescribeServices",
+              "ecs:DescribeTaskDefinition",
+              "ecs:ListTagsForResource",
+              "logs:DescribeLogGroups",
+              "logs:ListTagsForResource",
+              "servicediscovery:GetNamespace",
+              "servicediscovery:GetOperation",
+              "servicediscovery:GetService",
+              "servicediscovery:ListTagsForResource",
+              "sqs:GetQueueAttributes",
+              "sqs:GetQueueUrl",
+              "sqs:ListQueueTags",
+              "sts:GetCallerIdentity"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Sid": "GlobalNew",
+            "Effect": "Allow",
+            "Action": [
+              "cloudfront:CreateDistribution",
+              "cognito-idp:CreateUserPool",
+              "servicediscovery:CreatePrivateDnsNamespace"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "CfPolicyNew",
+            "Effect": "Allow",
+            "Action": [
+              "cloudfront:CreateCachePolicy",
+              "cloudfront:CreateOriginAccessControl",
+              "cloudfront:CreateResponseHeadersPolicy"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Sid": "ApiCreate",
+            "Effect": "Allow",
+            "Action": "apigateway:POST",
+            "Resource": "arn:aws:apigateway:${AWS_REGION}::/apis",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "ApiWrites",
+            "Effect": "Allow",
+            "Action": [
+              "apigateway:PATCH",
+              "apigateway:POST"
+            ],
+            "Resource": "arn:aws:apigateway:${AWS_REGION}::/apis/*",
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "BudgetRW",
+            "Effect": "Allow",
+            "Action": "budgets:ModifyBudget",
+            "Resource": "arn:aws:budgets::${AWS_ACCOUNT_ID}:budget/${NAME_PREFIX}-demo-monthly-cost"
+          },
+          {
+            "Sid": "TaggedRW",
+            "Effect": "Allow",
+            "Action": [
+              "cloudfront:UpdateDistribution",
+              "cloudwatch:TagResource",
+              "ec2:AssociateRouteTable",
+              "ec2:AuthorizeSecurityGroupEgress",
+              "ec2:AuthorizeSecurityGroupIngress",
+              "ec2:ModifySubnetAttribute",
+              "ec2:ModifyVpcAttribute",
+              "ecs:DeregisterTaskDefinition",
+              "ecs:UpdateClusterSettings",
+              "ecs:UpdateService",
+              "logs:PutRetentionPolicy",
+              "logs:TagResource",
+              "servicediscovery:TagResource",
+              "sqs:SetQueueAttributes",
+              "sqs:TagQueue"
+            ],
+            "Resource": [
+              "arn:aws:cloudfront::${AWS_ACCOUNT_ID}:distribution/*",
+              "arn:aws:cloudwatch:${AWS_REGION}:${AWS_ACCOUNT_ID}:alarm:${NAME_PREFIX}-demo-*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
+              "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
+              "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/*/${NAME_PREFIX}-demo*",
+              "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
+              "arn:aws:sqs:${AWS_REGION}:${AWS_ACCOUNT_ID}:${NAME_PREFIX}-demo-*"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "CfTagCreate",
+            "Effect": "Allow",
+            "Action": "cloudfront:TagResource",
+            "Resource": "arn:aws:cloudfront::${AWS_ACCOUNT_ID}:distribution/*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "CognitoRW",
+            "Effect": "Allow",
+            "Action": [
+              "cognito-idp:CreateUserPoolClient",
+              "cognito-idp:UpdateUserPool",
+              "cognito-idp:UpdateUserPoolClient"
+            ],
+            "Resource": "arn:aws:cognito-idp:${AWS_REGION}:${AWS_ACCOUNT_ID}:userpool/*"
+          },
+          {
+            "Sid": "CognitoTag",
+            "Effect": "Allow",
+            "Action": "cognito-idp:TagResource",
+            "Resource": "arn:aws:cognito-idp:${AWS_REGION}:${AWS_ACCOUNT_ID}:userpool/*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "AlarmCreate",
+            "Effect": "Allow",
+            "Action": "cloudwatch:PutMetricAlarm",
+            "Resource": "arn:aws:cloudwatch:${AWS_REGION}:${AWS_ACCOUNT_ID}:alarm:${NAME_PREFIX}-demo-*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "CloudMapNew",
+            "Effect": "Allow",
+            "Action": "servicediscovery:CreateService",
+            "Resource": [
+              "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:namespace/*",
+              "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:service/*"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "Ec2Create",
+            "Effect": "Allow",
+            "Action": [
+              "ec2:CreateRouteTable",
+              "ec2:CreateSecurityGroup",
+              "ec2:CreateSubnet",
+              "ec2:CreateTags",
+              "ec2:CreateVpc",
+              "ec2:CreateVpcEndpoint"
+            ],
+            "Resource": "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "EcsCreate",
+            "Effect": "Allow",
+            "Action": [
+              "ecs:CreateCluster",
+              "ecs:CreateService",
+              "ecs:TagResource"
+            ],
+            "Resource": [
+              "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${NAME_PREFIX}-demo",
+              "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:service/${NAME_PREFIX}-demo/${NAME_PREFIX}-demo-api"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "TaskNew",
+            "Effect": "Allow",
+            "Action": "ecs:RegisterTaskDefinition",
+            "Resource": "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/${NAME_PREFIX}-demo-api:*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo",
+                "ecs:task-cpu": "256",
+                "ecs:task-memory": "512"
+              }
+            }
+          },
+          {
+            "Sid": "LogCreate",
+            "Effect": "Allow",
+            "Action": "logs:CreateLogGroup",
+            "Resource": [
+              "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/apigateway/${NAME_PREFIX}-demo",
+              "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/ecs/${NAME_PREFIX}-demo/api"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "QueueCreate",
+            "Effect": "Allow",
+            "Action": "sqs:CreateQueue",
+            "Resource": [
+              "arn:aws:sqs:${AWS_REGION}:${AWS_ACCOUNT_ID}:${NAME_PREFIX}-demo-ingestion",
+              "arn:aws:sqs:${AWS_REGION}:${AWS_ACCOUNT_ID}:${NAME_PREFIX}-demo-ingestion-dlq"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "teardown": {
+      "environment": "aws-demo-teardown",
+      "role_variable": "AWS_DEMO_TEARDOWN_ROLE_ARN",
+      "subject": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-teardown",
+      "trust_policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowGitHubActionsTeardown",
+            "Effect": "Allow",
+            "Principal": {
+              "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {
+              "StringEquals": {
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                "token.actions.githubusercontent.com:sub": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-teardown"
+              }
+            }
+          }
+        ]
+      },
+      "permission_policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadStateBucket",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetBucketLocation",
+              "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}"
+          },
+          {
+            "Sid": "ManageStateObject",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject",
+              "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}/${TF_STATE_KEY}"
+          },
+          {
+            "Sid": "ManageStateLockOnly",
+            "Effect": "Allow",
+            "Action": [
+              "s3:DeleteObject",
+              "s3:GetObject",
+              "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}/${TF_STATE_KEY}.tflock"
+          },
+          {
+            "Sid": "ReadDemoBucketLocations",
+            "Effect": "Allow",
+            "Action": "s3:GetBucketLocation",
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-documents-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+            ]
+          },
+          {
+            "Sid": "DestroyDemoBucketObjects",
+            "Effect": "Allow",
+            "Action": [
+              "s3:DeleteObject",
+              "s3:DeleteObjectVersion"
+            ],
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}/*",
+              "arn:aws:s3:::${NAME_PREFIX}-documents-${AWS_ACCOUNT_ID}-${AWS_REGION}/*",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}/*"
+            ]
+          },
+          {
+            "Sid": "DestroyDemoBuckets",
+            "Effect": "Allow",
+            "Action": [
+              "s3:DeleteBucket",
+              "s3:DeleteBucketPolicy",
+              "s3:GetBucketCORS",
+              "s3:GetBucketOwnershipControls",
+              "s3:GetBucketPolicy",
+              "s3:GetBucketPublicAccessBlock",
+              "s3:GetBucketTagging",
+              "s3:GetBucketVersioning",
+              "s3:GetEncryptionConfiguration",
+              "s3:GetLifecycleConfiguration",
+              "s3:ListBucket",
+              "s3:ListBucketVersions",
+              "s3:PutBucketOwnershipControls",
+              "s3:PutBucketPublicAccessBlock",
+              "s3:PutBucketTagging",
+              "s3:PutEncryptionConfiguration",
+              "s3:PutLifecycleConfiguration"
+            ],
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-documents-${AWS_ACCOUNT_ID}-${AWS_REGION}",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+            ]
+          },
+          {
+            "Sid": "DestroyDemoEcrRepository",
+            "Effect": "Allow",
+            "Action": [
+              "ecr:BatchDeleteImage",
+              "ecr:DeleteLifecyclePolicy",
+              "ecr:DeleteRepository",
+              "ecr:DescribeImages",
+              "ecr:DescribeRepositories",
+              "ecr:GetLifecyclePolicy",
+              "ecr:ListTagsForResource"
+            ],
+            "Resource": "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${NAME_PREFIX}-demo/api"
+          },
+          {
+            "Sid": "DestroyDemoIamRoles",
+            "Effect": "Allow",
+            "Action": [
+              "iam:DeleteRole",
+              "iam:DeleteRolePolicy"
+            ],
+            "Resource": [
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-execution",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-task",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-worker-task"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "ReadDemoIamRoles",
+            "Effect": "Allow",
+            "Action": [
+              "iam:GetRole",
+              "iam:GetRolePolicy",
+              "iam:ListAttachedRolePolicies",
+              "iam:ListInstanceProfilesForRole",
+              "iam:ListRolePolicies",
+              "iam:ListRoleTags"
+            ],
+            "Resource": [
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-execution",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-api-task",
+              "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${NAME_PREFIX}-demo-worker-task"
+            ]
+          },
+          {
+            "Sid": "InventoryDemoResourcesGlobal",
+            "Effect": "Allow",
+            "Action": [
+              "apigateway:GET",
+              "budgets:ViewBudget",
+              "cloudfront:GetCachePolicy",
+              "cloudfront:GetDistribution",
+              "cloudfront:GetDistributionConfig",
+              "cloudfront:GetOriginAccessControl",
+              "cloudfront:GetResponseHeadersPolicy",
+              "cloudfront:ListCachePolicies",
+              "cloudfront:ListDistributions",
+              "cloudfront:ListOriginAccessControls",
+              "cloudfront:ListResponseHeadersPolicies",
+              "cloudfront:ListTagsForResource",
+              "cloudwatch:DescribeAlarms",
+              "cloudwatch:ListTagsForResource",
+              "cognito-idp:DescribeUserPool",
+              "cognito-idp:DescribeUserPoolClient",
+              "cognito-idp:ListTagsForResource",
+              "cognito-idp:ListUserPools",
+              "ec2:DescribeRouteTables",
+              "ec2:DescribeSecurityGroupRules",
+              "ec2:DescribeSecurityGroups",
+              "ec2:DescribeSubnets",
+              "ec2:DescribeVpcAttribute",
+              "ec2:DescribeVpcEndpoints",
+              "ec2:DescribeVpcs",
+              "ecr:DescribeRepositories",
+              "ecs:DescribeClusters",
+              "ecs:DescribeServices",
+              "ecs:DescribeTaskDefinition",
+              "ecs:ListClusters",
+              "ecs:ListTagsForResource",
+              "iam:ListRoles",
+              "logs:DescribeLogGroups",
+              "logs:ListTagsForResource",
+              "resourcegroupstaggingapi:GetResources",
+              "s3:ListAllMyBuckets",
+              "servicediscovery:GetNamespace",
+              "servicediscovery:GetOperation",
+              "servicediscovery:GetService",
+              "servicediscovery:ListNamespaces",
+              "servicediscovery:ListServices",
+              "servicediscovery:ListTagsForResource",
+              "sqs:GetQueueAttributes",
+              "sqs:GetQueueUrl",
+              "sqs:ListQueueTags",
+              "sqs:ListQueues",
+              "sts:GetCallerIdentity"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Sid": "DestroyDemoApiGateway",
+            "Effect": "Allow",
+            "Action": [
+              "apigateway:DELETE",
+              "apigateway:PATCH"
+            ],
+            "Resource": "arn:aws:apigateway:${AWS_REGION}::/apis/*",
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "DestroyDemoBudget",
+            "Effect": "Allow",
+            "Action": "budgets:ModifyBudget",
+            "Resource": "arn:aws:budgets::${AWS_ACCOUNT_ID}:budget/${NAME_PREFIX}-demo-monthly-cost"
+          },
+          {
+            "Sid": "DestroyUntaggableCloudFrontPolicies",
+            "Effect": "Allow",
+            "Action": [
+              "cloudfront:DeleteCachePolicy",
+              "cloudfront:DeleteOriginAccessControl",
+              "cloudfront:DeleteResponseHeadersPolicy"
+            ],
+            "Resource": [
+              "arn:aws:cloudfront::${AWS_ACCOUNT_ID}:cache-policy/*",
+              "arn:aws:cloudfront::${AWS_ACCOUNT_ID}:origin-access-control/*",
+              "arn:aws:cloudfront::${AWS_ACCOUNT_ID}:response-headers-policy/*"
+            ]
+          },
+          {
+            "Sid": "DestroyDemoCognitoClient",
+            "Effect": "Allow",
+            "Action": "cognito-idp:DeleteUserPoolClient",
+            "Resource": "arn:aws:cognito-idp:${AWS_REGION}:${AWS_ACCOUNT_ID}:userpool/*"
+          },
+          {
+            "Sid": "DestroyTaggedDemoResources",
+            "Effect": "Allow",
+            "Action": [
+              "cloudfront:DeleteDistribution",
+              "cloudfront:UntagResource",
+              "cloudfront:UpdateDistribution",
+              "cloudwatch:DeleteAlarms",
+              "cognito-idp:DeleteUserPool",
+              "ec2:DeleteRouteTable",
+              "ec2:DeleteSecurityGroup",
+              "ec2:DeleteSubnet",
+              "ec2:DeleteTags",
+              "ec2:DeleteVpc",
+              "ec2:DeleteVpcEndpoints",
+              "ec2:DisassociateRouteTable",
+              "ec2:RevokeSecurityGroupEgress",
+              "ec2:RevokeSecurityGroupIngress",
+              "ecs:DeleteCluster",
+              "ecs:DeleteService",
+              "ecs:DeregisterTaskDefinition",
+              "ecs:UpdateService",
+              "logs:DeleteLogGroup",
+              "servicediscovery:DeleteNamespace",
+              "servicediscovery:DeleteService",
+              "sqs:DeleteQueue"
+            ],
+            "Resource": [
+              "arn:aws:cloudfront::${AWS_ACCOUNT_ID}:distribution/*",
+              "arn:aws:cloudwatch:${AWS_REGION}:${AWS_ACCOUNT_ID}:alarm:${NAME_PREFIX}-demo-*",
+              "arn:aws:cognito-idp:${AWS_REGION}:${AWS_ACCOUNT_ID}:userpool/*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
+              "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${NAME_PREFIX}-demo",
+              "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:service/${NAME_PREFIX}-demo/${NAME_PREFIX}-demo-api",
+              "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/${NAME_PREFIX}-demo-api:*",
+              "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/apigateway/${NAME_PREFIX}-demo",
+              "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/ecs/${NAME_PREFIX}-demo/api",
+              "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:namespace/*",
+              "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:service/*",
+              "arn:aws:sqs:${AWS_REGION}:${AWS_ACCOUNT_ID}:${NAME_PREFIX}-demo-ingestion",
+              "arn:aws:sqs:${AWS_REGION}:${AWS_ACCOUNT_ID}:${NAME_PREFIX}-demo-ingestion-dlq"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

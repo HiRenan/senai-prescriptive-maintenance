@@ -205,16 +205,17 @@ resource "aws_cognito_user_pool_client" "demo" {
   name         = "${local.name}-public-client"
   user_pool_id = aws_cognito_user_pool.demo.id
 
-  access_token_validity                         = 1
+  access_token_validity                         = 2
   auth_session_validity                         = 3
   enable_propagate_additional_user_context_data = false
   enable_token_revocation                       = true
   explicit_auth_flows = [
+    "ALLOW_ADMIN_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
     "ALLOW_USER_SRP_AUTH",
   ]
   generate_secret               = false
-  id_token_validity             = 1
+  id_token_validity             = 2
   prevent_user_existence_errors = "ENABLED"
   refresh_token_validity        = 1
 
