@@ -36,6 +36,9 @@ A versão atual contém:
   resultados fechados, ciclo documental mínimo, portas internas tipadas e fakes
   inteiramente sintéticos, com snapshot determinístico para futura geração de
   cliente;
+- um domínio documental em memória com os sete estados governados, versões
+  idempotentes por identidade, número e SHA-256, auditoria imutável, relógio UTC
+  injetável e controle otimista de revisão por compare-and-swap;
 - configuração tipada e explícita para ambiente e URL PostgreSQL;
 - PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
   Compose;
@@ -107,7 +110,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, settings, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, settings, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |

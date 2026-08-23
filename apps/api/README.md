@@ -63,6 +63,56 @@ requisição HTTP real e encerra o processo ao final, sem exigir banco ou `.env`
 uv run --frozen poe smoke
 ```
 
+## Domínio do ciclo documental
+
+`prescriptive_maintenance.document_lifecycle` implementa a fronteira interna de
+governança sem alterar os endpoints ou o snapshot OpenAPI v1. A identidade do
+documento é lógica e estável; cada conteúdo recebe um número inteiro sequencial
+e um SHA-256 distinto. O trio identidade, versão e hash preserva a identidade
+idempotente do registro; um replay também precisa repetir o mesmo ator auditável
+para devolver o snapshot existente sem criar versão, revisão ou evento. O
+reprocessamento exige o mesmo hash da versão solicitada.
+
+| Estado atual | Próximo estado | Condição |
+| --- | --- | --- |
+| `received` | `processing` | início explícito do primeiro processamento |
+| `processing` | `pending_approval` | extração e indexação concluídas com sucesso |
+| `processing` | `failed` | falha sanitizada de uma etapa ainda não concluída |
+| `pending_approval` | `approved` | decisão com ator e motivo após os dois gates íntegros |
+| `pending_approval` | `rejected` | decisão com ator e motivo obrigatório |
+| `rejected` | `processing` | reprocessamento que reinicia os dois gates |
+| `failed` | `processing` | retry que preserva etapas concluídas e reinicia somente a falha |
+| `approved` | `superseded` | aprovação atômica de uma versão mais nova |
+| `superseded` | — | estado terminal |
+
+Uma versão nova em processamento, rejeitada ou com falha não desloca a versão
+aprovada vigente. Somente a aprovação da substituta marca a anterior como
+`superseded`; assim, nunca há promoção parcial. A elegibilidade exige ao mesmo
+tempo estado `approved`, vigência e integridade completa de extração e
+indexação. `rejected`, `failed` e `superseded` são sempre inelegíveis, mas seus
+eventos e versões permanecem no histórico.
+
+Uma etapa `succeeded` não pode regredir para `failed`. O reprocessamento de uma
+falha preserva etapas concluídas e reinicia apenas a etapa que falhou; o
+reprocessamento posterior a uma rejeição inicia uma nova passagem dos dois
+gates. Ator, motivos, código de falha, identidade e todos os demais textos de
+auditoria são validados antes de qualquer retorno idempotente. Controles,
+caracteres Unicode de formato, surrogates, noncharacters e texto que não possa
+ser codificado estritamente em UTF-8 são recusados com erros sanitizados.
+
+O serviço recebe um relógio injetável, normaliza seus valores para UTC e rejeita
+tempo ingênuo ou regressivo. O repositório em memória associa cada agregado a
+uma revisão e grava somente por compare-and-swap; uma revisão perdida produz o
+erro estável `document_concurrency_conflict`. Para comandos de transição, uma
+revisão obsoleta só é idempotente quando a revisão seguinte registra exatamente
+a mesma ação, versão, ator, motivo, hash, etapa e código aplicáveis. O CAS
+reconstrói o comando a partir do novo sufixo de auditoria e exige igualdade do
+agregado inteiro. Assim, não aceita estados fabricados nem uma versão aprovada
+marcada `superseded` sem a
+aprovação atômica da substituta. O prefixo histórico e as identidades das versões
+são append-only. Esse repositório não abre conexão com PostgreSQL, e o domínio
+não processa bytes, cria chunks nem expõe novas rotas.
+
 ## Configuração
 
 `prescriptive_maintenance.settings.Settings` carrega explicitamente dois campos
