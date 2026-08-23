@@ -40,6 +40,9 @@ A versão atual contém:
   idempotentes por identidade, número e SHA-256, auditoria imutável, relógio UTC
   injetável e controle otimista de revisão por compare-and-swap;
 - configuração tipada e explícita para ambiente e URL PostgreSQL;
+- persistência mínima e transacional de metadados rastreáveis de análise,
+  documentos, versões, chunks e evidências, com adapter em memória, adapter
+  PostgreSQL, evolução idempotente de versões e migração inicial reversível;
 - PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
   Compose;
 - imagens multi-stage da API e da fronteira web, construídas por bases fixadas
@@ -100,10 +103,10 @@ A versão atual contém:
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, integração da baseline ao fluxo HTTP, índice vetorial, vetores
-integrados à aplicação, recuperação de contexto, execução RAG integrada, chamada
-automática a LLM, autenticação, persistência integrada, readiness,
-infraestrutura AWS, deploy ou interface web.
+aplicação, integração da baseline ou dos adapters persistentes ao fluxo HTTP,
+busca real por vizinhos, vetores integrados à aplicação, recuperação de
+contexto, execução RAG integrada, chamada automática a LLM, autenticação,
+readiness, infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
 
@@ -117,7 +120,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, settings, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco e aplicações em contêineres são opcionais. |
@@ -340,11 +343,10 @@ As seguintes capacidades pertencem à evolução futura e **não estão
 implementadas**:
 
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
-- ingestão contínua ou orquestração do pipeline pela aplicação;
-- persistência da aplicação no PostgreSQL e uso de vetores pelo backend;
-- integração da busca por similaridade ao fluxo HTTP, índice vetorial,
-  recuperação governada de contexto, execução RAG integrada ou configuração
-  operacional de LLM;
+- ingestão contínua ou orquestração do pipeline canônico pela aplicação;
+- integração das rotas HTTP com a persistência, a baseline e o uso de vetores;
+- busca por similaridade, recuperação governada de contexto, execução RAG
+  integrada ou configuração operacional de LLM;
 - autenticação, autorização, readiness e observabilidade de produção;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de

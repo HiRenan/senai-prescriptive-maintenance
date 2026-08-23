@@ -46,10 +46,11 @@ referências opacas e uma página positiva, sem título, caminho ou texto bruto.
 `support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
 medida de confiança.
 
-A aplicação usa fakes determinísticos e inteiramente sintéticos: ela não executa
-modelo, recuperação, geração, persistência nem leitura de arquivos reais. O
-registro documental recebe somente metadados seguros de um PDF e nunca implica
-aprovação. Para regenerar e conferir o snapshot:
+A aplicação HTTP usa fakes determinísticos e inteiramente sintéticos: ela não
+executa modelo, recuperação, geração, persistência nem leitura de arquivos
+reais. O módulo de persistência descrito abaixo é uma fronteira interna ainda
+não ligada às rotas. O registro documental recebe somente metadados seguros de
+um PDF e nunca implica aprovação. Para regenerar e conferir o snapshot:
 
 ```powershell
 uv run --frozen python scripts/generate_openapi.py
@@ -146,6 +147,63 @@ settings = Settings()
 Não há valores padrão para os campos obrigatórios. Ausências e valores inválidos
 produzem `pydantic.ValidationError`; a aplicação e a liveness não instanciam
 `Settings` durante a importação ou a criação do app.
+
+## Persistência mínima
+
+`prescriptive_maintenance.persistence` define agregados imutáveis, repositórios
+tipados e uma unidade de trabalho explícita. `AnalysisMetadata` registra somente
+`analysis_id`, resultado fechado da API v1, `dataset_id`, `model_id`,
+`prompt_id`, `configuration_id`, instante e referências ordenadas de evidência.
+Documentos registram identidade estável; versões registram SHA-256 e instante;
+chunks registram referência opaca e página positiva. A evidência liga a análise
+ao trio documento–versão–chunk por chaves estrangeiras compostas.
+
+`dataset_id` preserva sem prefixo ou transformação o SHA-256 minúsculo de 64
+caracteres produzido pelo pipeline canônico. `evidence_id` preserva o formato do
+contrato de geração e sua unicidade é local à análise, representada pela chave
+composta `(analysis_id, evidence_id)`; o mesmo identificador pode ser reutilizado
+por outra análise sem perder a origem de cada referência.
+
+O esquema não possui features, linhas, vetores, embeddings, texto, conteúdo
+bruto, caminho, nome de arquivo, diagnóstico ou prescrição. Assim, a recuperação
+de uma análise devolve todos os IDs de versão usados sem persistir os materiais
+originais ou dados privados. Um replay com o mesmo ID e os mesmos metadados é
+idempotente; reutilizar o ID com metadados diferentes gera conflito tipado.
+`DocumentRepository.add_version()` acrescenta de forma idempotente uma versão
+imutável e seus chunks a um documento existente. Ele não reescreve nem remove
+histórico: repetir a mesma versão é uma operação vazia, enquanto associar o mesmo
+ID a outro hash, o mesmo hash a outro ID no documento ou reutilizar um ID de chunk
+gera conflito.
+
+`InMemoryUnitOfWork` é o adapter da suíte padrão e não abre rede. Cada unidade
+publica mudanças somente após `commit()` explícito; exceção, saída sem commit ou
+conflito transacional descarta todo o estado preparado. `PostgresUnitOfWork`
+oferece a mesma fronteira sobre uma conexão psycopg com autocommit desabilitado.
+
+A migração `initial_analysis_metadata`, versão 1, é aplicada por `upgrade()` e
+revertida por `downgrade()`. As duas operações são transacionais, verificam o
+checksum da versão aplicada e são idempotentes no alvo atual. O bootstrap do
+Compose continua responsável somente pelo pgvector; migrações da aplicação são
+sempre chamadas explicitamente:
+
+```python
+from psycopg import Connection
+from psycopg.rows import dict_row
+
+from prescriptive_maintenance.persistence import downgrade, upgrade
+from prescriptive_maintenance.persistence.migrations import PostgresRow
+
+connection = Connection[PostgresRow].connect(database_url, row_factory=dict_row)
+upgrade(connection)
+# downgrade(connection)  # retorna o schema ao estado vazio documentado
+connection.close()
+```
+
+O teste PostgreSQL real cria e remove um schema aleatório isolado. Ele é
+opcional e só executa quando
+`PRESCRIPTIVE_MAINTENANCE_TEST_DATABASE_URL` aponta explicitamente para um banco
+de teste; sem essa variável, apenas esses casos de integração são ignorados e a
+suíte padrão permanece integralmente offline.
 
 ## Acesso à fonte tabular
 
