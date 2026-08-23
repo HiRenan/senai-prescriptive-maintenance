@@ -117,6 +117,12 @@ A versão atual contém:
   recuperação, guardrails e UoW somente sob uma autorização imutável, confere
   paridade do ranking, projeta os cinco estados sem fallback, publica apenas
   citações efetivamente usadas e grava o cache local depois do commit;
+- um benchmark local curto e balanceado sobre o `POST /analysis` integrado,
+  com aquecimento separado, passagem temporizada sem tracing, passagem exclusiva
+  de memória em runtime novo, timers injetados em modelo, recuperação e provider,
+  métricas primárias por cenário, mix sintético secundário explícito, p50/p95,
+  erros, pico de alocações Python por requisição e uso sintético distinguido de
+  medição, estimativa e indisponibilidade;
 - um pipeline canônico local e determinístico para `banner.csv`, com 18 features
   de inferência, ledger completo de disposições, agrupamento temporal de
   ocorrências independente do target, partições cronológicas com purga e
@@ -246,6 +252,7 @@ código; `check` é uma sequência fail-fast somente leitura.
 | `uv run --frozen poe typecheck` | Executa Pyright em modo estrito. |
 | `uv run --frozen poe test` | Executa Pytest com cobertura mínima configurada. |
 | `uv run --frozen poe check` | Executa format-check, lint, typecheck e test, nessa ordem. |
+| `uv run --frozen python -m scripts.analysis_benchmark` | Mede localmente a análise integrada com cenários sintéticos e relatório JSON sanitizado. |
 | `uv run --frozen python -m prescriptive_maintenance.data.cli build --help` | Exibe os caminhos explícitos exigidos para construir derivados canônicos locais. |
 | `uv run --frozen python -m prescriptive_maintenance.data.cli check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
 | `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
@@ -426,6 +433,8 @@ sem enfraquecer a fronteira dos materiais locais.
   decisão de uso e limitações do motor k-NN v2.
 - [`docs/validation/analysis-integration.md`](docs/validation/analysis-integration.md):
   binding autorizado, cinco estados, persistência e limites da SEN-46.
+- [`docs/validation/analysis-benchmark.md`](docs/validation/analysis-benchmark.md):
+  método, métricas e limites do benchmark local sintético da SEN-65.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 - [`infra/aws/demo/delivery/README.md`](infra/aws/demo/delivery/README.md):

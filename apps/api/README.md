@@ -953,6 +953,48 @@ commit, e o cache process-local só é publicado depois dele. O relatório com a
 matriz dos cinco estados, decisões, testes e riscos está em
 [`docs/validation/analysis-integration.md`](../../docs/validation/analysis-integration.md).
 
+## Benchmark local da análise
+
+`prescriptive_maintenance.analysis_benchmark` monta a integração por injeção
+explícita e exercita o `POST /analysis` real com duas jornadas inteiramente
+sintéticas: geração aceita e falha de provider projetada como `degraded`.
+Wrappers nas próprias portas medem modelo com paridade do índice, recuperação e
+provider, enquanto o timer HTTP cobre somente o `client.post()` com o payload já
+preparado. A serialização da resposta e o logging operacional da aplicação,
+incluindo serialização JSON e I/O dos handlers de
+`prescriptive_maintenance.requests`, acontecem dentro de `client.post()` e,
+portanto, entram em `http_total`. A validação da resposta e a emissão dos eventos
+de camada do próprio benchmark ocorrem depois dos timers, de modo que um sink
+lento desses eventos não altera as distribuições. Aquecimento e amostras medidas
+permanecem separados, e falhas não entram nos percentis válidos de geração.
+
+O pico de `tracemalloc` vem de uma segunda passagem exclusiva de memória, com
+serviço, aplicação e provider sintético novos. Nenhum timer, percentil, contagem
+de erro ou uso de provider dessa passagem alimenta as métricas temporizadas. A
+janela de memória ainda cobre a serialização da resposta e o logging operacional
+da aplicação; somente preparação da requisição, validação pelo harness e eventos
+de camada do benchmark ficam fora dela.
+
+O resultado liga commit, digest canônico sanitizado da árvore, lock, runtime,
+configuração, seed e bindings sintéticos, revalidando commit, estado e conteúdo
+tracked/untracked dirty e `uv.lock` ao final sem publicar caminhos. A visão
+principal é por cenário; o agregado secundário chama-se
+`synthetic_scenario_mix` e explicita que percentis usam sucessos, enquanto a taxa
+de erro inclui a mistura deliberada. Contadores do fake são `simulated`, custo
+fica `not_available` e o maior pico de `tracemalloc` por requisição representa
+somente alocações Python rastreadas, não RSS ou memória nativa. Nenhum material
+original, artefato local, rede, AWS ou provider pago é acessado. A captura falha
+de forma tipada se o índice contiver `assume-unchanged` ou `skip-worktree`, pois
+essas flags poderiam ocultar bytes rastreados do status:
+
+```powershell
+uv run --frozen python -m scripts.analysis_benchmark
+uv run --frozen python -m scripts.analysis_benchmark --format markdown
+```
+
+O protocolo, a interpretação dos campos e os limites estão em
+[`docs/validation/analysis-benchmark.md`](../../docs/validation/analysis-benchmark.md).
+
 ## Pipeline canônico local
 
 `load_canonical_pipeline_config()` valida a configuração versionada que mapeia
