@@ -1,8 +1,17 @@
 # Scripts
 
-Este diretório contém a automação cross-platform usada pela interface Poe. O
-módulo `smoke.py` usa argumentos estruturados do Poe e subprocessos sem shell,
-portanto mantém a mesma invocação no Windows e no Ubuntu.
+Este diretório contém a automação cross-platform usada pela interface Poe. Os
+módulos usam argumentos estruturados e subprocessos sem shell, portanto mantêm
+a mesma invocação no Windows e no Ubuntu.
+
+`container_audit.py` exporta pelo BuildKit os targets `context-audit` da API e
+da web, compara cada arquivo com sua allowlist esperada e executa os targets
+`builder-audit` sem cache. Assim, a auditoria cobre o contexto real enviado ao
+builder e o filesystem intermediário, não somente a imagem final:
+
+```powershell
+uv run --frozen poe applications-audit
+```
 
 Da raiz, execute o smoke padrão sem banco e sem criar `.env`:
 
@@ -19,6 +28,14 @@ e uma operação vetorial mínima, use:
 
 ```powershell
 uv run --frozen poe smoke --with-services
+```
+
+Quando a topologia completa já foi iniciada por `applications-up`, acrescente a
+validação dos estados healthy, das duas liveness e da igualdade do OpenAPI
+servido pela API com o snapshot v1 rastreado:
+
+```powershell
+uv run --frozen poe smoke --with-services --with-applications
 ```
 
 O smoke nunca inicia, interrompe ou remove recursos Docker. Esse ciclo pertence

@@ -6,10 +6,11 @@ futura para evitar diagramas ou integrações fictícias.
 
 ## Visão geral
 
-O projeto usa um monorepo. O único processo de aplicação implementado é o
-backend FastAPI em `apps/api`, estruturado como base para um monólito modular.
-PostgreSQL/pgvector existe como serviço local independente; a aplicação ainda
-não abre conexão com ele.
+O projeto usa um monorepo. O backend FastAPI em `apps/api` é a aplicação de
+produto implementada e está estruturado como base para um monólito modular. A
+fronteira `apps/web` possui somente um processo operacional de liveness, sem
+interface. PostgreSQL/pgvector existe como serviço local independente; a API
+ainda não abre conexão com ele.
 
 ## Componentes existentes
 
@@ -23,10 +24,12 @@ não abre conexão com ele.
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v1, validação da saída, porta neutra, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não recupera contexto, não faz chamada automática, não lê credenciais, não valida suporte semântico das citações e não contém SDK ou configuração de infraestrutura AWS. |
 | `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados e geração, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
-| `apps/web` | Workspace privado e README de fronteira. | Não contém UI, framework, componentes, estilos, assets ou dependências. |
-| `compose.yaml` | Serviço PostgreSQL 17 com pgvector 0.8.6, bind em loopback, healthcheck e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
+| `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da liveness. | Não inclui dependências de desenvolvimento nem integra persistência. |
+| `apps/web` | Workspace privado, servidor HTTP sem dependências, Dockerfile multi-stage e `GET /health/live`. | Não contém UI, framework, componentes, estilos, assets ou comportamento visual. |
+| `.dockerignore` e `apps/*/Dockerfile.dockerignore` | União segura na raiz e allowlists específicas dos manifests, locks e fontes necessários a cada build. | Excluem todo o restante do monorepo dos contextos; a API inclui somente o README exigido pelos metadados Python. |
+| `compose.yaml` | Topologia API, web e PostgreSQL 17/pgvector 0.8.6, binds em loopback, healthchecks e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
-| `scripts/smoke.py` | Verifica runtimes, importação, `.env.example`, Compose e liveness HTTP; opcionalmente banco/pgvector. | Não inicia nem encerra serviços e não valida funcionalidades futuras. |
+| `scripts/smoke.py` | Verifica runtimes, importação, `.env.example`, Compose e liveness HTTP; opcionalmente banco/pgvector, contêineres e igualdade do OpenAPI v1. | Não inicia nem encerra serviços e não valida funcionalidades futuras. |
 | `data/source-manifest.json` | Nomes, tamanhos e hashes dos materiais locais. | Não contém nem redistribui os arquivos originais. |
 | `data/fixtures/` | Uma fixture tabular e um relato textual, ambos sintéticos. | Não são amostras dos materiais originais nem dados de produção. |
 | `data/inventories/banner/<source-sha>/fault-labels.v1.json` | Inventário categórico determinístico dos 151 raws, com frequência global, normalização, slug, colisões, versões, recibos e ID de conteúdo. | Não contém ocorrência, identificador, tempo, sensor ou medição e não define equivalência semântica. |
@@ -55,6 +58,19 @@ O caminho mínimo validado é:
 4. quando o PostgreSQL já está iniciado por `services-up`,
    `uv run --frozen poe smoke --with-services` também verifica o healthcheck, a
    extensão pgvector e uma operação vetorial mínima.
+
+O caminho containerizado adicional é:
+
+1. `uv run --frozen poe applications-audit` exporta os contextos filtrados reais
+   e audita os filesystems dos builders;
+2. `uv run --frozen poe applications-build` constrói API e web com bases por
+   digest e locks congelados;
+3. `uv run --frozen poe applications-up` inicia PostgreSQL, API e web e aguarda
+   os três healthchecks;
+4. `uv run --frozen poe smoke --with-services --with-applications` verifica o
+   banco, as liveness da API e da web e o OpenAPI v1 servido;
+5. `uv run --frozen poe services-down` remove contêineres e rede sem apagar o
+   volume PostgreSQL.
 
 O processo Uvicorn usado pelo smoke escuta apenas em loopback e em uma porta
 efêmera. O serviço PostgreSQL publica a porta somente em `127.0.0.1` e persiste
@@ -91,8 +107,8 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 
 ## Fronteiras atuais
 
-- **Aplicação:** FastAPI e configuração são código de produção; smoke e Compose
-  são suporte ao desenvolvimento e à validação.
+- **Aplicação:** FastAPI e configuração são código de produção; Dockerfiles,
+  smoke e Compose são suporte ao empacotamento, desenvolvimento e validação.
 - **Contrato de análise:** schemas, portas e orquestração são executáveis, mas os
   resultados vêm somente de fakes sintéticos; vizinhos pertencem ao modelo e
   citações pertencem à evidência documental, com referências opacas de documento,
@@ -101,7 +117,8 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
   com CAS e para chunks, além de contrato de escrita pgvector injetável para
   chunks; não existe cliente, SQL, migração ou persistência integrada ao banco
   da aplicação.
-- **Web:** `apps/web` reserva o limite do workspace; não existe frontend.
+- **Web:** `apps/web` reserva o limite do workspace e oferece somente liveness
+  operacional para o contêiner; não existe frontend ou rota visual.
 - **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
   categórico aprovado e visão derivada da política são públicos; originais e
   extrações dos PDFs e demais derivados permanecem locais e ignorados.

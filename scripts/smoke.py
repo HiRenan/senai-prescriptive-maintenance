@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 ENV_EXAMPLE: Final = REPOSITORY_ROOT / ".env.example"
+OPENAPI_SNAPSHOT: Final = REPOSITORY_ROOT / "apps" / "api" / "openapi" / "v1.json"
 LOOPBACK_HOST: Final = "127.0.0.1"
 EXPECTED_LIVENESS_BODY: Final = b'{"status":"ok"}'
 APPLICATION_ENVIRONMENT_VARIABLES: Final = (
@@ -32,6 +33,7 @@ APPLICATION_ENVIRONMENT_VARIABLES: Final = (
 STARTUP_TIMEOUT_SECONDS: Final = 15.0
 REQUEST_TIMEOUT_SECONDS: Final = 1.0
 SHUTDOWN_TIMEOUT_SECONDS: Final = 10.0
+MAX_OPENAPI_RESPONSE_BYTES: Final = 2 * 1024 * 1024
 
 
 class SmokeFailure(RuntimeError):
@@ -366,7 +368,139 @@ def _check_services() -> None:
     print("Serviços: PostgreSQL healthy e pgvector 0.8.6 verificados.")
 
 
-def _run_smoke(with_services: bool) -> None:
+def _application_host_port(variable_name: str, default: int) -> int:
+    raw_value = os.environ.get(variable_name, str(default))
+    if re.fullmatch(r"[1-9]\d{0,4}", raw_value) is None:
+        raise SmokeFailure(f"{variable_name} deve ser uma porta TCP válida.")
+
+    port = int(raw_value)
+    if port > 65535:
+        raise SmokeFailure(f"{variable_name} deve ser uma porta TCP válida.")
+    return port
+
+
+def _read_http_response(
+    url: str,
+    failure_subject: str,
+    *,
+    max_body_bytes: int,
+) -> tuple[int, str, bytes]:
+    # Callers build URLs only from fixed loopback hosts and validated numeric ports.
+    request = Request(url, method="GET")  # noqa: S310
+    try:
+        with urlopen(  # noqa: S310
+            request,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        ) as response:
+            status_code = response.status
+            content_type = response.headers.get_content_type()
+            body = response.read(max_body_bytes + 1)
+    except HTTPError as error:
+        raise SmokeFailure(
+            f"{failure_subject} respondeu com status HTTP {error.code}."
+        ) from error
+    except URLError as error:
+        raise SmokeFailure(f"{failure_subject} não respondeu em loopback.") from error
+
+    if len(body) > max_body_bytes:
+        raise SmokeFailure(f"{failure_subject} excedeu o limite de resposta.")
+    return status_code, content_type, body
+
+
+def _check_container_liveness(url: str, service_name: str) -> None:
+    status_code, content_type, body = _read_http_response(
+        url,
+        f"A liveness do contêiner {service_name}",
+        max_body_bytes=len(EXPECTED_LIVENESS_BODY),
+    )
+    if status_code != 200:
+        raise SmokeFailure(
+            f"A liveness do contêiner {service_name} respondeu com status "
+            f"HTTP {status_code}."
+        )
+    if content_type != "application/json":
+        raise SmokeFailure(
+            f"A liveness do contêiner {service_name} não respondeu com JSON."
+        )
+    if body != EXPECTED_LIVENESS_BODY:
+        raise SmokeFailure(
+            f"A liveness do contêiner {service_name} respondeu com corpo inesperado."
+        )
+
+
+def _check_containerized_applications() -> None:
+    records = _parse_compose_records(
+        _run_command(
+            (
+                _resolve_executable("docker", "Docker não encontrado."),
+                "compose",
+                "ps",
+                "--format",
+                "json",
+                "api",
+                "web",
+            ),
+            "Falha ao consultar os serviços de aplicação.",
+        )
+    )
+    expected_services = {"api", "web"}
+    records_by_service = {
+        service: record
+        for record in records
+        if isinstance(service := record.get("Service"), str)
+    }
+    if set(records_by_service) != expected_services:
+        raise SmokeFailure(
+            "Os contêineres api e web já iniciados não foram encontrados."
+        )
+    if any(
+        record.get("State") != "running" or record.get("Health") != "healthy"
+        for record in records_by_service.values()
+    ):
+        raise SmokeFailure("Os contêineres api e web não estão saudáveis.")
+
+    api_port = _application_host_port(
+        "PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT",
+        8000,
+    )
+    web_port = _application_host_port(
+        "PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT",
+        3000,
+    )
+    _check_container_liveness(
+        f"http://{LOOPBACK_HOST}:{api_port}/health/live",
+        "api",
+    )
+    _check_container_liveness(
+        f"http://{LOOPBACK_HOST}:{web_port}/health/live",
+        "web",
+    )
+
+    status_code, content_type, body = _read_http_response(
+        f"http://{LOOPBACK_HOST}:{api_port}/openapi.json",
+        "O contrato OpenAPI do contêiner api",
+        max_body_bytes=MAX_OPENAPI_RESPONSE_BYTES,
+    )
+    if status_code != 200 or content_type != "application/json":
+        raise SmokeFailure(
+            "O contrato OpenAPI do contêiner api respondeu incorretamente."
+        )
+    try:
+        expected_openapi: object = json.loads(OPENAPI_SNAPSHOT.read_bytes())
+        actual_openapi: object = json.loads(body)
+    except (OSError, json.JSONDecodeError) as error:
+        raise SmokeFailure(
+            "Não foi possível comparar o contrato OpenAPI do contêiner api."
+        ) from error
+    if actual_openapi != expected_openapi:
+        raise SmokeFailure(
+            "O contrato OpenAPI do contêiner api diverge do snapshot v1."
+        )
+
+    print("Aplicações: api, web e contrato OpenAPI v1 verificados em contêineres.")
+
+
+def _run_smoke(with_services: bool, with_applications: bool) -> None:
     _check_runtimes()
     _load_application()
     _check_example_configuration()
@@ -374,16 +508,23 @@ def _run_smoke(with_services: bool) -> None:
     _check_liveness()
     if with_services:
         _check_services()
+    if with_applications:
+        _check_containerized_applications()
 
 
-def main(with_services: bool = False, extra_args: str | None = None) -> None:
+def main(
+    with_services: bool = False,
+    with_applications: bool = False,
+    extra_args: str | None = None,
+) -> None:
     """Run smoke checks and translate failures into a concise non-zero result."""
     try:
         if extra_args:
             raise SmokeFailure(
-                "Argumentos adicionais não são aceitos; use apenas --with-services."
+                "Argumentos adicionais não são aceitos; use somente as opções "
+                "de smoke documentadas."
             )
-        _run_smoke(with_services)
+        _run_smoke(with_services, with_applications)
     except SmokeFailure as error:
         print(f"Smoke falhou: {error}", file=sys.stderr)
         raise SystemExit(1) from None
@@ -394,5 +535,13 @@ def main(with_services: bool = False, extra_args: str | None = None) -> None:
         )
         raise SystemExit(1) from None
 
-    service_mode = "com serviços" if with_services else "sem serviços"
-    print(f"Smoke concluído com sucesso ({service_mode}).")
+    enabled_modes = [
+        name
+        for enabled, name in (
+            (with_services, "serviços"),
+            (with_applications, "aplicações em contêineres"),
+        )
+        if enabled
+    ]
+    selected_mode = ", ".join(enabled_modes) if enabled_modes else "base local"
+    print(f"Smoke concluído com sucesso ({selected_mode}).")
