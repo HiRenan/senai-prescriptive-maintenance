@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, NoReturn, cast
+from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Body, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -75,24 +75,12 @@ async def handle_request_validation_error(
     request: Request,
     error: RequestValidationError,
 ) -> JSONResponse:
-    del request
-    issues: list[ValidationIssue] = []
-    for raw_error in error.errors():
-        location = cast(tuple[object, ...], raw_error.get("loc", ()))
-        public_location = tuple(
-            str(part) for part in location if part not in {"body", "path", "query"}
-        )
-        issues.append(
-            ValidationIssue(
-                field=".".join(public_location) or "request",
-                code=str(raw_error.get("type", "invalid")),
-            )
-        )
+    del request, error
     response = ErrorResponse(
         error=ErrorDetail(
             code="invalid_request",
             message="A requisição não atende ao contrato da API v1.",
-            issues=tuple(issues),
+            issues=(ValidationIssue(field="request", code="invalid"),),
         )
     )
     return JSONResponse(

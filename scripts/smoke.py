@@ -14,6 +14,7 @@ import time
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Final, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -26,10 +27,12 @@ ENV_EXAMPLE: Final = REPOSITORY_ROOT / ".env.example"
 OPENAPI_SNAPSHOT: Final = REPOSITORY_ROOT / "apps" / "api" / "openapi" / "v1.json"
 LOOPBACK_HOST: Final = "127.0.0.1"
 EXPECTED_LIVENESS_BODY: Final = b'{"status":"ok"}'
-APPLICATION_ENVIRONMENT_VARIABLES: Final = (
-    "PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT",
-    "PRESCRIPTIVE_MAINTENANCE_DATABASE_URL",
+EXPECTED_READINESS_BODY: Final = b'{"status":"ready"}'
+CORRELATION_ID_HEADER: Final = "X-Correlation-ID"
+CORRELATION_ID_PATTERN: Final = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,62}[A-Za-z0-9])?"
 )
+APPLICATION_ENVIRONMENT_PREFIX: Final = "PRESCRIPTIVE_MAINTENANCE_"
 STARTUP_TIMEOUT_SECONDS: Final = 15.0
 REQUEST_TIMEOUT_SECONDS: Final = 1.0
 SHUTDOWN_TIMEOUT_SECONDS: Final = 10.0
@@ -133,19 +136,22 @@ def _load_application() -> FastAPI:
 @contextmanager
 def _without_application_environment() -> Generator[None]:
     previous_values = {
-        name: os.environ.get(name) for name in APPLICATION_ENVIRONMENT_VARIABLES
+        name: value
+        for name, value in os.environ.items()
+        if name.upper().startswith(APPLICATION_ENVIRONMENT_PREFIX)
     }
-    for name in APPLICATION_ENVIRONMENT_VARIABLES:
+    for name in previous_values:
         os.environ.pop(name, None)
 
     try:
         yield
     finally:
-        for name, value in previous_values.items():
-            if value is None:
+        current_names = tuple(os.environ)
+        for name in current_names:
+            if name.upper().startswith(APPLICATION_ENVIRONMENT_PREFIX):
                 os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
+        for name, value in previous_values.items():
+            os.environ[name] = value
 
 
 def _check_example_configuration() -> None:
@@ -162,7 +168,13 @@ def _check_example_configuration() -> None:
     except (OSError, ValidationError) as error:
         raise SmokeFailure("Não foi possível carregar o .env.example.") from error
 
-    if settings.environment != "local" or settings.database_url.scheme != "postgresql":
+    database_url = settings.database_url
+    if (
+        settings.environment != "local"
+        or settings.persistence_backend != "postgres"
+        or database_url is None
+        or database_url.scheme != "postgresql"
+    ):
         raise SmokeFailure("O .env.example não contém a configuração local esperada.")
 
     print("Configuração: .env.example carregado explicitamente.")
@@ -208,6 +220,7 @@ def _read_liveness(port: int, process: subprocess.Popen[str]) -> None:
             ) as response:
                 status_code = response.status
                 content_type = response.headers.get_content_type()
+                correlation_id = response.headers.get(CORRELATION_ID_HEADER)
                 response_body = response.read(len(EXPECTED_LIVENESS_BODY) + 1)
         except HTTPError as error:
             raise SmokeFailure(
@@ -227,7 +240,40 @@ def _read_liveness(port: int, process: subprocess.Popen[str]) -> None:
             raise SmokeFailure("A liveness não respondeu com conteúdo JSON.")
         if response_body != EXPECTED_LIVENESS_BODY:
             raise SmokeFailure("A liveness respondeu com corpo inesperado.")
+        if (
+            correlation_id is None
+            or CORRELATION_ID_PATTERN.fullmatch(correlation_id) is None
+        ):
+            raise SmokeFailure("A liveness não retornou um correlation ID seguro.")
         return
+
+
+def _read_readiness(port: int) -> None:
+    request = Request(
+        f"http://{LOOPBACK_HOST}:{port}/health/ready",
+        method="GET",
+    )
+    try:
+        with urlopen(  # noqa: S310
+            request,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        ) as response:
+            status_code = response.status
+            content_type = response.headers.get_content_type()
+            correlation_id = response.headers.get(CORRELATION_ID_HEADER)
+            response_body = response.read(len(EXPECTED_READINESS_BODY) + 1)
+    except (HTTPError, URLError) as error:
+        raise SmokeFailure("A readiness offline não respondeu corretamente.") from error
+
+    if status_code != 200 or content_type != "application/json":
+        raise SmokeFailure("A readiness offline respondeu incorretamente.")
+    if response_body != EXPECTED_READINESS_BODY:
+        raise SmokeFailure("A readiness offline respondeu com corpo inesperado.")
+    if (
+        correlation_id is None
+        or CORRELATION_ID_PATTERN.fullmatch(correlation_id) is None
+    ):
+        raise SmokeFailure("A readiness não retornou um correlation ID seguro.")
 
 
 def _stop_process(process: subprocess.Popen[str]) -> None:
@@ -260,25 +306,36 @@ def _check_liveness() -> None:
         "--no-access-log",
     )
 
-    try:
-        process = subprocess.Popen(  # noqa: S603
-            command,
-            cwd=REPOSITORY_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except OSError as error:
-        raise SmokeFailure("Não foi possível iniciar o Uvicorn.") from error
+    process_environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith(("AWS_", APPLICATION_ENVIRONMENT_PREFIX))
+    }
+    process_environment["PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT"] = "offline"
+    process_environment["PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND"] = "memory"
 
-    try:
-        _read_liveness(port, process)
-    finally:
-        _stop_process(process)
+    with TemporaryDirectory(prefix="prescriptive-maintenance-smoke-") as workdir:
+        try:
+            process = subprocess.Popen(  # noqa: S603
+                command,
+                cwd=workdir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=process_environment,
+            )
+        except OSError as error:
+            raise SmokeFailure("Não foi possível iniciar o Uvicorn.") from error
 
-    print("Liveness: GET /health/live validado por HTTP real em loopback.")
+        try:
+            _read_liveness(port, process)
+            _read_readiness(port)
+        finally:
+            _stop_process(process)
+
+    print("Health: liveness e readiness offline validadas por HTTP em loopback.")
 
 
 def _parse_compose_records(output: str) -> list[Mapping[str, object]]:
@@ -428,6 +485,20 @@ def _check_container_liveness(url: str, service_name: str) -> None:
         )
 
 
+def _check_container_readiness(url: str) -> None:
+    status_code, content_type, body = _read_http_response(
+        url,
+        "A readiness do contêiner api",
+        max_body_bytes=len(EXPECTED_READINESS_BODY),
+    )
+    if (
+        status_code != 200
+        or content_type != "application/json"
+        or body != EXPECTED_READINESS_BODY
+    ):
+        raise SmokeFailure("A readiness do contêiner api respondeu incorretamente.")
+
+
 def _check_containerized_applications() -> None:
     records = _parse_compose_records(
         _run_command(
@@ -474,6 +545,9 @@ def _check_containerized_applications() -> None:
     _check_container_liveness(
         f"http://{LOOPBACK_HOST}:{web_port}/health/live",
         "web",
+    )
+    _check_container_readiness(
+        f"http://{LOOPBACK_HOST}:{api_port}/health/ready",
     )
 
     status_code, content_type, body = _read_http_response(

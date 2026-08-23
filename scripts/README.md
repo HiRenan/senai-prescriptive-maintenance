@@ -21,7 +21,11 @@ uv run --frozen poe smoke
 
 Ele verifica Python 3.13, Node.js 22, pnpm 10.15.1, importação do backend,
 carregamento explícito de `.env.example`, `docker compose config` e a resposta
-exata de `GET /health/live` por HTTP em loopback e porta efêmera.
+exata de `GET /health/live` e `GET /health/ready` no perfil `offline`, por HTTP
+em loopback e porta efêmera. As duas respostas também precisam devolver um
+correlation ID seguro. O Uvicorn do smoke nasce em um diretório temporário vazio
+e recebe somente a configuração explícita desse perfil; um `.env` local e
+variáveis AWS herdadas não participam do processo.
 
 Para também verificar um PostgreSQL já iniciado, o healthcheck, pgvector 0.8.6
 e uma operação vetorial mínima, use:
@@ -31,8 +35,8 @@ uv run --frozen poe smoke --with-services
 ```
 
 Quando a topologia completa já foi iniciada por `applications-up`, acrescente a
-validação dos estados healthy, das duas liveness e da igualdade do OpenAPI
-servido pela API com o snapshot v1 rastreado:
+validação dos estados healthy, das duas liveness, da readiness da API ligada ao
+PostgreSQL e da igualdade do OpenAPI servido com o snapshot v1 rastreado:
 
 ```powershell
 uv run --frozen poe smoke --with-services --with-applications

@@ -98,12 +98,14 @@ export PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT=53000
 
 As portas internas permanecem `5432`, `8000` e `3000`. A API recebe uma URL
 PostgreSQL exclusivamente local e fictícia apontada ao serviço `postgres`; a
-aplicação atual ainda não abre essa conexão. A web expõe somente sua liveness e
-continua sem UI.
+readiness abre uma conexão curta e executa `SELECT 1`, sem reter a conexão. A
+liveness da API continua restrita ao processo. A web expõe somente sua liveness
+e continua sem UI.
 
 API e web usam raiz somente leitura, `/tmp` efêmero, todas as capabilities
-removidas e `no-new-privileges`. O healthcheck da web condiciona sua inicialização
-à API healthy, que por sua vez depende do PostgreSQL healthy.
+removidas e `no-new-privileges`. O healthcheck da API usa readiness e, no perfil
+local do Compose, exige PostgreSQL; a web condiciona sua inicialização à API
+healthy.
 
 ## Bases e insumos fixados
 

@@ -128,7 +128,7 @@ help = "Remove contêiner e rede locais, preservando o volume."
 cmd = "docker compose down"
 
 [tool.poe.tasks.smoke]
-help = "Valida runtimes, configuração e liveness; banco é opcional."
+help = "Valida runtimes, configuração, liveness e readiness offline; banco é opcional."
 script = "scripts.smoke:main(with_services, with_applications, environ.get('POE_EXTRA_ARGS'))"
 args = [
   { name = "with_services", options = ["--with-services"], type = "boolean", help = "Verifica o PostgreSQL já iniciado e o pgvector." },

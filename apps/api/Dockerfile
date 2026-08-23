@@ -44,6 +44,6 @@ USER 65532:65532
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/health/live', timeout=2); body = response.read(32); content_type = response.headers.get_content_type(); response.close(); raise SystemExit(0 if response.status == 200 and content_type == 'application/json' and body == b'{\"status\":\"ok\"}' else 1)"]
+    CMD ["python", "-c", "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/health/ready', timeout=2); body = response.read(32); content_type = response.headers.get_content_type(); response.close(); raise SystemExit(0 if response.status == 200 and content_type == 'application/json' and body == b'{\"status\":\"ready\"}' else 1)"]
 
 CMD ["python", "-m", "uvicorn", "prescriptive_maintenance.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

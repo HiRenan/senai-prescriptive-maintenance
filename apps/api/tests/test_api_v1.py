@@ -75,6 +75,13 @@ RESULT_FIELDS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def configure_offline_startup_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT", "offline")
+    monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND", "memory")
+    monkeypatch.delenv("PRESCRIPTIVE_MAINTENANCE_DATABASE_URL", raising=False)
+
+
 def _request_payload(outcome: str) -> dict[str, Any]:
     return SYNTHETIC_ANALYSIS_REQUESTS[outcome].model_dump(mode="json")
 
@@ -265,9 +272,9 @@ def test_extra_feature_returns_422_before_internal_ports() -> None:
 
     assert response.status_code == 422
     assert ports.calls == 0
-    assert response.json()["error"]["issues"][0]["field"] == (
-        "features.internal_sensor"
-    )
+    assert response.json()["error"]["issues"] == [
+        {"field": "request", "code": "invalid"}
+    ]
 
 
 @pytest.mark.parametrize(
