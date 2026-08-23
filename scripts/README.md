@@ -53,3 +53,25 @@ snapshot:
 uv run --frozen python scripts/generate_openapi.py
 uv run --frozen python scripts/generate_openapi.py --check
 ```
+
+`analysis_benchmark.py` executa uma carga curta contra o `POST /analysis` real,
+com composição integrada e portas sintéticas temporizadas. O aquecimento não
+entra nas distribuições, a falha controlada do provider permanece `degraded` e
+não vira latência válida de geração. A visão principal é por cenário e o
+`synthetic_scenario_mix` é apenas secundário. Eventos JSON sanitizados são
+emitidos somente depois dos timers e do pico de memória para as camadas do
+benchmark; o logging operacional real da aplicação permanece dentro de
+`http_total` e da janela exclusiva de memória. A passagem de memória usa serviço
+e aplicação novos e não alimenta percentis, erros ou uso. Os eventos usam stderr,
+enquanto o JSON estável usa stdout:
+
+```powershell
+uv run --frozen python -m scripts.analysis_benchmark
+uv run --frozen python -m scripts.analysis_benchmark --format markdown
+```
+
+O benchmark não acessa materiais originais, rede, AWS ou provider pago. Tokens
+do fake são `simulated`, custo fica `not_available` e o maior pico de
+`tracemalloc` por requisição cobre somente alocações Python rastreadas, não RSS
+ou memória nativa. O protocolo completo está em
+[`docs/validation/analysis-benchmark.md`](../docs/validation/analysis-benchmark.md).

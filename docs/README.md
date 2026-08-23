@@ -21,6 +21,7 @@ sem repetir extensamente a mesma orientação.
 | [`validation/knn-abstention.md`](validation/knn-abstention.md) | Política versionada de suporte, novidade e abstenção do k-NN SEN-51, com avaliação temporal agregada. |
 | [`model-cards/temporal-knn-v2.md`](model-cards/temporal-knn-v2.md) | Condições de uso, resultado, riscos e decisão do motor temporal k-NN v2. |
 | [`validation/model-evaluation.md`](validation/model-evaluation.md) | Protocolo, métricas, benchmark e limitações da avaliação reprodutível SEN-53. |
+| [`validation/analysis-benchmark.md`](validation/analysis-benchmark.md) | Método, métricas, rastreabilidade e limites do benchmark local sintético SEN-65. |
 | [`validation/prescription-orchestration.md`](validation/prescription-orchestration.md) | Decisões, timeout limitado, metadados, estados e riscos residuais da composição prescritiva SEN-59. |
 | [`validation/similarity-index.md`](validation/similarity-index.md) | Contrato, integridade e paridade sintética do índice de similaridade SEN-52. |
 | [`validation/analysis-integration.md`](validation/analysis-integration.md) | Binding autorizado, projeção dos cinco estados, persistência e evidências da integração ponta a ponta SEN-46. |
