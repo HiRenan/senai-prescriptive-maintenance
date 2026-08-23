@@ -435,6 +435,8 @@ sem enfraquecer a fronteira dos materiais locais.
   binding autorizado, cinco estados, persistência e limites da SEN-46.
 - [`docs/validation/analysis-benchmark.md`](docs/validation/analysis-benchmark.md):
   método, métricas e limites do benchmark local sintético da SEN-65.
+- [`docs/validation/aws-demo-evidence.md`](docs/validation/aws-demo-evidence.md):
+  arquitetura, inventário, custo e evidências offline sanitizadas da SEN-69.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 - [`infra/aws/demo/delivery/README.md`](infra/aws/demo/delivery/README.md):

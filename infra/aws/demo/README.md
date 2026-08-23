@@ -24,25 +24,46 @@ esses placeholders antes da criação de recursos AWS.
 
 ```mermaid
 flowchart LR
+  subgraph External[Pré-requisitos externos não criados]
+    Approval[Reviewers e confirmação manual] --> OIDC[GitHub OIDC e três roles]
+    State[S3 state externo]
+    DNS[DNS e ACM us-east-1]
+  end
+
   Viewer[Cliente HTTPS] --> CF[CloudFront]
   CF -->|OAC SigV4| Frontend[S3 frontend privado]
-  Viewer -->|JWT Cognito| APIGW[API Gateway HTTP API]
+  DNS -. alias e certificado .-> CF
+  Viewer -->|JWT| APIGW[API Gateway HTTP API]
   Cognito[Cognito user pool] --> APIGW
-  APIGW -->|VPC Link| CloudMap[Cloud Map SRV]
-  CloudMap --> ECS[ECS Fargate: imagem OCI da API]
-  ECS --> Queue[SQS ingestão]
+
+  subgraph Private[VPC single-AZ privada]
+    APIGW -->|VPC Link| CloudMap[Cloud Map SRV]
+    CloudMap --> ECS[ECS Fargate sem IP público]
+    ECS --> Interfaces[4 endpoints Interface]
+    ECS --> S3Gateway[endpoint Gateway S3]
+  end
+
+  Interfaces --> ECR[ECR API e DKR]
+  Interfaces --> Logs[CloudWatch Logs]
+  Interfaces --> Queue[SQS ingestão]
   Queue --> DLQ[SQS DLQ]
-  ECS --> Documents[S3 documentos privado]
-  ECS --> Artifacts[S3 artefatos privado]
-  ECS --> Logs[CloudWatch Logs]
+  S3Gateway --> Documents[S3 documentos privado]
+  S3Gateway --> Artifacts[S3 artefatos privado]
+  Roles[IAM execução, API e worker] -. privilégio mínimo .-> ECS
   Budget[AWS Budget] -. precede recursos cobrados .-> CF
   Budget -.-> APIGW
+  Budget -.-> Interfaces
   Budget -.-> ECS
-  Alarms[CloudWatch alarmes] --> APIGW
-  Alarms --> ECS
-  Alarms --> Queue
-  Alarms --> DLQ
+  Alarms[4 alarmes CloudWatch] -. monitoram .-> APIGW
+  Alarms -.-> ECS
+  Alarms -.-> Queue
+  Alarms -.-> DLQ
+  OIDC -. plan, deploy e teardown autorizados .-> State
 ```
+
+A confrontação reproduzível entre esse diagrama, o plano de 73 recursos e os
+gates da SEN-68 está na
+[evidência offline da SEN-69](../../../docs/validation/aws-demo-evidence.md).
 
 A API da SEN-49 é um servidor Uvicorn OCI comum, com processo não privilegiado,
 porta `8000` e healthcheck HTTP. Por isso o compute é ECS Fargate: ele executa a
