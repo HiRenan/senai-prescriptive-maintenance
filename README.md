@@ -123,6 +123,10 @@ A versão atual contém:
   métricas primárias por cenário, mix sintético secundário explícito, p50/p95,
   erros, pico de alocações Python por requisição e uso sintético distinguido de
   medição, estimativa e indisponibilidade;
+- um golden set pequeno, versionado e inteiramente sintético que reproduz os
+  cinco estados do produto e o ciclo documental por HTTP/aplicação, prova os
+  gates pré-provider e de citações e emite contagens separadas de modelo,
+  recuperação e geração com seus bindings;
 - um pipeline canônico local e determinístico para `banner.csv`, com 18 features
   de inferência, ledger completo de disposições, agrupamento temporal de
   ocorrências independente do target, partições cronológicas com purga e
@@ -252,6 +256,7 @@ código; `check` é uma sequência fail-fast somente leitura.
 | `uv run --frozen poe typecheck` | Executa Pyright em modo estrito. |
 | `uv run --frozen poe test` | Executa Pytest com cobertura mínima configurada. |
 | `uv run --frozen poe check` | Executa format-check, lint, typecheck e test, nessa ordem. |
+| `uv run --frozen poe golden-e2e` | Executa o golden set sintético dos cinco estados e do ciclo documental. |
 | `uv run --frozen python -m scripts.analysis_benchmark` | Mede localmente a análise integrada com cenários sintéticos e relatório JSON sanitizado. |
 | `uv run --frozen python -m prescriptive_maintenance.data.cli build --help` | Exibe os caminhos explícitos exigidos para construir derivados canônicos locais. |
 | `uv run --frozen python -m prescriptive_maintenance.data.cli check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
@@ -437,6 +442,8 @@ sem enfraquecer a fronteira dos materiais locais.
   método, métricas e limites do benchmark local sintético da SEN-65.
 - [`docs/validation/aws-demo-evidence.md`](docs/validation/aws-demo-evidence.md):
   arquitetura, inventário, custo e evidências offline sanitizadas da SEN-69.
+- [`docs/validation/product-golden-e2e.md`](docs/validation/product-golden-e2e.md):
+  golden set, jornadas, gates e métricas determinísticas da SEN-48.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
 - [`infra/aws/demo/delivery/README.md`](infra/aws/demo/delivery/README.md):

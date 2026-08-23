@@ -995,6 +995,31 @@ uv run --frozen python -m scripts.analysis_benchmark --format markdown
 O protocolo, a interpretação dos campos e os limites estão em
 [`docs/validation/analysis-benchmark.md`](../../docs/validation/analysis-benchmark.md).
 
+## Golden set ponta a ponta
+
+`prescriptive_maintenance.product_golden` carrega exclusivamente a fixture
+versionada `apps/api/tests/golden/product_journeys.v1.json` e reproduz os cinco
+estados públicos pelo `POST /analysis`. A mesma execução registra metadados
+documentais por HTTP, conclui os gates de processamento pela aplicação e decide
+aprovação e rejeição novamente por HTTP, sempre com repositórios em memória.
+
+O provider oficial `FakeGenerationProvider` é usado atrás dos guardrails reais.
+O relatório prova zero chamadas para ausência e rejeição documental, uma chamada
+recusada para citação inventada e chamadas distintas de sucesso e falha nos
+estados `documented_fault` e `degraded`. As métricas são contagens determinísticas
+e separadas de modelo, recuperação e geração; incluem versões, hashes de policy e
+configuração, sem features, conteúdo documental, prompt ou output bruto.
+
+```powershell
+uv run --frozen poe golden-e2e
+```
+
+O JSON sanitizado é escrito em stdout. A suíte funcional confere o hash da
+fixture, os resultados, os deltas de chamadas, a correspondência da citação com
+a evidência aprovada e a estabilidade do relatório. O desenho e os limites estão
+em
+[`docs/validation/product-golden-e2e.md`](../../docs/validation/product-golden-e2e.md).
+
 ## Pipeline canônico local
 
 `load_canonical_pipeline_config()` valida a configuração versionada que mapeia
