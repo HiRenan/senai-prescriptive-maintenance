@@ -10,7 +10,8 @@ O projeto usa um monorepo. O backend FastAPI em `apps/api` é a aplicação de
 produto implementada e está estruturado como base para um monólito modular. A
 fronteira `apps/web` possui somente um processo operacional de liveness, sem
 interface. PostgreSQL/pgvector existe como serviço local independente; a API
-ainda não abre conexão com ele.
+não abre conexão automaticamente, enquanto o módulo de persistência recebe
+fábricas injetadas e permanece desacoplado das rotas HTTP.
 
 ## Componentes existentes
 
@@ -21,10 +22,11 @@ ainda não abre conexão com ele.
 | `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates monotônicos de extração/indexação, auditoria append-only com texto seguro, replay semântico exato, relógio UTC injetável e repositório em memória cujo CAS valida o comando e o agregado completos. | Não processa bytes ou chunks, não implementa adapter PostgreSQL e não altera os endpoints do contrato v1. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
+| `apps/api/src/prescriptive_maintenance/persistence/` | Metadados imutáveis de análise/documento/versão/chunk/evidência, evolução idempotente de versões, repositórios tipados, unidade transacional, adapter em memória, adapter psycopg e migração inicial reversível. | Não persiste conteúdo, features, vetores ou narrativas e ainda não é chamado pelas rotas HTTP. |
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v1, validação da saída, porta neutra, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não recupera contexto, não faz chamada automática, não lê credenciais, não valida suporte semântico das citações e não contém SDK ou configuração de infraestrutura AWS. |
 | `apps/api/src/prescriptive_maintenance/modeling/` | Baseline k-NN em memória sobre 18 features, `StandardScaler` de treino, distância euclidiana, adapter `ModelPort` e artefato NumPy/JSON íntegro e versionado. | Não está ligada às rotas, não calibra probabilidade, não se abstém, não faz tuning e não usa banco, pgvector ou GPU. |
-| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, dados, geração e modelo, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | Os testes não acessam materiais originais, serviços externos nem credenciais; guardrails semânticos e regras prescritivas completas não estão implementados. |
+| `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, persistência, dados, geração e modelo, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | A suíte padrão não acessa materiais originais, serviços externos nem credenciais; a integração PostgreSQL é opcional e usa schema descartável. |
 | `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da liveness. | Não inclui dependências de desenvolvimento nem integra persistência. |
 | `apps/web` | Workspace privado, servidor HTTP sem dependências, Dockerfile multi-stage e `GET /health/live`. | Não contém UI, framework, componentes, estilos, assets ou comportamento visual. |
 | `.dockerignore` e `apps/*/Dockerfile.dockerignore` | União segura na raiz e allowlists específicas dos manifests, locks e fontes necessários a cada build. | Excluem todo o restante do monorepo dos contextos; a API inclui somente o README exigido pelos metadados Python. |
@@ -43,7 +45,8 @@ ainda não abre conexão com ele.
 `scikit-learn` compõem as dependências de produção das camadas de dados e
 modelo. PDFium cobre parse, texto nativo
 e rasterização; o adapter RapidOCR inicializa o engine ONNX local somente quando
-uma página exige OCR, sem serviço ou binário OCR do sistema. `matplotlib` e
+uma página exige OCR, sem serviço ou binário OCR do sistema. `psycopg` é o
+driver do adapter PostgreSQL. `matplotlib` e
 `pandas-stubs` permanecem no grupo de desenvolvimento porque apoiam a inspeção
 gráfica e a tipagem estática sem ampliar as dependências instaladas do backend
 em produção.
@@ -118,10 +121,12 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 - **Modelo:** a baseline e o adapter são executáveis e carregáveis localmente,
   mas a aplicação HTTP não os instancia; seus artefatos reais permanecem
   ignorados e somente as métricas agregadas sanitizadas são públicas.
-- **Persistência:** há repositórios locais em memória para o ciclo documental
-  com CAS e para chunks, além de contrato de escrita pgvector injetável para
-  chunks; não existe cliente, SQL, migração ou persistência integrada ao banco
-  da aplicação.
+- **Persistência:** o backend oferece repositórios e unidade de trabalho com
+  adapters em memória e PostgreSQL, além de migração reversível para metadados;
+  o ciclo documental possui separadamente repositório em memória com CAS e a
+  indexação mantém um repositório em memória e um contrato de escrita pgvector
+  injetável, ainda sem cliente ou SQL. As rotas HTTP continuam usando fakes e
+  não abrem conexão automaticamente.
 - **Web:** `apps/web` reserva o limite do workspace e oferece somente liveness
   operacional para o contêiner; não existe frontend ou rota visual.
 - **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
@@ -138,7 +143,7 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou pipeline de transformação tabular da aplicação;
-- esquema da aplicação, migrações e persistência integrada;
+- integração das rotas HTTP com os repositórios persistentes;
 - integração operacional do adapter de modelo, adapters reais de recuperação,
   embedding semântico, índice vetorial, conexão pgvector e uso de vetores pela
   aplicação, busca por similaridade, recuperação governada de contexto,

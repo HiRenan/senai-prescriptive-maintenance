@@ -15,6 +15,8 @@ from pydantic import (
     model_validator,
 )
 
+from prescriptive_maintenance.domain import AnalysisOutcome
+
 API_CONTRACT_VERSION: Final = "1.0.0"
 DEFAULT_TOP_K: Final = 5
 MAX_TOP_K: Final = 10
@@ -103,16 +105,6 @@ class AnalysisRequest(ContractModel):
 
     features: AnalysisFeatures
     top_k: Annotated[int, Field(ge=1, le=MAX_TOP_K)] = DEFAULT_TOP_K
-
-
-class AnalysisOutcome(StrEnum):
-    """Complete public outcome vocabulary for API v1."""
-
-    NORMAL = "normal"
-    DOCUMENTED_FAULT = "documented_fault"
-    UNDOCUMENTED_FAULT = "undocumented_fault"
-    OUT_OF_DISTRIBUTION = "out_of_distribution"
-    DEGRADED = "degraded"
 
 
 class Diagnosis(ContractModel):
