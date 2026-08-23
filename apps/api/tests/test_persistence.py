@@ -1,6 +1,7 @@
 """Contract tests for minimal metadata and the in-memory transaction adapter."""
 
 from dataclasses import dataclass, fields, replace
+from datetime import timedelta
 from typing import cast
 
 import pytest
@@ -10,12 +11,16 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT,
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
+    SYNTHETIC_INVALID_CIVIL_STATES,
+    SYNTHETIC_UTC_OFFSETS,
     assert_ambiguous_zoneinfo_datetime_is_canonical,
     assert_lying_datetimes_are_canonical,
+    assert_offset_datetime_is_canonical,
     assert_persisted_scalars_are_canonical,
     synthetic_ambiguous_zoneinfo_document,
     synthetic_invalid_civil_datetime_document,
     synthetic_lying_datetime_aggregates,
+    synthetic_offset_datetime_document,
     synthetic_tainted_scalar_aggregates,
 )
 from prescriptive_maintenance.contracts import AnalysisOutcome as ApiAnalysisOutcome
@@ -338,8 +343,41 @@ def test_in_memory_ignores_hostile_datetime_overrides_and_preserves_instant() ->
     )
 
 
-def test_in_memory_rejects_invalid_civil_datetime_without_executing_reducer() -> None:
-    document, source, zone = synthetic_invalid_civil_datetime_document()
+@pytest.mark.parametrize(
+    ("case_name", "offset"),
+    SYNTHETIC_UTC_OFFSETS,
+    ids=[case_name for case_name, _ in SYNTHETIC_UTC_OFFSETS],
+)
+def test_in_memory_preserves_valid_fractional_offset_instants(
+    case_name: str,
+    offset: timedelta,
+) -> None:
+    document, source = synthetic_offset_datetime_document(case_name, offset)
+    store = InMemoryStore()
+    with InMemoryUnitOfWork(store) as transaction:
+        transaction.documents.add(document)
+        transaction.commit()
+
+    with InMemoryUnitOfWork(store) as query:
+        recovered_document = query.documents.get(document.document_id)
+
+    assert recovered_document is not None
+    assert_offset_datetime_is_canonical(recovered_document, source)
+
+
+@pytest.mark.parametrize(
+    ("case_name", "state"),
+    SYNTHETIC_INVALID_CIVIL_STATES,
+    ids=[case_name for case_name, _ in SYNTHETIC_INVALID_CIVIL_STATES],
+)
+def test_in_memory_rejects_invalid_civil_datetime_without_executing_reducer(
+    case_name: str,
+    state: bytes,
+) -> None:
+    document, source, zone = synthetic_invalid_civil_datetime_document(
+        case_name,
+        state,
+    )
     store = InMemoryStore()
 
     with (

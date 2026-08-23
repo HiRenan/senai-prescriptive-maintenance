@@ -7,6 +7,7 @@ import re
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import timedelta
 from threading import Barrier
 from typing import Final, cast
 from uuid import uuid4
@@ -18,12 +19,16 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT,
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
+    SYNTHETIC_INVALID_CIVIL_STATES,
+    SYNTHETIC_UTC_OFFSETS,
     assert_ambiguous_zoneinfo_datetime_is_canonical,
     assert_lying_datetimes_are_canonical,
+    assert_offset_datetime_is_canonical,
     assert_persisted_scalars_are_canonical,
     synthetic_ambiguous_zoneinfo_document,
     synthetic_invalid_civil_datetime_document,
     synthetic_lying_datetime_aggregates,
+    synthetic_offset_datetime_document,
     synthetic_tainted_scalar_aggregates,
 )
 from prescriptive_maintenance.domain import AnalysisOutcome
@@ -36,6 +41,7 @@ from prescriptive_maintenance.persistence import (
     PersistenceConflictError,
     PersistenceIntegrityError,
     PostgresConnectionFactory,
+    PostgresDocumentRepository,
     PostgresUnitOfWork,
     TransactionRollbackOnlyError,
     UnitOfWorkStateError,
@@ -94,6 +100,12 @@ _EXPECTED_COLUMNS: Final = {
         "ordinal",
     },
 }
+
+
+class _FailOnSqlConnection:
+    def execute(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("Invalid civil datetime must fail before SQL execution.")
 
 
 @pytest.fixture
@@ -485,8 +497,15 @@ def test_postgres_ignores_hostile_datetime_overrides_and_preserves_instant(
     )
 
 
-def test_postgres_rejects_invalid_civil_datetime_without_executing_reducer(
+@pytest.mark.parametrize(
+    ("case_name", "offset"),
+    SYNTHETIC_UTC_OFFSETS,
+    ids=[case_name for case_name, _ in SYNTHETIC_UTC_OFFSETS],
+)
+def test_postgres_preserves_valid_fractional_offset_instants(
     postgres_connection_factory: PostgresConnectionFactory,
+    case_name: str,
+    offset: timedelta,
 ) -> None:
     migration_connection = postgres_connection_factory()
     try:
@@ -494,7 +513,65 @@ def test_postgres_rejects_invalid_civil_datetime_without_executing_reducer(
     finally:
         migration_connection.close()
 
-    document, source, zone = synthetic_invalid_civil_datetime_document()
+    document, source = synthetic_offset_datetime_document(case_name, offset)
+    with PostgresUnitOfWork(postgres_connection_factory) as transaction:
+        transaction.documents.add(document)
+        transaction.commit()
+
+    with PostgresUnitOfWork(postgres_connection_factory) as query:
+        recovered_document = query.documents.get(document.document_id)
+
+    assert recovered_document is not None
+    assert_offset_datetime_is_canonical(recovered_document, source)
+
+
+@pytest.mark.parametrize(
+    ("case_name", "state"),
+    SYNTHETIC_INVALID_CIVIL_STATES,
+    ids=[case_name for case_name, _ in SYNTHETIC_INVALID_CIVIL_STATES],
+)
+def test_postgres_rejects_invalid_civil_datetime_before_sql(
+    case_name: str,
+    state: bytes,
+) -> None:
+    document, source, zone = synthetic_invalid_civil_datetime_document(
+        case_name,
+        state,
+    )
+    repository = PostgresDocumentRepository(
+        cast(PostgresConnection, _FailOnSqlConnection())
+    )
+
+    with pytest.raises(ValueError) as caught:
+        repository.add(document)
+
+    assert type(caught.value) is ValueError
+    assert str(caught.value) == "created_at could not be canonicalized safely."
+    assert source.virtual_reads == []
+    assert type(source).reducer_callable_reads == []
+    assert zone.virtual_reads == []
+
+
+@pytest.mark.parametrize(
+    ("case_name", "state"),
+    SYNTHETIC_INVALID_CIVIL_STATES,
+    ids=[case_name for case_name, _ in SYNTHETIC_INVALID_CIVIL_STATES],
+)
+def test_postgres_rejects_invalid_civil_datetime_without_executing_reducer(
+    postgres_connection_factory: PostgresConnectionFactory,
+    case_name: str,
+    state: bytes,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    document, source, zone = synthetic_invalid_civil_datetime_document(
+        case_name,
+        state,
+    )
     with (
         PostgresUnitOfWork(postgres_connection_factory) as transaction,
         pytest.raises(ValueError) as caught,

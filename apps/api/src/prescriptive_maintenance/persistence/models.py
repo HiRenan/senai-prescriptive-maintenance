@@ -23,7 +23,6 @@ _DATETIME_REDUCTION_PROTOCOL: Final = 4
 _DATETIME_STATE_SIZE: Final = 10
 _DATETIME_FOLD_MASK: Final = 0x80
 _DATETIME_MONTH_MASK: Final = 0x7F
-_DATETIME_MICROSECOND_START: Final = 7
 
 
 def _validate_identifier(value: str, pattern: re.Pattern[str], label: str) -> None:
@@ -142,7 +141,7 @@ def _base_utc_datetime(value: datetime) -> datetime:
 
     base_value = _base_datetime(value)
     try:
-        base_state, base_zone = _validated_datetime_state(
+        _, base_zone = _validated_datetime_state(
             base_value,
             expected_constructor=datetime,
         )
@@ -153,7 +152,7 @@ def _base_utc_datetime(value: datetime) -> datetime:
         canonical = datetime.astimezone(base_value, UTC)
         if type(canonical) is not datetime:
             raise ValueError("created_at could not be canonicalized safely.")
-        canonical_state, canonical_zone = _validated_datetime_state(
+        _, canonical_zone = _validated_datetime_state(
             canonical,
             expected_constructor=datetime,
         )
@@ -163,8 +162,6 @@ def _base_utc_datetime(value: datetime) -> datetime:
             or canonical_zone is not UTC
             or canonical_offset is None
             or timedelta.__eq__(canonical_offset, timedelta(0)) is not True
-            or base_state[_DATETIME_MICROSECOND_START:]
-            != canonical_state[_DATETIME_MICROSECOND_START:]
             or timedelta.__eq__(
                 datetime.__sub__(canonical, base_value),
                 timedelta(0),

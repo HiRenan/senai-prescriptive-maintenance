@@ -54,9 +54,39 @@ SYNTHETIC_AMBIGUOUS_TIME: Final = datetime(
     tzinfo=_SYNTHETIC_AMBIGUOUS_ZONE,
     fold=1,
 )
-# CPython stores ``fold`` in the high month bit; only the day byte is invalid.
-_SYNTHETIC_INVALID_CIVIL_STATE: Final = bytes(
-    (0x07, 0xF0, 0x82, 0x00, 0x04, 0x05, 0x06, 0x0C, 0x0A, 0x14)
+SYNTHETIC_UTC_OFFSETS: Final = (
+    (
+        "positive_fractional",
+        timedelta(hours=5, minutes=30, seconds=45, microseconds=123456),
+    ),
+    (
+        "negative_fractional",
+        -timedelta(hours=3, minutes=15, seconds=30, microseconds=654321),
+    ),
+    (
+        "near_positive_limit",
+        timedelta(hours=23, minutes=59, seconds=59, microseconds=999999),
+    ),
+    ("integer_seconds", timedelta(hours=5, minutes=30, seconds=45)),
+)
+# CPython stores ``fold`` in the high month bit. These pickle states exercise
+# the civil fields that the low-level constructor accepts without validation.
+SYNTHETIC_INVALID_CIVIL_STATES: Final = (
+    ("year_zero", bytes((0x00, 0x00, 0x82, 0x03, 0x04, 0x05, 0x06, 0x0C, 0x0A, 0x14))),
+    ("day_zero", bytes((0x07, 0xF0, 0x82, 0x00, 0x04, 0x05, 0x06, 0x0C, 0x0A, 0x14))),
+    ("day_32", bytes((0x07, 0xF0, 0x82, 0x20, 0x04, 0x05, 0x06, 0x0C, 0x0A, 0x14))),
+    (
+        "february_30",
+        bytes((0x07, 0xF0, 0x82, 0x1E, 0x04, 0x05, 0x06, 0x0C, 0x0A, 0x14)),
+    ),
+    ("april_31", bytes((0x07, 0xF0, 0x84, 0x1F, 0x04, 0x05, 0x06, 0x0C, 0x0A, 0x14))),
+    ("hour_24", bytes((0x07, 0xF0, 0x82, 0x03, 0x18, 0x05, 0x06, 0x0C, 0x0A, 0x14))),
+    ("minute_60", bytes((0x07, 0xF0, 0x82, 0x03, 0x04, 0x3C, 0x06, 0x0C, 0x0A, 0x14))),
+    ("second_60", bytes((0x07, 0xF0, 0x82, 0x03, 0x04, 0x05, 0x3C, 0x0C, 0x0A, 0x14))),
+    (
+        "microsecond_1000000",
+        bytes((0x07, 0xF0, 0x82, 0x03, 0x04, 0x05, 0x06, 0x0F, 0x42, 0x40)),
+    ),
 )
 _DATETIME_FROM_STATE: Final = cast(
     Callable[[type[datetime], bytes, DateTimeZone], datetime],
@@ -358,12 +388,41 @@ def synthetic_ambiguous_zoneinfo_document() -> tuple[
     return document, source
 
 
-def synthetic_invalid_civil_datetime_document() -> tuple[
+def synthetic_offset_datetime_document(
+    case_name: str,
+    offset: timedelta,
+) -> tuple[DocumentMetadata, datetime]:
+    """Build metadata with a valid fixed offset, including fractional seconds."""
+
+    source = datetime(
+        2032,
+        2,
+        3,
+        4,
+        5,
+        6,
+        789012,
+        tzinfo=timezone(offset),
+        fold=1,
+    )
+    document = replace(
+        SYNTHETIC_DOCUMENT,
+        document_id=f"doc_synthetic_offset_{case_name}",
+        created_at=source,
+        versions=(),
+    )
+    return document, source
+
+
+def synthetic_invalid_civil_datetime_document(
+    case_name: str,
+    state: bytes,
+) -> tuple[
     DocumentMetadata,
     InvalidCivilDateTime,
     ReducerPayloadZone,
 ]:
-    """Inject a day-zero state after model construction for adapter validation."""
+    """Inject an invalid civil state after model construction."""
 
     zone = ReducerPayloadZone()
     InvalidCivilDateTime.reducer_callable_reads.clear()
@@ -371,18 +430,35 @@ def synthetic_invalid_civil_datetime_document() -> tuple[
         InvalidCivilDateTime,
         _DATETIME_FROM_STATE(
             InvalidCivilDateTime,
-            _SYNTHETIC_INVALID_CIVIL_STATE,
+            state,
             zone,
         ),
     )
     source.virtual_reads = []
     document = replace(
         SYNTHETIC_DOCUMENT,
-        document_id="doc_synthetic_invalid_civil",
+        document_id=f"doc_synthetic_invalid_{case_name}",
         versions=(),
     )
     object.__setattr__(document, "created_at", source)
     return document, source, zone
+
+
+def assert_offset_datetime_is_canonical(
+    document: DocumentMetadata,
+    source: datetime,
+) -> None:
+    """Assert a fixed-offset instant was preserved in an exact UTC datetime."""
+
+    persisted = document.created_at
+    expected_utc = datetime.astimezone(source, UTC)
+
+    assert type(persisted) is datetime
+    assert persisted == expected_utc
+    assert persisted.tzinfo is UTC
+    assert persisted.microsecond == expected_utc.microsecond
+    assert datetime.timestamp(persisted) == datetime.timestamp(source)
+    assert datetime.__sub__(persisted, source) == timedelta(0)
 
 
 def synthetic_tainted_scalar_aggregates() -> tuple[
