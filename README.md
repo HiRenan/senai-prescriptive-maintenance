@@ -4,227 +4,48 @@
 [![Pull Request Policy](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/pull-request-policy.yml/badge.svg?branch=develop)](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/pull-request-policy.yml?query=branch%3Adevelop)
 [![Security](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/security.yml?query=branch%3Adevelop)
 
-## Problema
+Este repositório reúne uma plataforma demonstrável para apoiar manutenção
+prescritiva de ativos industriais. Ela organiza medições, histórico e
+conhecimento técnico em uma resposta rastreável, mas não autoriza ações de
+manutenção nem substitui avaliação humana.
 
-Ativos industriais perdem disponibilidade quando sinais de degradação são
-percebidos tarde ou analisados sem contexto. A manutenção prescritiva busca
-transformar medições, histórico e conhecimento técnico em recomendações
-justificáveis para apoiar a decisão de manutenção: o que observar, qual ação
-avaliar e por que ela merece prioridade.
+## O problema
 
-Este repositório organiza a fundação técnica de uma solução para esse problema.
-O foco atual é oferecer uma base local reproduzível, testável e segura para que
-as capacidades de domínio sejam acrescentadas sem confundir intenção com
-funcionalidade entregue.
+Sinais de degradação percebidos tarde reduzem a disponibilidade dos ativos.
+Analisar somente uma medição também é insuficiente: uma recomendação precisa
+explicar a condição observada, mostrar casos comparáveis e apontar a evidência
+documental que sustenta cada ação sugerida.
 
-## Visão proposta
+O projeto entrega as fronteiras técnicas dessa jornada com foco em
+reprodutibilidade, falha segura e proteção dos materiais fornecidos. O runtime
+padrão continua sintético e offline; integrações reais exigem composição e
+autorização explícitas.
 
-A visão de produto é uma plataforma capaz de receber dados autorizados de
-ativos, contextualizar condições observadas e apoiar recomendações de
-manutenção com evidências rastreáveis. Essa visão orienta as decisões
-arquiteturais, mas **ainda não representa o estado implementado**.
+## Estado atual
 
-## Estado implementado
+| Capacidade | O que existe | Limite que importa |
+| --- | --- | --- |
+| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, health checks, correlation ID e erros sanitizados. | A factory padrão usa fakes sintéticos; não há autenticação nem artefatos reais autorizados. |
+| Dados | Pipeline local auditado, contrato de 18 features, split temporal e checker determinístico. | A fonte e os derivados por registro permanecem locais e ignorados; a CI usa somente fixtures sintéticas. |
+| Modelo | Baseline k-NN v2 determinística, índice exato e política de abstenção. | A avaliação temporal não aprovou o modelo para classificação ou automação. |
+| Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
+| Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
+| Web | Processo Node e imagem OCI com liveness. | Não existe interface, componente visual ou experiência de usuário implementada. |
+| AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline. | Nenhum recurso, identidade, deploy, smoke ou teardown foi executado na AWS. |
 
-A versão atual contém:
+As afirmações públicas usam quatro rótulos:
 
-- um workspace Python gerenciado por uv, com um backend instalável em
-  `apps/api`;
-- uma aplicação FastAPI inicializável pelo Uvicorn, com liveness exclusiva do
-  processo em `GET /health/live`, readiness operacional em `GET /health/ready`,
-  correlation ID por requisição e logs JSON sanitizados;
-- um contrato OpenAPI v1 congelado para análise com 18 features e cinco
-  resultados fechados, ciclo documental mínimo, portas internas tipadas e fakes
-  de análise inteiramente sintéticos, com snapshot determinístico para futura
-  geração de cliente;
-- um registro HTTP de metadados documentais ligado ao domínio dos sete estados,
-  com adapters em memória e PostgreSQL, versões idempotentes, auditoria
-  imutável, IDs opacos e controle otimista de revisão por compare-and-swap;
-- configuração tipada e fail-fast para os perfis `local`, `offline` e `aws`,
-  com backend `memory` ou `postgres` obrigatório e dependências coerentes;
-- persistência mínima e transacional de metadados rastreáveis de análise,
-  documentos, versões, ciclo, eventos, chunks e evidências, com adapter em
-  memória, adapter PostgreSQL, evolução idempotente de versões e migrações
-  reversíveis;
-- PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
-  Compose;
-- imagens multi-stage da API e da fronteira web, construídas por bases fixadas
-  por digest e locks congelados, com processos não privilegiados e healthchecks;
-- um perfil Terraform AWS demo, ainda não aplicado, com frontend S3 privado por
-  CloudFront/OAC, API Gateway protegida por Cognito, imagem da API em Fargate
-  privado, filas, storage versionado, logs, alarmes, Budget e teardown explícito;
-- quatro workflows AWS protegidos: validação inteiramente offline em pull
-  request e plan, deploy por digest com smoke autenticado e teardown somente
-  manuais, separados por environment/role OIDC; bootstrap e execução reais não
-  foram realizados;
-- automação Poe para bootstrap, formatação, lint, tipagem estrita, testes,
-  hooks, smoke e controle dos serviços locais;
-- um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
-  como fronteira de integração e um processo HTTP exclusivo para liveness,
-  ainda sem interface;
-- manifesto de integridade dos materiais locais, duas fixtures públicas
-  inteiramente sintéticas, uma baseline agregada e um inventário categórico de
-  rótulos, ambos versionados sob a identidade pública da fonte;
-- uma única porta tipada e somente leitura para `banner.csv`, com caminho de
-  entrada explícito, validação de tamanho e SHA-256 antes e depois do consumo;
-  `consume_banner_source_audited()` vincula a baseline aos fingerprints
-  efetivamente observados no recibo pre/post, enquanto
-  `consume_banner_source()` preserva a interface compatível;
-- uma porta tipada e somente leitura para inventariar e extrair `Doc1.pdf` a
-  `Doc6.pdf`, com validação pre/post pelo manifesto, rastreabilidade e qualidade
-  por página, extração nativa preferencial e adapter RapidOCR local, explícito e
-  lazy; as saídas reais ficam somente em diretório ignorado;
-- segmentação determinística somente sobre a extração estruturada desses
-  documentos, sem reabrir PDFs, com limites e overlap versionados, IDs por
-  conteúdo e proveniência, embeddings fake hash locais não semânticos para CI,
-  repositório em memória e fronteira pgvector dependente de writer injetado;
-- uma configuração externa e auditável de classes canônicas para documentos
-  lógicos opacos, com versão e SHA-256 determinístico, e um serviço interno que
-  filtra lifecycle e integridade antes de um scorer injetado, limita o top-k e
-  preserva um resultado navegável sem conteúdo para as fronteiras públicas;
-- uma porta interna de recuperação governada que bloqueia normal e OOD antes da
-  busca, distingue ausência, classe não mapeada e indisponibilidade, aplica
-  limiar identificado por política e entrega ao futuro RAG somente snapshots de
-  conteúdo íntegros, aprovados, vigentes e limitados pelos budgets de geração;
-- um catálogo v2 das 26 colunas e um contrato Pandera estrito, ordenado e sem
-  coerção implícita, acompanhado de relatórios sanitizados de violação;
-- um profiler determinístico sobre DataFrames já carregados, com indicadores
-  agregados de estrutura, tempo, qualidade por coluna, duplicidade, estatística,
-  rótulos protegidos por vocabulário confiável ou categorias anônimas e pares
-  redundantes, além de JSON estável e Markdown resumido;
-- um runner auditado de baseline que executa duas rodadas independentes, aplica
-  gates fail-closed e só publica JSON e Markdown sanitizados quando os bytes das
-  duas rodadas e seus recibos de integridade coincidem;
-- normalização textual versionada de `fault` e um inventário JSON com os 151
-  rótulos brutos, frequências globais, forma normalizada, slug estável e estado
-  explícito de colisão, gerado em duas rodadas pela mesma porta auditada e
-  validável offline sem a fonte;
-- uma política declarativa e versionada de qualidade, validada contra contrato e
-  profiler, com identificador semântico SHA-256, precedências imutáveis e visão
-  pública derivada apenas da política e dos agregados rastreados da baseline;
-- contratos v1 de geração para diagnóstico imutável de entrada, evidências,
-  avaliação de suporte, prescrições, citações e warnings, com prompt versionado,
-  provider fake determinístico e adaptador Bedrock desabilitável;
-- guardrails RAG internos que recusam estado ou evidência inseguros antes do
-  provider, encapsulam documentos em envelopes não confiáveis e revalidam
-  schema, citações e atualidade dos mesmos snapshots depois da chamada;
-- uma composição prescritiva interna e pura que só encaminha falhas documentadas
-  com evidência governada aos guardrails, encerra normal, OOD e ausência
-  documental sem provider, limita chamadas síncronas por timeout e capacidade
-  unitária e registra apenas prompt, provider, latência monotônica e uso
-  allowlisted;
-- uma composição explícita da análise HTTP que liga modelo, índice,
-  recuperação, guardrails e UoW somente sob uma autorização imutável, confere
-  paridade do ranking, projeta os cinco estados sem fallback, publica apenas
-  citações efetivamente usadas e grava o cache local depois do commit;
-- um benchmark local curto e balanceado sobre o `POST /analysis` integrado,
-  com aquecimento separado, passagem temporizada sem tracing, passagem exclusiva
-  de memória em runtime novo, timers injetados em modelo, recuperação e provider,
-  métricas primárias por cenário, mix sintético secundário explícito, p50/p95,
-  erros, pico de alocações Python por requisição e uso sintético distinguido de
-  medição, estimativa e indisponibilidade;
-- um golden set pequeno, versionado e inteiramente sintético que reproduz os
-  cinco estados do produto e o ciclo documental por HTTP/aplicação, prova os
-  gates pré-provider e de citações e emite contagens separadas de modelo,
-  recuperação e geração com seus bindings;
-- um pipeline canônico local e determinístico para `banner.csv`, com 18 features
-  de inferência, ledger completo de disposições, agrupamento temporal de
-  ocorrências independente do target, partições cronológicas com purga e
-  estatísticas IQR ajustadas somente em treino;
-- uma baseline k-NN local e determinística sobre as mesmas 18 features, com
-  `StandardScaler` ajustado somente no treino, distância euclidiana, desempates
-  totais, suporte heurístico de votos e distância, thresholds calibrados sem o
-  teste, abstenção tipada para distância, votação ou classe rara, adapter da
-  porta de modelo e artefato NumPy/JSON versionado, íntegro e sem
-  desserialização executável;
-- um índice de similaridade local derivado somente do artefato k-NN já
-  verificado, com manifesto de compatibilidade e hashes, porta única, adapters
-  equivalentes em memória e PostgreSQL/pgvector e migração reversível;
-- um harness de avaliação temporal com plano materializado antes da leitura
-  feita pela tarefa, ranking exato em lote, métricas em escopos total e de
-  classes conhecidas, benchmark de latência e pico de memória do processo, além
-  de model card que registra a observação histórica do teste e não aprova o
-  motor para automação;
-- CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
-  request e integridade Git de releases, além de verificações de segurança com
-  CodeQL, revisão de dependências e varredura de segredos;
-- atualizações semanais agrupadas pelo Dependabot para os ecossistemas uv, npm,
-  GitHub Actions e Docker Compose, sempre direcionadas a `develop`;
-- documentação de governança, segurança, arquitetura e decisões fundamentais.
+- **implementado**: comportamento presente em código e coberto por teste;
+- **medido**: resultado de uma execução identificada, com ambiente e limites;
+- **estimado**: cálculo baseado em hipóteses explícitas, não observação;
+- **futuro**: capacidade ausente, que não deve ser apresentada como entrega.
 
-Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, upload ou armazenamento de bytes documentais, composição operacional
-autorizada com artefatos reais, busca semântica real por vizinhos, configuração
-operacional ou chamada automática a LLM, autenticação, infraestrutura AWS
-aplicada, bootstrap OIDC/IAM configurado, execução real de deploy ou interface
-web. A factory HTTP padrão permanece inteiramente sintética; a integração real
-exige injeção explícita e nenhum modelo avaliado está aprovado para automação.
+## Quickstart offline
 
-## Arquitetura atual
-
-O repositório é um monorepo e o backend segue um monólito modular: uma única
-aplicação implantável, com fronteiras internas que poderão receber módulos de
-domínio quando houver requisitos implementáveis. Essa escolha reduz a
-complexidade operacional da fundação sem impedir separação de responsabilidades
-no código.
-
-Os componentes existentes são:
-
-| Componente | Responsabilidade atual |
-| --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1, análise sintética padrão e composição integrada injetável sob autorização exata, registro documental governado com adapters em memória/PostgreSQL, recuperação aprovada, porta RAG governada, guardrails pré/pós-provider e composição prescritiva interna com timeout limitado, settings, persistência mínima, baseline e recuperação de vizinhos em memória/pgvector, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
-| `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
-| `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
-| `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
-| `infra/aws/demo/` | Perfil Terraform declarativo, privado e removível para uma demo single-AZ, com automação manual protegida ainda não configurada nem executada na AWS. |
-| `data/` | Manifesto dos materiais locais, fixtures sintéticas, artefatos públicos aprovados e destinos ignorados para derivados canônicos locais. |
-
-O inventário detalhado está em
-[`docs/architecture/README.md`](docs/architecture/README.md), e as decisões que
-sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md).
-
-## Estrutura do repositório
-
-```text
-.
-├── .github/          # governança de pull requests, responsáveis e CI
-├── apps/
-│   ├── api/          # pacote Python instalável do backend
-│   └── web/          # fronteira de workspace, sem implementação de UI
-├── data/
-│   ├── baselines/banner/<source-sha>/
-│   │   ├── baseline.v1.json # agregado determinístico e sanitizado
-│   │   └── summary.md       # resumo derivado somente do JSON
-│   ├── inventories/banner/<source-sha>/
-│   │   └── fault-labels.v1.json # inventário categórico determinístico
-│   ├── fixtures/            # dados públicos inteiramente sintéticos
-│   └── source-manifest.json # identidade pública dos materiais locais
-├── docs/
-│   ├── adr/          # decisões arquiteturais
-│   ├── architecture/ # inventário da arquitetura implementada
-│   ├── data/         # visões humanas derivadas de contratos de dados
-│   └── model-cards/  # condições de uso e limites dos modelos avaliados
-├── experiments/      # estudos isolados do código de produção
-├── infra/            # PostgreSQL local e perfil Terraform AWS demo
-└── scripts/          # automação cross-platform exposta pelo Poe
-```
-
-## Pré-requisitos
-
-- Git;
-- Python `>=3.13,<3.14`, com a linha `3.13` registrada em
-  `.python-version`;
-- uv compatível com o lock do projeto;
-- Node.js `>=22,<23`, com a linha `22` registrada em `.node-version`;
-- Corepack e pnpm `10.15.1`;
-- Docker Desktop ou Docker Engine com Compose v2 para o smoke e os comandos de
-  infraestrutura.
-- Terraform `>=1.15.9,<1.16` somente para validar o perfil AWS demo, sem exigir
-  credenciais no plano estático.
-
-## Quickstart
-
-Clone o repositório, use a branch de integração e prepare o ambiente pela raiz:
+Pré-requisitos: Git, Python `>=3.13,<3.14`, uv, Node.js `>=22,<23`, Corepack,
+pnpm `10.15.1` e Docker Compose v2. O primeiro setup pode baixar dependências;
+depois de instaladas, o smoke e a demonstração abaixo não acessam AWS,
+providers pagos nem materiais locais protegidos.
 
 ```powershell
 git clone https://github.com/HiRenan/senai-prescriptive-maintenance.git
@@ -233,66 +54,55 @@ git switch develop
 uv run --frozen poe setup
 uv run --frozen poe check
 uv run --frozen poe smoke
+uv run --frozen poe golden-e2e
 ```
 
-`setup` sincroniza todos os pacotes Python pelo lock, instala o workspace pnpm
-com lock congelado e instala os hooks pre-commit. O projeto mantém um único
-`uv.lock` e um único `pnpm-lock.yaml`, ambos na raiz.
+- `check` executa formatação somente leitura, lint, tipagem estrita e testes;
+- `smoke` valida runtimes, Compose e liveness/readiness reais em loopback, sem
+  iniciar serviços;
+- `golden-e2e` percorre por HTTP os cinco estados do produto e o ciclo
+  documental com dados e providers inteiramente sintéticos.
 
-O smoke padrão não exige banco em execução nem cria `.env`. O Docker precisa
-estar disponível porque a validação inclui `docker compose config`.
+O [guia de scripts](scripts/README.md) detalha smoke, demonstração e benchmark;
+a [infraestrutura local](infra/README.md) cobre os caminhos opcionais com
+contêineres.
+
+## Executar a API
+
+Para iniciar somente a API com memória e sem dependência externa:
+
+```powershell
+$env:PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT = "offline"
+$env:PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND = "memory"
+uv run --frozen uvicorn prescriptive_maintenance.main:app `
+  --host 127.0.0.1 --port 8000
+```
+
+Os endpoints operacionais ficam em `GET /health/live` e
+`GET /health/ready`. O contrato de negócio, os endpoints e o ciclo documental
+estão no [README do backend](apps/api/README.md); o snapshot OpenAPI canônico está em
+[`apps/api/openapi/v1.json`](apps/api/openapi/v1.json).
 
 ## Comandos canônicos
 
-Todas as tarefas abaixo são executadas da raiz. Somente `format` reescreve
-código; `check` é uma sequência fail-fast somente leitura.
+Todos os comandos partem da raiz. Somente `format` reescreve código.
 
 | Comando | Finalidade |
 | --- | --- |
-| `uv run --frozen poe setup` | Sincroniza dependências congeladas e instala os hooks locais. |
-| `uv run --frozen poe format` | Aplica correções seguras e formata arquivos Python com Ruff. |
-| `uv run --frozen poe format-check` | Verifica a formatação sem escrever. |
-| `uv run --frozen poe lint` | Executa Ruff sem correções automáticas. |
-| `uv run --frozen poe typecheck` | Executa Pyright em modo estrito. |
-| `uv run --frozen poe test` | Executa Pytest com cobertura mínima configurada. |
-| `uv run --frozen poe check` | Executa format-check, lint, typecheck e test, nessa ordem. |
-| `uv run --frozen poe golden-e2e` | Executa o golden set sintético dos cinco estados e do ciclo documental. |
-| `uv run --frozen python -m scripts.analysis_benchmark` | Mede localmente a análise integrada com cenários sintéticos e relatório JSON sanitizado. |
-| `uv run --frozen python -m prescriptive_maintenance.data.cli build --help` | Exibe os caminhos explícitos exigidos para construir derivados canônicos locais. |
-| `uv run --frozen python -m prescriptive_maintenance.data.cli check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
-| `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
-| `uv run --frozen poe services-up` | Inicia o PostgreSQL local e aguarda o healthcheck. |
-| `uv run --frozen poe applications-audit` | Audita os contextos Docker reais e os filesystems dos builders. |
-| `uv run --frozen poe applications-build` | Constrói as imagens locais multi-stage da API e da web. |
-| `uv run --frozen poe applications-up` | Constrói e inicia PostgreSQL, API e web e aguarda os healthchecks. |
-| `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |
-| `uv run --frozen poe smoke` | Valida runtimes, configuração, Compose, liveness e readiness offline reais. |
-| `uv run --frozen poe smoke --with-services` | Acrescenta a validação do PostgreSQL e do pgvector já iniciados. |
-| `uv run --frozen poe smoke --with-services --with-applications` | Acrescenta PostgreSQL, pgvector, health da web, readiness da API e OpenAPI v1 em contêineres. |
+| `uv run --frozen poe setup` | Sincroniza os workspaces pelos locks e instala hooks. |
+| `uv run --frozen poe format` | Aplica correções seguras e formata Python. |
+| `uv run --frozen poe check` | Executa format-check, lint, typecheck e testes. |
+| `uv run --frozen poe hooks` | Executa todos os hooks em todos os arquivos. |
+| `uv run --frozen poe failure-matrix` | Exercita falhas P0/P1 e audita o histórico público. |
+| `uv run --frozen poe smoke` | Valida a aplicação offline e o Compose, sem iniciar serviços. |
+| `uv run --frozen poe golden-e2e` | Executa a demonstração sintética ponta a ponta. |
+| `uv run --frozen poe services-up` | Inicia somente PostgreSQL/pgvector local. |
+| `uv run --frozen poe applications-audit` | Audita contextos e builders das imagens. |
+| `uv run --frozen poe applications-build` | Constrói as imagens da API e da fronteira web. |
+| `uv run --frozen poe applications-up` | Inicia PostgreSQL, API e web localmente. |
+| `uv run --frozen poe services-down` | Remove contêineres e rede, preservando o volume. |
 
-Para incluir o banco no smoke:
-
-```powershell
-uv run --frozen poe services-up
-uv run --frozen poe smoke --with-services
-uv run --frozen poe services-down
-```
-
-Se `127.0.0.1:5432` estiver ocupada, escolha uma porta host livre por
-`PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT`. A porta interna permanece
-`5432`; os exemplos para PowerShell e Bash estão em
-[`infra/README.md`](infra/README.md).
-
-## Topologia containerizada local
-
-O fluxo completo usa o mesmo `compose.yaml` do banco, sem duplicar serviços.
-Cada Dockerfile tem uma allowlist própria, e a `.dockerignore` da raiz mantém
-uma união segura para clientes sem suporte à convenção específica. Somente os
-manifests, locks e fontes necessários chegam ao builder; testes, snapshots
-OpenAPI, READMEs desnecessários, materiais originais, demais dados, `.env`, Git,
-caches e dependências de desenvolvimento ficam fora do contexto e das imagens.
-
-Execute build, start, smoke e stop a partir da raiz:
+Para validar a topologia completa:
 
 ```powershell
 uv run --frozen poe applications-audit
@@ -302,160 +112,106 @@ uv run --frozen poe smoke --with-services --with-applications
 uv run --frozen poe services-down
 ```
 
-A API fica em `127.0.0.1:8000` e a liveness da web em `127.0.0.1:3000`. As
-portas host podem ser alteradas por
-`PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT` e
-`PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT`; as portas internas permanecem `8000`
-e `3000`. `applications-up` usa apenas a configuração local fictícia declarada
-no Compose, e `services-down` continua preservando o volume PostgreSQL.
+## Arquitetura
 
-## Configuração local
+O backend é um monólito modular em `apps/api`; `apps/web` é apenas uma
+fronteira operacional sem UI. PostgreSQL/pgvector apoia o perfil local, e os
+artefatos reais de dados, modelo e documentos continuam fora do Git. A factory
+HTTP padrão não descobre esses artefatos: a composição integrada só é usada
+quando todas as identidades são injetadas e autorizadas.
 
-O backend exige `PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT` com um dos perfis
-`local`, `offline` ou `aws` e
-`PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND` com `memory` ou `postgres`.
-`memory` proíbe URL; `postgres` exige
-`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL`. `offline` aceita somente `memory`,
-enquanto `local` e `aws` admitem as duas composições explícitas. A configuração
-é validada no startup e uma falha encerra a inicialização com mensagem
-sanitizada. A liveness não consulta dependências; a readiness consulta somente
-o PostgreSQL quando o backend selecionado é `postgres`.
+Os [diagramas lógico, local e AWS](docs/architecture/diagrams.md) marcam
+explicitamente essa separação. O
+[inventário técnico](docs/architecture/README.md) relaciona cada componente ao
+código que o comprova.
 
-`.env.example` contém valores obviamente fictícios e exclusivos para
-desenvolvimento local. Copie-o para `.env` apenas quando um fluxo manual
-precisar carregar settings; `.env` permanece ignorado pelo Git. Consulte
-[`apps/api/README.md`](apps/api/README.md) para o contrato completo.
+```text
+apps/api       API, domínio, dados, modelo, recuperação, geração e persistência
+apps/web       processo de liveness; nenhuma interface
+data           manifesto, fixtures sintéticas e derivados públicos permitidos
+docs           arquitetura, cards, decisões, runbooks e evidências
+infra          Compose local e perfil Terraform AWS demo
+scripts        automação exposta pelo Poe
+```
 
-## Dados e materiais
+## Perfis de execução
 
-Os oito materiais originais fornecidos para o desafio são locais, ignorados
-pelo Git e não podem ser redistribuídos. O arquivo rastreado
-[`data/source-manifest.json`](data/source-manifest.json) contém somente nomes,
-tamanhos e hashes SHA-256 para verificação de integridade; não contém nem
-concede direitos sobre o conteúdo recebido.
+| Perfil | Backend permitido | Uso atual |
+| --- | --- | --- |
+| `offline` | somente `memory` | Smoke, golden set e execução sem dependências externas. |
+| `local` | `memory` ou `postgres` | Desenvolvimento; o Compose seleciona PostgreSQL. |
+| `aws` | `memory` ou `postgres` | Contrato de configuração; o perfil Terraform demo seleciona `memory`. |
 
-Além das fixtures sintéticas em `data/fixtures/`, há duas exceções rastreadas
-para saídas derivadas. O par
-`data/baselines/banner/<source-sha>/baseline.v1.json` e `summary.md` contém
-somente auditoria agregada e sanitizada. O arquivo
-`data/inventories/banner/<source-sha>/fault-labels.v1.json` contém somente o
-conjunto categórico aprovado: rótulo bruto, frequência global, forma
-normalizada, slug e estado/resolução de colisão, além de versões, identidade da
-fonte, recibos e reconciliações. Nenhum desses artefatos contém linha,
-identificador, medição, associação temporal, caminho local ou arquivo original;
-todos são validados offline contra o manifesto e a baseline pública.
+`memory` proíbe URL de banco; `postgres` exige
+`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL`. A configuração falha no startup quando
+há campo ausente, extra ou combinação incoerente. `.env.example` usa valores
+fictícios exclusivos de desenvolvimento e `.env` permanece ignorado.
 
-A matriz pública de regras, precedências e comparação exclusivamente agregada
-está em
-[`docs/data/banner-quality-policy.md`](docs/data/banner-quality-policy.md). A
-fonte canônica dessa visão é a política JSON validada pelo backend; o documento
-não contém valores por registro e não autoriza reprocessamento da fonte.
+## Dados, modelo e RAG
 
-O pipeline canônico consome a fonte somente pela porta auditada e grava seus seis
-artefatos exclusivamente em um destino local explicitamente informado e já
-ignorado pelo Git. `manifest.json` registra IDs, hashes físicos e lógicos,
-reconciliações, contagens e gates; os Parquets por partição contêm somente as 18
-features ordenadas e o target pós-partição como `y`. Consulte
-[`apps/api/README.md`](apps/api/README.md) para os contratos e comandos.
+Os materiais fornecidos não são redistribuídos. O repositório contém somente
+identidades públicas de integridade, agregados sanitizados aprovados e fixtures
+inteiramente sintéticas. Fontes, extrações, Parquets, vetores, modelos,
+mapeamentos e relatórios por registro ficam em destinos locais ignorados.
 
-Dados originais devem ficar em `data/raw/original/`. Originais, dados brutos,
-saídas intermediárias, dados processados e quaisquer outros artefatos gerados
-continuam locais, proibidos de versionamento e cobertos pelos caminhos ignorados
-em `.gitignore`; os artefatos públicos acima não ampliam essas exceções. As regras de
-preparação, conferência e publicação estão em
-[`data/README.md`](data/README.md).
+Fontes canônicas para avaliação:
+
+- [data card do pipeline tabular](docs/data/banner-data-card.md);
+- [model card do k-NN temporal v2](docs/model-cards/temporal-knn-v2.md);
+- [RAG card da composição prescritiva](docs/rag/prescriptive-rag-card.md).
+
+Resultados **medidos** nas execuções históricas aprovadas incluem 166.796 linhas
+reconciliadas no pipeline local e 24.768 linhas no holdout temporal do modelo.
+Nesse holdout, a candidata top-1 acertou 49 linhas e a cobertura após abstenção
+foi 39,7408%; o resultado sustenta a decisão de não aprovar automação. Esses
+números não foram remensurados por esta consolidação e não são métricas de
+produção.
+
+O custo AWS de USD 2,72 com contingência para uma janela de oito horas é uma
+**estimativa**, não gasto observado. As hipóteses, a data de referência e a
+ausência de execução live estão no
+[relatório AWS](docs/validation/aws-demo-evidence.md).
 
 ## Segurança
 
-Credenciais, tokens, chaves, `.env`, dumps, volumes e dados locais nunca devem
-ser versionados. Os valores de `.env.example` e `compose.yaml` são fictícios e
-não podem ser usados em produção.
+O runtime local não possui autenticação nem deve ser exposto publicamente.
+Logs HTTP usam somente campos permitidos e não registram payload, query,
+conteúdo documental, prompt, credencial ou texto de exceção. O ciclo documental
+e a recuperação validam integridade e vigência, mas esses controles não provam
+correção semântica de diagnóstico ou prescrição.
+
+- [Política de segurança](SECURITY.md)
+- [Threat model](docs/security/threat-model.md)
 
 Vulnerabilidades devem ser comunicadas de forma privada conforme
-[`SECURITY.md`](SECURITY.md); não publique detalhes exploráveis em issues ou
-pull requests.
+[`SECURITY.md`](SECURITY.md).
 
-## Contribuição e governança
+## Limitações e trabalho futuro
 
-`develop` é a branch de integração e `main` contém somente baselines e releases
-estáveis. Implementações são feitas em branches curtas, dentro de worktrees
-isoladas criadas a partir do `origin/develop` atualizado, e entram por pull
-request com squash. Releases usam uma branch curta `release/*` criada da
-`origin/develop` validada, que apenas reconcilia a `origin/main` vigente e deve
-preservar exatamente a árvore de `develop`; seu pull request para `main` é
-integrado por merge commit. Hotfixes entram em `main` por squash e são
-sincronizados de volta para `develop` antes da promoção seguinte.
+Não estão implementados:
 
-O gate obrigatório rejeita promoções diretas de `develop`, branches de tarefa e
-forks para `main`. Para uma release, ele exige um merge commit de dois pais
-exatos — `origin/develop` primeiro e `origin/main` segundo —, ancestralidade da
-`main` vigente e equivalência da árvore com a `develop` vigente. A sincronização
-é provada por um merge virtual limpo de `develop` com `main` que preserve a
-árvore de `develop`; a equivalência da árvore de `main` com um commit histórico
-de `develop` existe somente como fallback para a divergência legada causada pelo
-squash anterior. Nenhuma etapa permite alteração direta das branches
-permanentes.
+- regras operacionais completas ou autorização automática de manutenção;
+- ingestão contínua e orquestração do pipeline pela aplicação;
+- upload, armazenamento ou validação de bytes documentais pela API;
+- composição padrão com modelo real aprovado, embedding semântico, mapeamento
+  real, pgvector preenchido e provider de geração habilitado;
+- autenticação, autorização, rate limiting e operação de produção;
+- interface web;
+- infraestrutura AWS aplicada, bootstrap OIDC/IAM, deploy ou evidência live.
 
-Nomes de branches, commits Conventional Commits e títulos de pull request são
-escritos em inglês. Documentação, ADRs, apresentações e descrições de pull
-request são escritos em português. O fluxo completo está em
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## Limitações e próximos passos não implementados
-
-As seguintes capacidades pertencem à evolução futura e **não estão
-implementadas**:
-
-- regras operacionais completas de diagnóstico e manutenção prescritiva;
-- ingestão contínua ou orquestração do pipeline canônico pela aplicação;
-- upload multipart/streaming, validação de hash/tamanho contra bytes e
-  armazenamento documental local ou S3;
-- composição operacional autorizada com artefato de modelo aprovado, busca
-  semântica real, adapters reais, vetores e configuração de LLM;
-- autenticação, autorização, métricas e exportação de telemetria;
-- frontend ou qualquer experiência de usuário;
-- infraestrutura AWS aplicada, bootstrap externo OIDC/IAM, execução real do
-  pipeline manual, release publicada ou ambiente de produção.
-
-Cada capacidade deverá entrar por tarefa própria, com critérios verificáveis e
-sem enfraquecer a fronteira dos materiais locais.
+Esses itens são futuro, não compromisso desta versão.
 
 ## Documentação
 
-- [`CONTRIBUTING.md`](CONTRIBUTING.md): GitFlow, papéis e critérios de revisão;
-- [`SECURITY.md`](SECURITY.md): reporte responsável e política de segredos;
-- [`docs/README.md`](docs/README.md): índice e convenções da documentação;
-- [`docs/adr/README.md`](docs/adr/README.md): decisões arquiteturais;
-- [`docs/architecture/README.md`](docs/architecture/README.md): estado técnico
-  implementado;
-- [`docs/validation/document-pipeline.md`](docs/validation/document-pipeline.md):
-  decisões, evidências e limites do pipeline documental governado da SEN-4;
-- [`docs/validation/similarity-index.md`](docs/validation/similarity-index.md):
-  contrato, integridade e paridade sintética do índice de similaridade SEN-52;
-- [`docs/validation/model-evaluation.md`](docs/validation/model-evaluation.md):
-  protocolo e evidências agregadas da avaliação temporal SEN-53;
-- [`docs/model-cards/temporal-knn-v2.md`](docs/model-cards/temporal-knn-v2.md):
-  decisão de uso e limitações do motor k-NN v2.
-- [`docs/validation/analysis-integration.md`](docs/validation/analysis-integration.md):
-  binding autorizado, cinco estados, persistência e limites da SEN-46.
-- [`docs/validation/analysis-benchmark.md`](docs/validation/analysis-benchmark.md):
-  método, métricas e limites do benchmark local sintético da SEN-65.
-- [`docs/validation/aws-demo-evidence.md`](docs/validation/aws-demo-evidence.md):
-  arquitetura, inventário, custo e evidências offline sanitizadas da SEN-69.
-- [`docs/validation/product-golden-e2e.md`](docs/validation/product-golden-e2e.md):
-  golden set, jornadas, gates e métricas determinísticas da SEN-48.
-- [`docs/validation/safe-failure-matrix.md`](docs/validation/safe-failure-matrix.md):
-  falhas seguras, auditoria Git sanitizada e protocolo clean-room da SEN-66.
-- [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
-  validação estática e teardown do perfil AWS não aplicado.
-- [`infra/aws/demo/delivery/README.md`](infra/aws/demo/delivery/README.md):
-  workflows manuais, contrato OIDC/IAM, bootstrap e limites da entrega AWS.
+O [índice técnico](docs/README.md) organiza arquitetura, API, cards, segurança,
+runbooks, ADRs e relatórios de validação sem duplicar seus detalhes. GitFlow,
+papéis e critérios de revisão estão em [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Acesso e direitos
 
 Este repositório é público exclusivamente para leitura, clone e avaliação pela
 banca. A disponibilidade pública não concede autorização para copiar,
-modificar, redistribuir ou reutilizar o conteúdo.
+modificar, redistribuir ou reutilizar seu conteúdo.
 
 Não há arquivo `LICENSE`, não existe licença implícita de reutilização e todos
 os direitos permanecem reservados a Renan Mocelin.
