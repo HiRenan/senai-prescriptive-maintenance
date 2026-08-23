@@ -42,10 +42,13 @@ A versão atual contém:
 - configuração tipada e explícita para ambiente e URL PostgreSQL;
 - PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
   Compose;
+- imagens multi-stage da API e da fronteira web, construídas por bases fixadas
+  por digest e locks congelados, com processos não privilegiados e healthchecks;
 - automação Poe para bootstrap, formatação, lint, tipagem estrita, testes,
-  hooks, smoke e controle do serviço local;
+  hooks, smoke e controle dos serviços locais;
 - um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
-  como fronteira de integração, ainda sem interface;
+  como fronteira de integração e um processo HTTP exclusivo para liveness,
+  ainda sem interface;
 - manifesto de integridade dos materiais locais, duas fixtures públicas
   inteiramente sintéticas, uma baseline agregada e um inventário categórico de
   rótulos, ambos versionados sob a identidade pública da fonte;
@@ -111,9 +114,9 @@ Os componentes existentes são:
 | Componente | Responsabilidade atual |
 | --- | --- |
 | `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, settings, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
-| `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
-| `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
-| `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
+| `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
+| `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
+| `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco e aplicações em contêineres são opcionais. |
 | `data/` | Manifesto dos materiais locais, fixtures sintéticas, artefatos públicos aprovados e destinos ignorados para derivados canônicos locais. |
 
 O inventário detalhado está em
@@ -194,9 +197,12 @@ código; `check` é uma sequência fail-fast somente leitura.
 | `uv run --frozen python -m prescriptive_maintenance.data.cli check --help` | Exibe os caminhos exigidos para verificar um build local sem reescrever. |
 | `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
 | `uv run --frozen poe services-up` | Inicia o PostgreSQL local e aguarda o healthcheck. |
+| `uv run --frozen poe applications-build` | Constrói as imagens locais multi-stage da API e da web. |
+| `uv run --frozen poe applications-up` | Constrói e inicia PostgreSQL, API e web e aguarda os healthchecks. |
 | `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |
 | `uv run --frozen poe smoke` | Valida runtimes, configuração, Compose e liveness real. |
 | `uv run --frozen poe smoke --with-services` | Acrescenta a validação do PostgreSQL e do pgvector já iniciados. |
+| `uv run --frozen poe smoke --with-services --with-applications` | Acrescenta PostgreSQL, pgvector, health da web, liveness e OpenAPI v1 da API em contêineres. |
 
 Para incluir o banco no smoke:
 
@@ -210,6 +216,29 @@ Se `127.0.0.1:5432` estiver ocupada, escolha uma porta host livre por
 `PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT`. A porta interna permanece
 `5432`; os exemplos para PowerShell e Bash estão em
 [`infra/README.md`](infra/README.md).
+
+## Topologia containerizada local
+
+O fluxo completo usa o mesmo `compose.yaml` do banco, sem duplicar serviços. As
+imagens recebem somente os manifests, locks e fontes necessários pela allowlist
+de `.dockerignore`; materiais originais, demais dados, `.env`, Git, caches e
+dependências de desenvolvimento ficam fora do contexto e das imagens finais.
+
+Execute build, start, smoke e stop a partir da raiz:
+
+```powershell
+uv run --frozen poe applications-build
+uv run --frozen poe applications-up
+uv run --frozen poe smoke --with-services --with-applications
+uv run --frozen poe services-down
+```
+
+A API fica em `127.0.0.1:8000` e a liveness da web em `127.0.0.1:3000`. As
+portas host podem ser alteradas por
+`PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT` e
+`PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT`; as portas internas permanecem `8000`
+e `3000`. `applications-up` usa apenas a configuração local fictícia declarada
+no Compose, e `services-down` continua preservando o volume PostgreSQL.
 
 ## Configuração local
 

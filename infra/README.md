@@ -1,19 +1,19 @@
 # Infraestrutura local
 
-O ambiente local contém somente PostgreSQL 17 com pgvector. Ele não representa
-credenciais nem dados de produção e não inclui serviços de aplicação, filas,
-armazenamento de objetos ou recursos de nuvem.
+O ambiente local usa uma única topologia Compose com PostgreSQL 17/pgvector,
+API e a fronteira web sem interface. Ele não representa credenciais nem dados
+de produção e não inclui filas, armazenamento de objetos ou recursos de nuvem.
 
 ## Pré-requisitos
 
 - Docker Desktop com contêineres Linux;
 - Docker Compose v2;
-- porta `127.0.0.1:5432` livre, ou outra porta local livre escolhida
-  explicitamente.
+- portas `127.0.0.1:5432`, `127.0.0.1:8000` e `127.0.0.1:3000` livres, ou
+  outras portas locais livres escolhidas explicitamente.
 
-Execute os comandos abaixo a partir da raiz do repositório. A interface
-recomendada inicia o banco em modo detached, aguarda o healthcheck e o remove
-preservando os dados:
+Execute os comandos abaixo a partir da raiz do repositório. O fluxo existente
+de banco isolado continua iniciando somente o PostgreSQL em modo detached,
+aguarda o healthcheck e o remove preservando os dados:
 
 ```powershell
 uv run --frozen poe services-up
@@ -65,13 +65,73 @@ porta do contêiner permanece `5432`, e a publicação continua restrita a
 `PRESCRIPTIVE_MAINTENANCE_DATABASE_URL` para a mesma porta host. O comando
 `uv run --frozen poe smoke --with-services` é idêntico nos dois sistemas.
 
-## Imagem reproduzível
+## Topologia de aplicação
+
+O ciclo completo constrói as duas imagens, inicia os três serviços, aguarda os
+healthchecks, compara o OpenAPI servido com o snapshot v1 e encerra a topologia
+sem remover o volume:
+
+```powershell
+uv run --frozen poe applications-build
+uv run --frozen poe applications-up
+uv run --frozen poe smoke --with-services --with-applications
+uv run --frozen poe services-down
+```
+
+O Compose publica somente em loopback. Para escolher outras portas host no
+PowerShell antes de `applications-up` e do smoke:
+
+```powershell
+$env:PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT = "55432"
+$env:PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT = "58000"
+$env:PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT = "53000"
+```
+
+No Ubuntu:
+
+```bash
+export PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT=55432
+export PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT=58000
+export PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT=53000
+```
+
+As portas internas permanecem `5432`, `8000` e `3000`. A API recebe uma URL
+PostgreSQL exclusivamente local e fictícia apontada ao serviço `postgres`; a
+aplicação atual ainda não abre essa conexão. A web expõe somente sua liveness e
+continua sem UI.
+
+API e web usam raiz somente leitura, `/tmp` efêmero, todas as capabilities
+removidas e `no-new-privileges`. O healthcheck da web condiciona sua inicialização
+à API healthy, que por sua vez depende do PostgreSQL healthy.
+
+## Bases e insumos fixados
 
 O serviço usa pgvector `0.8.6` sobre PostgreSQL `17`, pela referência:
 
 ```text
 pgvector/pgvector:0.8.6-pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
 ```
+
+Os Dockerfiles multi-stage das aplicações usam os índices OCI fixados abaixo:
+
+```text
+python:3.13-slim-bookworm@sha256:00faa2debb87529f9f0764e9491d8ba400a3678976616c3bd7cb193745ac20d1
+ghcr.io/astral-sh/uv:0.9.4@sha256:c4089b0085cf4d38e38d5cdaa5e57752c1878a6f41f2e3a3a234dc5f23942cb4
+node:22-alpine3.22@sha256:cd7807368cf24826297cbad5dca1a44972ccfd770647db52a8c7589eb4599ac8
+```
+
+A API instala somente o grupo de produção por `uv sync --frozen --no-dev`; a
+web confirma o workspace por `pnpm install --frozen-lockfile --prod` e não tem
+dependências de aplicação. A allowlist de `.dockerignore` limita os contextos a
+manifests, locks e fontes necessários. Nenhuma etapa copia `.env`, Git, dados,
+materiais originais, caches, testes ou ferramentas de desenvolvimento para as
+imagens finais.
+
+Neste fluxo, reprodutibilidade significa bases imutáveis por digest, ferramentas
+e dependências fixadas, locks congelados e contexto controlado. O image ID local
+pode variar em razão de metadados e proveniência produzidos pelo BuildKit; não há
+promessa de identidade bit a bit, publicação em registry ou attestation nesta
+tarefa.
 
 O digest é o índice OCI multi-arquitetura da tag. O índice oferece
 `linux/amd64`, usado pelo Docker Desktop validado, e `linux/arm64`. Verifique a
@@ -114,9 +174,9 @@ docker compose stop
 docker compose up --wait
 ```
 
-`services-down` executa `docker compose down`: remove o contêiner e a rede deste
-projeto, mas preserva o volume nomeado. O próximo `services-up` recria o serviço
-sobre os dados existentes:
+`services-down` executa `docker compose down`: remove os contêineres e a rede
+deste projeto, mas preserva o volume nomeado. O próximo `services-up` recria o
+banco sobre os dados existentes; `applications-up` recria a topologia completa:
 
 ```powershell
 uv run --frozen poe services-down

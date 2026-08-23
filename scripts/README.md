@@ -21,6 +21,14 @@ e uma operação vetorial mínima, use:
 uv run --frozen poe smoke --with-services
 ```
 
+Quando a topologia completa já foi iniciada por `applications-up`, acrescente a
+validação dos estados healthy, das duas liveness e da igualdade do OpenAPI
+servido pela API com o snapshot v1 rastreado:
+
+```powershell
+uv run --frozen poe smoke --with-services --with-applications
+```
+
 O smoke nunca inicia, interrompe ou remove recursos Docker. Esse ciclo pertence
 às tarefas `services-up` e `services-down`.
 

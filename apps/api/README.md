@@ -113,6 +113,16 @@ aprovação atômica da substituta. O prefixo histórico e as identidades das ve
 são append-only. Esse repositório não abre conexão com PostgreSQL, e o domínio
 não processa bytes, cria chunks nem expõe novas rotas.
 
+## Execução em contêiner
+
+O Dockerfile multi-stage instala somente as dependências de produção pelo
+`uv.lock`, executa o Uvicorn como UID/GID `65532` e verifica
+`GET /health/live`. O build parte da raiz porque o lock do workspace é único;
+`.dockerignore` limita o contexto aos manifests, lock e fontes do pacote.
+
+O fluxo completo de build, start, smoke da liveness e do snapshot OpenAPI v1 e
+stop está em [`infra/README.md`](../../infra/README.md).
+
 ## Configuração
 
 `prescriptive_maintenance.settings.Settings` carrega explicitamente dois campos

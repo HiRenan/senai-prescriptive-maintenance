@@ -1,0 +1,17 @@
+**
+!pyproject.toml
+!uv.lock
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/api/
+!apps/api/Dockerfile
+!apps/api/README.md
+!apps/api/pyproject.toml
+!apps/api/src/
+!apps/api/src/**
+!apps/web/
+!apps/web/Dockerfile
+!apps/web/package.json
+!apps/web/server.mjs

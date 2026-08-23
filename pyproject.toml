@@ -111,15 +111,24 @@ cmd = "pre-commit run --all-files"
 help = "Inicia o PostgreSQL local e aguarda o healthcheck."
 cmd = "docker compose up --detach --wait postgres"
 
+[tool.poe.tasks.applications-build]
+help = "Constrói as imagens locais da API e da web pelos locks congelados."
+cmd = "docker compose build api web"
+
+[tool.poe.tasks.applications-up]
+help = "Inicia PostgreSQL, API e web e aguarda todos os healthchecks."
+cmd = "docker compose up --detach --build --wait postgres api web"
+
 [tool.poe.tasks.services-down]
 help = "Remove contêiner e rede locais, preservando o volume."
 cmd = "docker compose down"
 
 [tool.poe.tasks.smoke]
 help = "Valida runtimes, configuração e liveness; banco é opcional."
-script = "scripts.smoke:main(with_services, environ.get('POE_EXTRA_ARGS'))"
+script = "scripts.smoke:main(with_services, with_applications, environ.get('POE_EXTRA_ARGS'))"
 args = [
   { name = "with_services", options = ["--with-services"], type = "boolean", help = "Verifica o PostgreSQL já iniciado e o pgvector." },
+  { name = "with_applications", options = ["--with-applications"], type = "boolean", help = "Verifica API, web e OpenAPI v1 em contêineres já iniciados." },
 ]
 
 [tool.ruff]
