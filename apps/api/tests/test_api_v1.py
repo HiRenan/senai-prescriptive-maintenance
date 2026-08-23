@@ -29,12 +29,14 @@ from prescriptive_maintenance.fakes import (
     SyntheticDocumentService,
     SyntheticGenerationPort,
     SyntheticModelPort,
+    SyntheticRetrievalPort,
     build_synthetic_analysis_service,
 )
 from prescriptive_maintenance.main import create_app
 from prescriptive_maintenance.ports import (
     DocumentEvidence,
     ModelPrediction,
+    PortContractError,
     PortUnavailableError,
 )
 from prescriptive_maintenance.services import AnalysisService
@@ -328,23 +330,39 @@ class UnavailableRetrievalPort:
         raise PortUnavailableError("synthetic retrieval outage")
 
 
-class UnsafeLocalPathRetrievalPort:
+class UnsafeCitation(Citation):
+    local_path: str
+
+
+class UnsafeCitationRetrievalPort:
     def retrieve(self, retrieval_key: str, *, top_k: int) -> DocumentEvidence:
         del retrieval_key, top_k
-        unsafe_citation = cast(
-            Citation,
-            {
-                "document_id": "doc_synthetic_manual",
-                "document_version": "docver_synthetic_manual_v1",
-                "chunk": "chunk_synthetic_manual_01",
-                "page_number": 1,
-                "local_path": r"C:\private\manual.pdf",
-            },
+        unsafe_citation = UnsafeCitation(
+            document_id="doc_synthetic_manual",
+            document_version="docver_synthetic_manual_v1",
+            chunk="chunk_synthetic_manual_01",
+            page_number=1,
+            local_path=r"C:\synthetic-private\manual.pdf",
         )
         return DocumentEvidence(
             support_score=0.88,
             citations=(unsafe_citation,),
         )
+
+
+class TrackingGenerationPort(SyntheticGenerationPort):
+    def __init__(self) -> None:
+        self.calls = 0
+        self.received_evidence: DocumentEvidence | None = None
+
+    def generate(
+        self,
+        diagnosis: Diagnosis,
+        evidence: DocumentEvidence,
+    ) -> Prescription:
+        self.calls += 1
+        self.received_evidence = evidence
+        return super().generate(diagnosis, evidence)
 
 
 def test_retrieval_unavailability_preserves_model_support_and_neighbors() -> None:
@@ -370,11 +388,23 @@ def test_retrieval_unavailability_preserves_model_support_and_neighbors() -> Non
     assert "synthetic retrieval outage" not in response.text
 
 
-def test_retrieval_evidence_with_local_path_is_rejected_and_never_propagated() -> None:
+def test_retrieval_boundary_rejects_subclass_and_preserves_valid_citations() -> None:
+    retrieval = UnsafeCitationRetrievalPort()
+    generation = TrackingGenerationPort()
+
+    with pytest.raises(
+        PortContractError,
+        match="Retrieval evidence violates the internal contract",
+    ) as raised:
+        retrieval.retrieve("documented", top_k=1)
+    assert str(raised.value) == "Retrieval evidence violates the internal contract."
+    assert "synthetic-private" not in str(raised.value)
+    assert "manual.pdf" not in str(raised.value)
+
     service = AnalysisService(
         model=SyntheticModelPort(),
-        retrieval=UnsafeLocalPathRetrievalPort(),
-        generation=SyntheticGenerationPort(),
+        retrieval=retrieval,
+        generation=generation,
     )
 
     with TestClient(create_app(analysis_service=service)) as client:
@@ -386,9 +416,41 @@ def test_retrieval_evidence_with_local_path_is_rejected_and_never_propagated() -
     assert response.status_code == 200
     assert response.json()["outcome"] == "degraded"
     assert response.json()["citations"] == []
+    assert generation.calls == 0
+    assert generation.received_evidence is None
     assert "local_path" not in response.text
-    assert "private" not in response.text
+    assert "synthetic-private" not in response.text
     assert "manual.pdf" not in response.text
+
+    valid_generation = TrackingGenerationPort()
+    valid_service = AnalysisService(
+        model=SyntheticModelPort(),
+        retrieval=SyntheticRetrievalPort(),
+        generation=valid_generation,
+    )
+
+    with TestClient(create_app(analysis_service=valid_service)) as client:
+        valid_response = client.post(
+            "/analysis",
+            json=_request_payload("documented_fault"),
+        )
+
+    assert valid_response.status_code == 200
+    assert valid_generation.calls == 1
+    assert valid_generation.received_evidence is not None
+    citations = valid_generation.received_evidence.citations
+    assert type(citations) is tuple
+    assert all(type(citation) is Citation for citation in citations)
+    assert tuple(citation.chunk for citation in citations) == (
+        "chunk_synthetic_manual_01",
+        "chunk_synthetic_manual_02",
+        "chunk_synthetic_manual_03",
+    )
+    assert tuple(item["chunk"] for item in valid_response.json()["citations"]) == (
+        "chunk_synthetic_manual_01",
+        "chunk_synthetic_manual_02",
+        "chunk_synthetic_manual_03",
+    )
 
 
 def test_analysis_query_returns_created_result_and_404_for_unknown_id() -> None:

@@ -24,9 +24,9 @@ class PortContractError(Exception):
 
 
 def _validate_citations(value: object) -> None:
+    # Pydantic subclasses may declare fields forbidden on the public base model.
     if not isinstance(value, tuple) or any(
-        not isinstance(citation, Citation)
-        for citation in cast(tuple[object, ...], value)
+        type(citation) is not Citation for citation in cast(tuple[object, ...], value)
     ):
         raise PortContractError("Retrieval evidence violates the internal contract.")
 
