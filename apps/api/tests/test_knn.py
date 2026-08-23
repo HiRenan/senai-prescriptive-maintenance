@@ -247,6 +247,19 @@ def test_model_port_exposes_only_opaque_neighbor_contract() -> None:
         } & set(payload)
 
 
+def test_model_port_exposes_exact_unicode_diagnosis_summary() -> None:
+    prediction = KnnModelPortAdapter(_model()).predict(
+        _analysis_features(1.0),
+        top_k=1,
+    )
+
+    assert prediction.diagnosis is not None
+    assert prediction.diagnosis.summary == (
+        "Classe candidata da baseline k-NN; o suporte é uma "
+        "heurística de votos, não uma probabilidade."
+    )
+
+
 def test_fit_and_prediction_are_repeatable() -> None:
     first = _model()
     second = _model()

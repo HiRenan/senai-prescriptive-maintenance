@@ -328,8 +328,8 @@ class KnnModelPortAdapter:
             diagnosis=Diagnosis(
                 code=candidate_label.fault_code,
                 summary=(
-                    "Classe candidata da baseline k-NN; o suporte Ã© uma "
-                    "heurÃ­stica de votos, nÃ£o uma probabilidade."
+                    "Classe candidata da baseline k-NN; o suporte é uma "
+                    "heurística de votos, não uma probabilidade."
                 ),
             ),
             support_score=candidate.support_score,
