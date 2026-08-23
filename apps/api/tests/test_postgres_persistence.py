@@ -18,8 +18,11 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT,
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
+    assert_ambiguous_zoneinfo_datetime_is_canonical,
     assert_lying_datetimes_are_canonical,
     assert_persisted_scalars_are_canonical,
+    synthetic_ambiguous_zoneinfo_document,
+    synthetic_invalid_civil_datetime_document,
     synthetic_lying_datetime_aggregates,
     synthetic_tainted_scalar_aggregates,
 )
@@ -479,6 +482,55 @@ def test_postgres_ignores_hostile_datetime_overrides_and_preserves_instant(
         recovered_document,
         recovered_analysis,
         sources,
+    )
+
+
+def test_postgres_rejects_invalid_civil_datetime_without_executing_reducer(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    document, source, zone = synthetic_invalid_civil_datetime_document()
+    with (
+        PostgresUnitOfWork(postgres_connection_factory) as transaction,
+        pytest.raises(ValueError) as caught,
+    ):
+        transaction.documents.add(document)
+
+    assert type(caught.value) is ValueError
+    assert str(caught.value) == "created_at could not be canonicalized safely."
+    assert source.virtual_reads == []
+    assert type(source).reducer_callable_reads == []
+    assert zone.virtual_reads == []
+    with PostgresUnitOfWork(postgres_connection_factory) as query:
+        assert query.documents.get(document.document_id) is None
+
+
+def test_postgres_canonicalizes_ambiguous_zoneinfo_without_virtual_reads(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    document, source = synthetic_ambiguous_zoneinfo_document()
+    with PostgresUnitOfWork(postgres_connection_factory) as transaction:
+        transaction.documents.add(document)
+        transaction.commit()
+
+    with PostgresUnitOfWork(postgres_connection_factory) as query:
+        recovered_document = query.documents.get(document.document_id)
+
+    assert recovered_document is not None
+    assert_ambiguous_zoneinfo_datetime_is_canonical(
+        recovered_document,
+        source,
     )
 
 

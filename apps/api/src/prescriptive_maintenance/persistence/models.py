@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Final, cast
@@ -22,11 +21,9 @@ _CONFIGURATION_ID: Final = re.compile(r"^config_[a-z0-9_.-]{3,64}$")
 _SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
 _DATETIME_REDUCTION_PROTOCOL: Final = 4
 _DATETIME_STATE_SIZE: Final = 10
+_DATETIME_FOLD_MASK: Final = 0x80
+_DATETIME_MONTH_MASK: Final = 0x7F
 _DATETIME_MICROSECOND_START: Final = 7
-_DATETIME_FROM_STATE: Final = cast(
-    Callable[[type[datetime], bytes, tzinfo], datetime],
-    datetime.__new__,
-)
 
 
 def _validate_identifier(value: str, pattern: re.Pattern[str], label: str) -> None:
@@ -37,8 +34,9 @@ def _validate_identifier(value: str, pattern: re.Pattern[str], label: str) -> No
 def _validate_aware_datetime(value: object, label: str) -> None:
     if not isinstance(value, datetime):
         raise ValueError(f"{label} must be timezone-aware.")
+    base_value = _base_datetime(value)
     try:
-        offset = datetime.utcoffset(value)
+        offset = datetime.utcoffset(base_value)
     except Exception:
         raise ValueError(f"{label} must be timezone-aware.") from None
     if offset is None:
@@ -55,7 +53,7 @@ def _validated_datetime_state(
     value: datetime,
     *,
     expected_constructor: type[datetime],
-) -> tuple[bytes, tzinfo]:
+) -> tuple[bytes, tzinfo | None]:
     raw_reduction: object = datetime.__reduce_ex__(
         value,
         _DATETIME_REDUCTION_PROTOCOL,
@@ -73,47 +71,84 @@ def _validated_datetime_state(
     if type(raw_arguments) is not tuple:
         raise ValueError("created_at could not be canonicalized safely.")
     arguments = cast(tuple[object, ...], raw_arguments)
-    if len(arguments) != 2:
+    if len(arguments) not in {1, 2}:
         raise ValueError("created_at could not be canonicalized safely.")
 
-    state, zone = arguments
-    if (
-        type(state) is not bytes
-        or len(state) != _DATETIME_STATE_SIZE
-        or not isinstance(zone, tzinfo)
-    ):
+    state = arguments[0]
+    zone = arguments[1] if len(arguments) == 2 else None
+    if type(state) is not bytes or len(state) != _DATETIME_STATE_SIZE:
         raise ValueError("created_at could not be canonicalized safely.")
-    return state, zone
+    if len(arguments) == 2 and not isinstance(zone, tzinfo):
+        raise ValueError("created_at could not be canonicalized safely.")
+    return state, cast(tzinfo | None, zone)
 
 
-def _base_utc_datetime(value: datetime) -> datetime:
-    """Preserve an aware instant in an exact UTC ``datetime``."""
+def _base_datetime(value: datetime) -> datetime:
+    """Decode and validate CPython state into an exact, non-virtual datetime."""
 
-    _validate_aware_datetime(value, "created_at")
     try:
         source_state, source_zone = _validated_datetime_state(
             value,
             expected_constructor=type(value),
         )
-        base_value = _DATETIME_FROM_STATE(datetime, source_state, source_zone)
-        if type(base_value) is not datetime:
+        year = (source_state[0] << 8) | source_state[1]
+        month = source_state[2] & _DATETIME_MONTH_MASK
+        day = source_state[3]
+        hour = source_state[4]
+        minute = source_state[5]
+        second = source_state[6]
+        microsecond = (source_state[7] << 16) | (source_state[8] << 8) | source_state[9]
+        fold = (source_state[2] & _DATETIME_FOLD_MASK) >> 7
+        civil_value = datetime(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            microsecond,
+            fold=fold,
+        )
+        civil_state, civil_zone = _validated_datetime_state(
+            civil_value,
+            expected_constructor=datetime,
+        )
+        if (
+            type(civil_value) is not datetime
+            or civil_value.fold != fold
+            or civil_state != source_state
+            or civil_zone is not None
+        ):
             raise ValueError("created_at could not be canonicalized safely.")
 
+        base_value = datetime.replace(civil_value, tzinfo=source_zone)
         cloned_state, cloned_zone = _validated_datetime_state(
             base_value,
             expected_constructor=datetime,
         )
-        if cloned_state != source_state or cloned_zone is not source_zone:
-            raise ValueError("created_at could not be canonicalized safely.")
-
-        source_offset = datetime.utcoffset(value)
-        cloned_offset = datetime.utcoffset(base_value)
         if (
-            source_offset is None
-            or cloned_offset is None
-            or timedelta.__eq__(source_offset, cloned_offset) is not True
+            type(base_value) is not datetime
+            or cloned_state != source_state
+            or cloned_zone is not source_zone
         ):
             raise ValueError("created_at could not be canonicalized safely.")
+    except Exception:
+        raise ValueError("created_at could not be canonicalized safely.") from None
+    return base_value
+
+
+def _base_utc_datetime(value: datetime) -> datetime:
+    """Preserve an aware instant in an exact UTC ``datetime``."""
+
+    base_value = _base_datetime(value)
+    try:
+        base_state, base_zone = _validated_datetime_state(
+            base_value,
+            expected_constructor=datetime,
+        )
+        base_offset = datetime.utcoffset(base_value)
+        if base_offset is None:
+            raise ValueError("created_at must be timezone-aware.")
 
         canonical = datetime.astimezone(base_value, UTC)
         if type(canonical) is not datetime:
@@ -124,10 +159,11 @@ def _base_utc_datetime(value: datetime) -> datetime:
         )
         canonical_offset = datetime.utcoffset(canonical)
         if (
-            canonical_zone is not UTC
+            base_zone is None
+            or canonical_zone is not UTC
             or canonical_offset is None
             or timedelta.__eq__(canonical_offset, timedelta(0)) is not True
-            or source_state[_DATETIME_MICROSECOND_START:]
+            or base_state[_DATETIME_MICROSECOND_START:]
             != canonical_state[_DATETIME_MICROSECOND_START:]
             or timedelta.__eq__(
                 datetime.__sub__(canonical, base_value),
