@@ -468,7 +468,7 @@
             }
           },
           "503": {
-            "description": "O modelo não pode produzir um resultado seguro.",
+            "description": "A análise está temporariamente indisponível.",
             "content": {
               "application/json": {
                 "schema": {
@@ -819,8 +819,8 @@
               }
             }
           },
-          "422": {
-            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+          "503": {
+            "description": "O ciclo documental está temporariamente indisponível.",
             "content": {
               "application/json": {
                 "schema": {
@@ -868,8 +868,28 @@
               }
             }
           },
+          "409": {
+            "description": "O comando documental conflita com o estado armazenado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "O ciclo documental está temporariamente indisponível.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1047,6 +1067,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "O ciclo documental está temporariamente indisponível.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1102,7 +1132,7 @@
             }
           },
           "409": {
-            "description": "Transição documental inválida.",
+            "description": "O comando documental conflita com o estado armazenado ou a transição solicitada não é válida para o estado atual.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1113,6 +1143,16 @@
           },
           "422": {
             "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "O ciclo documental está temporariamente indisponível.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1175,7 +1215,7 @@
             }
           },
           "409": {
-            "description": "Transição documental inválida.",
+            "description": "O comando documental conflita com o estado armazenado ou a transição solicitada não é válida para o estado atual.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1186,6 +1226,16 @@
           },
           "422": {
             "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "O ciclo documental está temporariamente indisponível.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1238,7 +1288,7 @@
             }
           },
           "409": {
-            "description": "Transição documental inválida.",
+            "description": "O comando documental conflita com o estado armazenado ou a transição solicitada não é válida para o estado atual.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1249,6 +1299,16 @@
           },
           "422": {
             "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "O ciclo documental está temporariamente indisponível.",
             "content": {
               "application/json": {
                 "schema": {
