@@ -1106,8 +1106,30 @@ def audit_network_and_auth(
         fail("A rota default da API não exige JWT.")
 
     client = after(require_count(resources, "aws_cognito_user_pool_client", 1)[0])
-    if client.get("generate_secret") is not False:
-        fail("O cliente Cognito gera credencial permanente.")
+    token_units = sequence(
+        client.get("token_validity_units"), context="cognito.token_validity_units"
+    )
+    if (
+        client.get("generate_secret") is not False
+        or client.get("explicit_auth_flows")
+        != [
+            "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+            "ALLOW_REFRESH_TOKEN_AUTH",
+            "ALLOW_USER_SRP_AUTH",
+        ]
+        or client.get("access_token_validity") != 2
+        or client.get("id_token_validity") != 2
+        or client.get("refresh_token_validity") != 1
+        or token_units
+        != [
+            {
+                "access_token": "hours",
+                "id_token": "hours",
+                "refresh_token": "days",
+            }
+        ]
+    ):
+        fail("Cliente Cognito diverge dos fluxos mínimos ou da validade protegida.")
 
     user_pool = after(require_count(resources, "aws_cognito_user_pool", 1)[0])
     if user_pool.get("deletion_protection") != "INACTIVE":

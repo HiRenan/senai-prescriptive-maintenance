@@ -210,3 +210,6 @@ UI, Textract, alta disponibilidade ou multiambiente.
 
 A presença do código não representa um ambiente AWS existente. A SEN-67 não
 executa `apply`, não envia imagens e não cria credenciais, usuários ou conteúdo.
+A automação manual e protegida da SEN-68 está separada em
+[`aws/demo/delivery/README.md`](aws/demo/delivery/README.md); OIDC, roles,
+environments, secrets e qualquer execução real continuam pendências externas.

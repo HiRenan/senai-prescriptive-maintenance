@@ -53,6 +53,10 @@ A versão atual contém:
 - um perfil Terraform AWS demo, ainda não aplicado, com frontend S3 privado por
   CloudFront/OAC, API Gateway protegida por Cognito, imagem da API em Fargate
   privado, filas, storage versionado, logs, alarmes, Budget e teardown explícito;
+- quatro workflows AWS protegidos: validação inteiramente offline em pull
+  request e plan, deploy por digest com smoke autenticado e teardown somente
+  manuais, separados por environment/role OIDC; bootstrap e execução reais não
+  foram realizados;
 - automação Poe para bootstrap, formatação, lint, tipagem estrita, testes,
   hooks, smoke e controle dos serviços locais;
 - um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
@@ -142,9 +146,9 @@ Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
 aplicação, upload ou armazenamento de bytes documentais, composição operacional
 autorizada com artefatos reais, busca semântica real por vizinhos, configuração
 operacional ou chamada automática a LLM, autenticação, infraestrutura AWS
-aplicada, deploy ou interface web. A factory HTTP padrão permanece inteiramente
-sintética; a integração real exige injeção explícita e nenhum modelo avaliado
-está aprovado para automação.
+aplicada, bootstrap OIDC/IAM configurado, execução real de deploy ou interface
+web. A factory HTTP padrão permanece inteiramente sintética; a integração real
+exige injeção explícita e nenhum modelo avaliado está aprovado para automação.
 
 ## Arquitetura atual
 
@@ -162,7 +166,7 @@ Os componentes existentes são:
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
-| `infra/aws/demo/` | Perfil Terraform declarativo, privado e removível para uma demo single-AZ; nenhum recurso foi aplicado. |
+| `infra/aws/demo/` | Perfil Terraform declarativo, privado e removível para uma demo single-AZ, com automação manual protegida ainda não configurada nem executada na AWS. |
 | `data/` | Manifesto dos materiais locais, fixtures sintéticas, artefatos públicos aprovados e destinos ignorados para derivados canônicos locais. |
 
 O inventário detalhado está em
@@ -398,8 +402,8 @@ implementadas**:
   semântica real, adapters reais, vetores e configuração de LLM;
 - autenticação, autorização, métricas e exportação de telemetria;
 - frontend ou qualquer experiência de usuário;
-- infraestrutura AWS aplicada, pipeline de deploy, release publicada ou
-  ambiente de produção.
+- infraestrutura AWS aplicada, bootstrap externo OIDC/IAM, execução real do
+  pipeline manual, release publicada ou ambiente de produção.
 
 Cada capacidade deverá entrar por tarefa própria, com critérios verificáveis e
 sem enfraquecer a fronteira dos materiais locais.
@@ -424,6 +428,8 @@ sem enfraquecer a fronteira dos materiais locais.
   binding autorizado, cinco estados, persistência e limites da SEN-46.
 - [`infra/aws/demo/README.md`](infra/aws/demo/README.md): arquitetura, custo,
   validação estática e teardown do perfil AWS não aplicado.
+- [`infra/aws/demo/delivery/README.md`](infra/aws/demo/delivery/README.md):
+  workflows manuais, contrato OIDC/IAM, bootstrap e limites da entrega AWS.
 
 ## Acesso e direitos
 

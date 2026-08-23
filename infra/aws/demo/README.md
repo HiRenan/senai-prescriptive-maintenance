@@ -93,7 +93,8 @@ O ECR nasce vazio. `api_desired_count = 0` permite criar a fundação sem tentar
 executar um digest ausente. Depois que a imagem real construída pelo Dockerfile
 da SEN-49 for enviada ao repositório, um plano posterior informa o digest
 `sha256:...` e muda a contagem para `1`. Publicação e automação de deploy não
-fazem parte da SEN-67.
+fazem parte da SEN-67; a SEN-68 acrescenta o fluxo manual protegido descrito em
+[`delivery/README.md`](delivery/README.md), ainda sem execução AWS.
 
 SQS, DLQ e `worker-contract.v1.json` definem a fronteira assíncrona mínima. Uma
 mensagem referencia uma versão imutável do objeto e seu SHA-256; o consumidor
@@ -329,7 +330,16 @@ Riscos aceitos pelo prazo e custo:
   o Terraform falha antes de um plano real que reutilize os placeholders;
 - habilitar Bedrock acrescenta custo por modelo e exige uma nova estimativa;
 - não há Aurora, RDS, Textract, WAF pago, alta disponibilidade, multiambiente,
-  gestão de DNS/certificado ou deploy automático.
+  gestão de DNS/certificado ou deploy automático por evento.
+
+## Entrega manual protegida
+
+[`delivery/README.md`](delivery/README.md) documenta os quatro workflows da
+SEN-68, o contrato OIDC/IAM, o bootstrap externo, o deploy por digest, o smoke
+condicionado à SEN-46 e o inventário pós-teardown. Plan, deploy e teardown são
+estritamente manuais, exigem o HEAD atual de `main`, SHA completo idêntico,
+environment distinto e role temporária distinta. A implementação não representa
+uma conta configurada ou uma execução AWS concluída.
 
 Referências de arquitetura:
 
