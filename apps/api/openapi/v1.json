@@ -1,0 +1,2813 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Prescriptive Maintenance API",
+    "summary": "Contrato v1 de análise e ciclo documental.",
+    "description": "Contrato público congelado com fakes inteiramente sintéticos; não executa modelo, recuperação, geração ou persistência reais.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health/live": {
+      "get": {
+        "summary": " Liveness",
+        "operationId": "_liveness_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response  Liveness Health Live Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analysis": {
+      "post": {
+        "tags": [
+          "analysis"
+        ],
+        "summary": "Executa uma análise prescritiva",
+        "operationId": "createAnalysis",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              },
+              "examples": {
+                "normal": {
+                  "summary": "Entrada sintética normal",
+                  "value": {
+                    "features": {
+                      "z_rms_velocity_mm_s": 1.2,
+                      "temperature_c": 42.0,
+                      "x_rms_velocity_mm_s": 1.1,
+                      "z_peak_acceleration_g": 0.3,
+                      "x_peak_acceleration_g": 0.25,
+                      "z_peak_vel_comp_freq_hz": 60.0,
+                      "x_peak_vel_comp_freq_hz": 58.0,
+                      "z_rms_acceleration_g": 0.08,
+                      "x_rms_acceleration_g": 0.07,
+                      "z_kurtosis": 3.1,
+                      "x_kurtosis": 3.0,
+                      "z_crest_factor": 1.8,
+                      "x_crest_factor": 1.7,
+                      "z_peak_velocity_mm_s": 2.4,
+                      "x_peak_velocity_mm_s": 2.2,
+                      "z_high_freq_rms_accel_g": 0.04,
+                      "x_high_freq_rms_accel_g": 0.03,
+                      "rpm": 1000.0
+                    },
+                    "top_k": 3
+                  }
+                },
+                "documented_fault": {
+                  "summary": "Entrada sintética documented_fault",
+                  "value": {
+                    "features": {
+                      "z_rms_velocity_mm_s": 1.2,
+                      "temperature_c": 42.0,
+                      "x_rms_velocity_mm_s": 1.1,
+                      "z_peak_acceleration_g": 0.3,
+                      "x_peak_acceleration_g": 0.25,
+                      "z_peak_vel_comp_freq_hz": 60.0,
+                      "x_peak_vel_comp_freq_hz": 58.0,
+                      "z_rms_acceleration_g": 0.08,
+                      "x_rms_acceleration_g": 0.07,
+                      "z_kurtosis": 3.1,
+                      "x_kurtosis": 3.0,
+                      "z_crest_factor": 1.8,
+                      "x_crest_factor": 1.7,
+                      "z_peak_velocity_mm_s": 2.4,
+                      "x_peak_velocity_mm_s": 2.2,
+                      "z_high_freq_rms_accel_g": 0.04,
+                      "x_high_freq_rms_accel_g": 0.03,
+                      "rpm": 1100.0
+                    },
+                    "top_k": 3
+                  }
+                },
+                "undocumented_fault": {
+                  "summary": "Entrada sintética undocumented_fault",
+                  "value": {
+                    "features": {
+                      "z_rms_velocity_mm_s": 1.2,
+                      "temperature_c": 42.0,
+                      "x_rms_velocity_mm_s": 1.1,
+                      "z_peak_acceleration_g": 0.3,
+                      "x_peak_acceleration_g": 0.25,
+                      "z_peak_vel_comp_freq_hz": 60.0,
+                      "x_peak_vel_comp_freq_hz": 58.0,
+                      "z_rms_acceleration_g": 0.08,
+                      "x_rms_acceleration_g": 0.07,
+                      "z_kurtosis": 3.1,
+                      "x_kurtosis": 3.0,
+                      "z_crest_factor": 1.8,
+                      "x_crest_factor": 1.7,
+                      "z_peak_velocity_mm_s": 2.4,
+                      "x_peak_velocity_mm_s": 2.2,
+                      "z_high_freq_rms_accel_g": 0.04,
+                      "x_high_freq_rms_accel_g": 0.03,
+                      "rpm": 1200.0
+                    },
+                    "top_k": 3
+                  }
+                },
+                "out_of_distribution": {
+                  "summary": "Entrada sintética out_of_distribution",
+                  "value": {
+                    "features": {
+                      "z_rms_velocity_mm_s": 1.2,
+                      "temperature_c": 42.0,
+                      "x_rms_velocity_mm_s": 1.1,
+                      "z_peak_acceleration_g": 0.3,
+                      "x_peak_acceleration_g": 0.25,
+                      "z_peak_vel_comp_freq_hz": 60.0,
+                      "x_peak_vel_comp_freq_hz": 58.0,
+                      "z_rms_acceleration_g": 0.08,
+                      "x_rms_acceleration_g": 0.07,
+                      "z_kurtosis": 3.1,
+                      "x_kurtosis": 3.0,
+                      "z_crest_factor": 1.8,
+                      "x_crest_factor": 1.7,
+                      "z_peak_velocity_mm_s": 2.4,
+                      "x_peak_velocity_mm_s": 2.2,
+                      "z_high_freq_rms_accel_g": 0.04,
+                      "x_high_freq_rms_accel_g": 0.03,
+                      "rpm": 1300.0
+                    },
+                    "top_k": 3
+                  }
+                },
+                "degraded": {
+                  "summary": "Entrada sintética degraded",
+                  "value": {
+                    "features": {
+                      "z_rms_velocity_mm_s": 1.2,
+                      "temperature_c": 42.0,
+                      "x_rms_velocity_mm_s": 1.1,
+                      "z_peak_acceleration_g": 0.3,
+                      "x_peak_acceleration_g": 0.25,
+                      "z_peak_vel_comp_freq_hz": 60.0,
+                      "x_peak_vel_comp_freq_hz": 58.0,
+                      "z_rms_acceleration_g": 0.08,
+                      "x_rms_acceleration_g": 0.07,
+                      "z_kurtosis": 3.1,
+                      "x_kurtosis": 3.0,
+                      "z_crest_factor": 1.8,
+                      "x_crest_factor": 1.7,
+                      "z_peak_velocity_mm_s": 2.4,
+                      "x_peak_velocity_mm_s": 2.2,
+                      "z_high_freq_rms_accel_g": 0.04,
+                      "x_high_freq_rms_accel_g": 0.03,
+                      "rpm": 1400.0
+                    },
+                    "top_k": 3
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Um dos cinco resultados fechados da API v1.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResponse"
+                },
+                "examples": {
+                  "normal": {
+                    "summary": "Resultado sintético normal",
+                    "value": {
+                      "analysis_id": "ana_synthetic_normal",
+                      "outcome": "normal",
+                      "diagnosis": {
+                        "code": "synthetic_normal",
+                        "summary": "Condição sintética dentro da faixa esperada."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.98
+                      },
+                      "abstention": null,
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_normal",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_normal",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_normal",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [],
+                      "warnings": []
+                    }
+                  },
+                  "documented_fault": {
+                    "summary": "Resultado sintético documented_fault",
+                    "value": {
+                      "analysis_id": "ana_synthetic_documented_fault",
+                      "outcome": "documented_fault",
+                      "diagnosis": {
+                        "code": "synthetic_documented_fault",
+                        "summary": "Falha sintética com documentação aprovada."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.92
+                      },
+                      "abstention": null,
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_documented_fault",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_documented_fault",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_documented_fault",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": {
+                        "summary": "Programar inspeção sintética controlada.",
+                        "priority": "scheduled",
+                        "actions": [
+                          "Confirmar a condição em uma nova leitura sintética.",
+                          "Revisar o manual sintético citado."
+                        ]
+                      },
+                      "citations": [
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_01",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 1"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_02",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 2"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_03",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 3"
+                        }
+                      ],
+                      "warnings": []
+                    }
+                  },
+                  "undocumented_fault": {
+                    "summary": "Resultado sintético undocumented_fault",
+                    "value": {
+                      "analysis_id": "ana_synthetic_undocumented_fault",
+                      "outcome": "undocumented_fault",
+                      "diagnosis": {
+                        "code": "synthetic_undocumented_fault",
+                        "summary": "Falha sintética sem documentação aprovada."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.79
+                      },
+                      "abstention": {
+                        "reason": "undocumented_fault",
+                        "message": "Não há documentação suficiente para prescrever uma ação."
+                      },
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_undocumented_fault",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_undocumented_fault",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_undocumented_fault",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [],
+                      "warnings": [
+                        {
+                          "code": "documentation_not_found",
+                          "message": "O diagnóstico não possui suporte documental aprovado."
+                        }
+                      ]
+                    }
+                  },
+                  "out_of_distribution": {
+                    "summary": "Resultado sintético out_of_distribution",
+                    "value": {
+                      "analysis_id": "ana_synthetic_out_of_distribution",
+                      "outcome": "out_of_distribution",
+                      "diagnosis": null,
+                      "support": {
+                        "level": "insufficient",
+                        "support_score": 0.05
+                      },
+                      "abstention": {
+                        "reason": "out_of_distribution",
+                        "message": "A entrada sintética está fora da distribuição suportada."
+                      },
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_reference_fault",
+                          "distance": 1.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_reference_fault",
+                          "distance": 2.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_reference_fault",
+                          "distance": 3.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [],
+                      "warnings": [
+                        {
+                          "code": "out_of_distribution",
+                          "message": "Nenhuma prescrição foi produzida."
+                        }
+                      ]
+                    }
+                  },
+                  "degraded": {
+                    "summary": "Resultado sintético degraded",
+                    "value": {
+                      "analysis_id": "ana_synthetic_degraded",
+                      "outcome": "degraded",
+                      "diagnosis": {
+                        "code": "synthetic_degraded",
+                        "summary": "Condição sintética com dependência indisponível."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.72
+                      },
+                      "abstention": {
+                        "reason": "dependency_unavailable",
+                        "message": "A análise parcial não permite uma prescrição segura."
+                      },
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_degraded",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_degraded",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_degraded",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_01",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 1"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_02",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 2"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_03",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 3"
+                        }
+                      ],
+                      "warnings": [
+                        {
+                          "code": "dependency_unavailable",
+                          "message": "Recuperação ou geração está temporariamente indisponível."
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "O modelo não pode produzir um resultado seguro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analysis/{analysis_id}": {
+      "get": {
+        "tags": [
+          "analysis"
+        ],
+        "summary": "Consulta uma análise",
+        "operationId": "getAnalysis",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^ana_[a-z0-9_]{3,64}$",
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado previamente criado no catálogo sintético.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResponse"
+                },
+                "examples": {
+                  "normal": {
+                    "summary": "Resultado sintético normal",
+                    "value": {
+                      "analysis_id": "ana_synthetic_normal",
+                      "outcome": "normal",
+                      "diagnosis": {
+                        "code": "synthetic_normal",
+                        "summary": "Condição sintética dentro da faixa esperada."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.98
+                      },
+                      "abstention": null,
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_normal",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_normal",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_normal",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [],
+                      "warnings": []
+                    }
+                  },
+                  "documented_fault": {
+                    "summary": "Resultado sintético documented_fault",
+                    "value": {
+                      "analysis_id": "ana_synthetic_documented_fault",
+                      "outcome": "documented_fault",
+                      "diagnosis": {
+                        "code": "synthetic_documented_fault",
+                        "summary": "Falha sintética com documentação aprovada."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.92
+                      },
+                      "abstention": null,
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_documented_fault",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_documented_fault",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_documented_fault",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": {
+                        "summary": "Programar inspeção sintética controlada.",
+                        "priority": "scheduled",
+                        "actions": [
+                          "Confirmar a condição em uma nova leitura sintética.",
+                          "Revisar o manual sintético citado."
+                        ]
+                      },
+                      "citations": [
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_01",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 1"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_02",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 2"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_03",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 3"
+                        }
+                      ],
+                      "warnings": []
+                    }
+                  },
+                  "undocumented_fault": {
+                    "summary": "Resultado sintético undocumented_fault",
+                    "value": {
+                      "analysis_id": "ana_synthetic_undocumented_fault",
+                      "outcome": "undocumented_fault",
+                      "diagnosis": {
+                        "code": "synthetic_undocumented_fault",
+                        "summary": "Falha sintética sem documentação aprovada."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.79
+                      },
+                      "abstention": {
+                        "reason": "undocumented_fault",
+                        "message": "Não há documentação suficiente para prescrever uma ação."
+                      },
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_undocumented_fault",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_undocumented_fault",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_undocumented_fault",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [],
+                      "warnings": [
+                        {
+                          "code": "documentation_not_found",
+                          "message": "O diagnóstico não possui suporte documental aprovado."
+                        }
+                      ]
+                    }
+                  },
+                  "out_of_distribution": {
+                    "summary": "Resultado sintético out_of_distribution",
+                    "value": {
+                      "analysis_id": "ana_synthetic_out_of_distribution",
+                      "outcome": "out_of_distribution",
+                      "diagnosis": null,
+                      "support": {
+                        "level": "insufficient",
+                        "support_score": 0.05
+                      },
+                      "abstention": {
+                        "reason": "out_of_distribution",
+                        "message": "A entrada sintética está fora da distribuição suportada."
+                      },
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_reference_fault",
+                          "distance": 1.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_reference_fault",
+                          "distance": 2.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_reference_fault",
+                          "distance": 3.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [],
+                      "warnings": [
+                        {
+                          "code": "out_of_distribution",
+                          "message": "Nenhuma prescrição foi produzida."
+                        }
+                      ]
+                    }
+                  },
+                  "degraded": {
+                    "summary": "Resultado sintético degraded",
+                    "value": {
+                      "analysis_id": "ana_synthetic_degraded",
+                      "outcome": "degraded",
+                      "diagnosis": {
+                        "code": "synthetic_degraded",
+                        "summary": "Condição sintética com dependência indisponível."
+                      },
+                      "support": {
+                        "level": "sufficient",
+                        "support_score": 0.72
+                      },
+                      "abstention": {
+                        "reason": "dependency_unavailable",
+                        "message": "A análise parcial não permite uma prescrição segura."
+                      },
+                      "model_id": "model_synthetic_v1",
+                      "neighbors": [
+                        {
+                          "neighbor_ref": "neighbor_synthetic_01",
+                          "rank": 1,
+                          "fault_code": "synthetic_degraded",
+                          "distance": 0.4
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_02",
+                          "rank": 2,
+                          "fault_code": "synthetic_degraded",
+                          "distance": 1.3
+                        },
+                        {
+                          "neighbor_ref": "neighbor_synthetic_03",
+                          "rank": 3,
+                          "fault_code": "synthetic_degraded",
+                          "distance": 2.2
+                        }
+                      ],
+                      "prescription": null,
+                      "citations": [
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_01",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 1"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_02",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 2"
+                        },
+                        {
+                          "document_id": "doc_synthetic_manual",
+                          "document_version": "docver_synthetic_manual_v1",
+                          "chunk": "chunk_synthetic_manual_03",
+                          "title": "Manual sintético de manutenção",
+                          "locator": "Seção sintética 3"
+                        }
+                      ],
+                      "warnings": [
+                        {
+                          "code": "dependency_unavailable",
+                          "message": "Recuperação ou geração está temporariamente indisponível."
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso não encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Lista documentos e estados do ciclo",
+        "operationId": "listDocuments",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Registra metadados de um documento",
+        "operationId": "registerDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Registro recebido; nunca implica aprovação.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedDocument"
+                },
+                "example": {
+                  "document_id": "doc_bbbbbbbbbbbb",
+                  "filename": "inspection.synthetic.pdf",
+                  "media_type": "application/pdf",
+                  "size_bytes": 2048,
+                  "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "created_at": "2030-01-02T03:04:05Z",
+                  "updated_at": "2030-01-02T03:04:05Z",
+                  "status": "received"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{document_id}": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Consulta um documento",
+        "operationId": "getDocument",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^doc_[a-z0-9_]{3,64}$",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documento sintético em um estado válido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentResponse"
+                },
+                "examples": {
+                  "failed": {
+                    "summary": "Documento sintético failed",
+                    "value": {
+                      "document_id": "doc_synthetic_failed",
+                      "filename": "failed.synthetic.pdf",
+                      "media_type": "application/pdf",
+                      "size_bytes": 1024,
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "created_at": "2030-01-02T03:04:05Z",
+                      "updated_at": "2030-01-02T03:04:05Z",
+                      "status": "failed",
+                      "decision_note": null,
+                      "failure": {
+                        "code": "synthetic_processing_failure",
+                        "message": "Falha controlada do fake sintético."
+                      },
+                      "superseded_by_document_id": null
+                    }
+                  },
+                  "approved": {
+                    "summary": "Documento sintético approved",
+                    "value": {
+                      "document_id": "doc_synthetic_manual",
+                      "filename": "manual.synthetic.pdf",
+                      "media_type": "application/pdf",
+                      "size_bytes": 1024,
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "created_at": "2030-01-02T03:04:05Z",
+                      "updated_at": "2030-01-02T03:04:05Z",
+                      "status": "approved",
+                      "decision_note": "Conteúdo inteiramente sintético aprovado para o fake.",
+                      "failure": null,
+                      "superseded_by_document_id": null
+                    }
+                  },
+                  "pending_approval": {
+                    "summary": "Documento sintético pending_approval",
+                    "value": {
+                      "document_id": "doc_synthetic_pending",
+                      "filename": "pending.synthetic.pdf",
+                      "media_type": "application/pdf",
+                      "size_bytes": 1024,
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "created_at": "2030-01-02T03:04:05Z",
+                      "updated_at": "2030-01-02T03:04:05Z",
+                      "status": "pending_approval",
+                      "decision_note": null,
+                      "failure": null,
+                      "superseded_by_document_id": null
+                    }
+                  },
+                  "processing": {
+                    "summary": "Documento sintético processing",
+                    "value": {
+                      "document_id": "doc_synthetic_processing",
+                      "filename": "processing.synthetic.pdf",
+                      "media_type": "application/pdf",
+                      "size_bytes": 1024,
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "created_at": "2030-01-02T03:04:05Z",
+                      "updated_at": "2030-01-02T03:04:05Z",
+                      "status": "processing",
+                      "decision_note": null,
+                      "failure": null,
+                      "superseded_by_document_id": null
+                    }
+                  },
+                  "received": {
+                    "summary": "Documento sintético received",
+                    "value": {
+                      "document_id": "doc_synthetic_received",
+                      "filename": "received.synthetic.pdf",
+                      "media_type": "application/pdf",
+                      "size_bytes": 1024,
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "created_at": "2030-01-02T03:04:05Z",
+                      "updated_at": "2030-01-02T03:04:05Z",
+                      "status": "received",
+                      "decision_note": null,
+                      "failure": null,
+                      "superseded_by_document_id": null
+                    }
+                  },
+                  "rejected": {
+                    "summary": "Documento sintético rejected",
+                    "value": {
+                      "document_id": "doc_synthetic_rejected",
+                      "filename": "rejected.synthetic.pdf",
+                      "media_type": "application/pdf",
+                      "size_bytes": 1024,
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "created_at": "2030-01-02T03:04:05Z",
+                      "updated_at": "2030-01-02T03:04:05Z",
+                      "status": "rejected",
+                      "decision_note": "Metadados sintéticos incompletos.",
+                      "failure": null,
+                      "superseded_by_document_id": null
+                    }
+                  },
+                  "superseded": {
+                    "summary": "Documento sintético superseded",
+                    "value": {
+                      "document_id": "doc_synthetic_superseded",
+                      "filename": "old.synthetic.pdf",
+                      "media_type": "application/pdf",
+                      "size_bytes": 1024,
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "created_at": "2030-01-02T03:04:05Z",
+                      "updated_at": "2030-01-02T03:04:05Z",
+                      "status": "superseded",
+                      "decision_note": null,
+                      "failure": null,
+                      "superseded_by_document_id": "doc_synthetic_manual"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso não encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{document_id}/approve": {
+      "post": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Aprova um documento pendente",
+        "operationId": "approveDocument",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^doc_[a-z0-9_]{3,64}$",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveDocumentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovedDocument"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso não encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Transição documental inválida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{document_id}/reject": {
+      "post": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Rejeita um documento pendente",
+        "operationId": "rejectDocument",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^doc_[a-z0-9_]{3,64}$",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDocumentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RejectedDocument"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso não encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Transição documental inválida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{document_id}/reprocess": {
+      "post": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Reprocessa um documento rejeitado ou com falha",
+        "operationId": "reprocessDocument",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^doc_[a-z0-9_]{3,64}$",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingDocument"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso não encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Transição documental inválida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Abstention": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/AbstentionReason"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "message"
+        ],
+        "title": "Abstention"
+      },
+      "AbstentionReason": {
+        "type": "string",
+        "enum": [
+          "undocumented_fault",
+          "out_of_distribution",
+          "dependency_unavailable"
+        ],
+        "title": "AbstentionReason"
+      },
+      "AnalysisFeatures": {
+        "properties": {
+          "z_rms_velocity_mm_s": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Z Rms Velocity Mm S"
+          },
+          "temperature_c": {
+            "type": "number",
+            "minimum": -273.15,
+            "title": "Temperature C"
+          },
+          "x_rms_velocity_mm_s": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "X Rms Velocity Mm S"
+          },
+          "z_peak_acceleration_g": {
+            "type": "number",
+            "title": "Z Peak Acceleration G"
+          },
+          "x_peak_acceleration_g": {
+            "type": "number",
+            "title": "X Peak Acceleration G"
+          },
+          "z_peak_vel_comp_freq_hz": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Z Peak Vel Comp Freq Hz"
+          },
+          "x_peak_vel_comp_freq_hz": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "X Peak Vel Comp Freq Hz"
+          },
+          "z_rms_acceleration_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Z Rms Acceleration G"
+          },
+          "x_rms_acceleration_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "X Rms Acceleration G"
+          },
+          "z_kurtosis": {
+            "type": "number",
+            "title": "Z Kurtosis"
+          },
+          "x_kurtosis": {
+            "type": "number",
+            "title": "X Kurtosis"
+          },
+          "z_crest_factor": {
+            "type": "number",
+            "title": "Z Crest Factor"
+          },
+          "x_crest_factor": {
+            "type": "number",
+            "title": "X Crest Factor"
+          },
+          "z_peak_velocity_mm_s": {
+            "type": "number",
+            "title": "Z Peak Velocity Mm S"
+          },
+          "x_peak_velocity_mm_s": {
+            "type": "number",
+            "title": "X Peak Velocity Mm S"
+          },
+          "z_high_freq_rms_accel_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Z High Freq Rms Accel G"
+          },
+          "x_high_freq_rms_accel_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "X High Freq Rms Accel G"
+          },
+          "rpm": {
+            "type": "number",
+            "title": "Rpm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "z_rms_velocity_mm_s",
+          "temperature_c",
+          "x_rms_velocity_mm_s",
+          "z_peak_acceleration_g",
+          "x_peak_acceleration_g",
+          "z_peak_vel_comp_freq_hz",
+          "x_peak_vel_comp_freq_hz",
+          "z_rms_acceleration_g",
+          "x_rms_acceleration_g",
+          "z_kurtosis",
+          "x_kurtosis",
+          "z_crest_factor",
+          "x_crest_factor",
+          "z_peak_velocity_mm_s",
+          "x_peak_velocity_mm_s",
+          "z_high_freq_rms_accel_g",
+          "x_high_freq_rms_accel_g",
+          "rpm"
+        ],
+        "title": "AnalysisFeatures",
+        "description": "The 18 ordered, metric model inputs frozen by API v1."
+      },
+      "AnalysisRequest": {
+        "properties": {
+          "features": {
+            "$ref": "#/components/schemas/AnalysisFeatures"
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "default": 5
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "features"
+        ],
+        "title": "AnalysisRequest",
+        "description": "Request accepted by ``POST /analysis``."
+      },
+      "AnalysisResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/NormalAnalysisResult"
+          },
+          {
+            "$ref": "#/components/schemas/DocumentedFaultAnalysisResult"
+          },
+          {
+            "$ref": "#/components/schemas/UndocumentedFaultAnalysisResult"
+          },
+          {
+            "$ref": "#/components/schemas/OutOfDistributionAnalysisResult"
+          },
+          {
+            "$ref": "#/components/schemas/DegradedAnalysisResult"
+          }
+        ],
+        "title": "AnalysisResponse",
+        "description": "Named discriminated union consumed directly by generated clients.",
+        "discriminator": {
+          "propertyName": "outcome",
+          "mapping": {
+            "degraded": "#/components/schemas/DegradedAnalysisResult",
+            "documented_fault": "#/components/schemas/DocumentedFaultAnalysisResult",
+            "normal": "#/components/schemas/NormalAnalysisResult",
+            "out_of_distribution": "#/components/schemas/OutOfDistributionAnalysisResult",
+            "undocumented_fault": "#/components/schemas/UndocumentedFaultAnalysisResult"
+          }
+        }
+      },
+      "AnalysisWarning": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AnalysisWarning"
+      },
+      "ApproveDocumentRequest": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ApproveDocumentRequest"
+      },
+      "ApprovedDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "const": "approved",
+            "title": "Status"
+          },
+          "decision_note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Note"
+          },
+          "failure": {
+            "type": "null",
+            "title": "Failure"
+          },
+          "superseded_by_document_id": {
+            "type": "null",
+            "title": "Superseded By Document Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "status",
+          "decision_note",
+          "failure",
+          "superseded_by_document_id"
+        ],
+        "title": "ApprovedDocument"
+      },
+      "Citation": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "document_version": {
+            "type": "string",
+            "pattern": "^docver_[a-z0-9_]{3,64}$",
+            "title": "Document Version"
+          },
+          "chunk": {
+            "type": "string",
+            "pattern": "^chunk_[a-z0-9_]{3,64}$",
+            "title": "Chunk"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "locator": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Locator"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "document_version",
+          "chunk",
+          "title",
+          "locator"
+        ],
+        "title": "Citation",
+        "description": "Auditable opaque location without source paths or raw document text."
+      },
+      "DegradedAnalysisResult": {
+        "properties": {
+          "analysis_id": {
+            "type": "string",
+            "pattern": "^ana_[a-z0-9_]{3,64}$",
+            "title": "Analysis Id"
+          },
+          "outcome": {
+            "type": "string",
+            "const": "degraded",
+            "title": "Outcome"
+          },
+          "diagnosis": {
+            "$ref": "#/components/schemas/Diagnosis"
+          },
+          "support": {
+            "$ref": "#/components/schemas/SufficientSupport"
+          },
+          "abstention": {
+            "$ref": "#/components/schemas/Abstention"
+          },
+          "model_id": {
+            "type": "string",
+            "pattern": "^model_[a-z0-9_.-]{3,64}$",
+            "title": "Model Id"
+          },
+          "neighbors": {
+            "items": {
+              "$ref": "#/components/schemas/OpaqueNeighbor"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Neighbors"
+          },
+          "prescription": {
+            "type": "null",
+            "title": "Prescription"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Citations"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisWarning"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "analysis_id",
+          "outcome",
+          "diagnosis",
+          "support",
+          "abstention",
+          "model_id",
+          "neighbors",
+          "prescription",
+          "citations",
+          "warnings"
+        ],
+        "title": "DegradedAnalysisResult"
+      },
+      "Diagnosis": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Summary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "summary"
+        ],
+        "title": "Diagnosis"
+      },
+      "DocumentFailure": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "DocumentFailure"
+      },
+      "DocumentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ReceivedDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/ProcessingDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/PendingApprovalDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/ApprovedDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/RejectedDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/FailedDocument"
+                },
+                {
+                  "$ref": "#/components/schemas/SupersededDocument"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "status",
+                "mapping": {
+                  "approved": "#/components/schemas/ApprovedDocument",
+                  "failed": "#/components/schemas/FailedDocument",
+                  "pending_approval": "#/components/schemas/PendingApprovalDocument",
+                  "processing": "#/components/schemas/ProcessingDocument",
+                  "received": "#/components/schemas/ReceivedDocument",
+                  "rejected": "#/components/schemas/RejectedDocument",
+                  "superseded": "#/components/schemas/SupersededDocument"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "DocumentListResponse"
+      },
+      "DocumentResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ReceivedDocument"
+          },
+          {
+            "$ref": "#/components/schemas/ProcessingDocument"
+          },
+          {
+            "$ref": "#/components/schemas/PendingApprovalDocument"
+          },
+          {
+            "$ref": "#/components/schemas/ApprovedDocument"
+          },
+          {
+            "$ref": "#/components/schemas/RejectedDocument"
+          },
+          {
+            "$ref": "#/components/schemas/FailedDocument"
+          },
+          {
+            "$ref": "#/components/schemas/SupersededDocument"
+          }
+        ],
+        "title": "DocumentResponse",
+        "description": "Named discriminated document lifecycle union.",
+        "discriminator": {
+          "propertyName": "status",
+          "mapping": {
+            "approved": "#/components/schemas/ApprovedDocument",
+            "failed": "#/components/schemas/FailedDocument",
+            "pending_approval": "#/components/schemas/PendingApprovalDocument",
+            "processing": "#/components/schemas/ProcessingDocument",
+            "received": "#/components/schemas/ReceivedDocument",
+            "rejected": "#/components/schemas/RejectedDocument",
+            "superseded": "#/components/schemas/SupersededDocument"
+          }
+        }
+      },
+      "DocumentedFaultAnalysisResult": {
+        "properties": {
+          "analysis_id": {
+            "type": "string",
+            "pattern": "^ana_[a-z0-9_]{3,64}$",
+            "title": "Analysis Id"
+          },
+          "outcome": {
+            "type": "string",
+            "const": "documented_fault",
+            "title": "Outcome"
+          },
+          "diagnosis": {
+            "$ref": "#/components/schemas/Diagnosis"
+          },
+          "support": {
+            "$ref": "#/components/schemas/SufficientSupport"
+          },
+          "abstention": {
+            "type": "null",
+            "title": "Abstention"
+          },
+          "model_id": {
+            "type": "string",
+            "pattern": "^model_[a-z0-9_.-]{3,64}$",
+            "title": "Model Id"
+          },
+          "neighbors": {
+            "items": {
+              "$ref": "#/components/schemas/OpaqueNeighbor"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Neighbors"
+          },
+          "prescription": {
+            "$ref": "#/components/schemas/Prescription"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Citations"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisWarning"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "analysis_id",
+          "outcome",
+          "diagnosis",
+          "support",
+          "abstention",
+          "model_id",
+          "neighbors",
+          "prescription",
+          "citations",
+          "warnings"
+        ],
+        "title": "DocumentedFaultAnalysisResult"
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "issues"
+        ],
+        "title": "ErrorDetail"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse"
+      },
+      "FailedDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "const": "failed",
+            "title": "Status"
+          },
+          "decision_note": {
+            "type": "null",
+            "title": "Decision Note"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/DocumentFailure"
+          },
+          "superseded_by_document_id": {
+            "type": "null",
+            "title": "Superseded By Document Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "status",
+          "decision_note",
+          "failure",
+          "superseded_by_document_id"
+        ],
+        "title": "FailedDocument"
+      },
+      "InsufficientSupport": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "const": "insufficient",
+            "title": "Level"
+          },
+          "support_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Support Score",
+            "description": "Heurística agregada não calibrada; não representa probabilidade nem confiança estatística."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "level",
+          "support_score"
+        ],
+        "title": "InsufficientSupport"
+      },
+      "NormalAnalysisResult": {
+        "properties": {
+          "analysis_id": {
+            "type": "string",
+            "pattern": "^ana_[a-z0-9_]{3,64}$",
+            "title": "Analysis Id"
+          },
+          "outcome": {
+            "type": "string",
+            "const": "normal",
+            "title": "Outcome"
+          },
+          "diagnosis": {
+            "$ref": "#/components/schemas/Diagnosis"
+          },
+          "support": {
+            "$ref": "#/components/schemas/SufficientSupport"
+          },
+          "abstention": {
+            "type": "null",
+            "title": "Abstention"
+          },
+          "model_id": {
+            "type": "string",
+            "pattern": "^model_[a-z0-9_.-]{3,64}$",
+            "title": "Model Id"
+          },
+          "neighbors": {
+            "items": {
+              "$ref": "#/components/schemas/OpaqueNeighbor"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Neighbors"
+          },
+          "prescription": {
+            "type": "null",
+            "title": "Prescription"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "maxItems": 0,
+            "title": "Citations"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisWarning"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "analysis_id",
+          "outcome",
+          "diagnosis",
+          "support",
+          "abstention",
+          "model_id",
+          "neighbors",
+          "prescription",
+          "citations",
+          "warnings"
+        ],
+        "title": "NormalAnalysisResult"
+      },
+      "OpaqueNeighbor": {
+        "properties": {
+          "neighbor_ref": {
+            "type": "string",
+            "pattern": "^neighbor_[a-z0-9_]{3,64}$",
+            "title": "Neighbor Ref"
+          },
+          "rank": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Rank"
+          },
+          "fault_code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$",
+            "title": "Fault Code"
+          },
+          "distance": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Distance",
+            "description": "Distância padronizada não negativa e sem limite superior."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "neighbor_ref",
+          "rank",
+          "fault_code",
+          "distance"
+        ],
+        "title": "OpaqueNeighbor",
+        "description": "Ranked model neighbor without row, timestamp, measurement, or vector data."
+      },
+      "OutOfDistributionAnalysisResult": {
+        "properties": {
+          "analysis_id": {
+            "type": "string",
+            "pattern": "^ana_[a-z0-9_]{3,64}$",
+            "title": "Analysis Id"
+          },
+          "outcome": {
+            "type": "string",
+            "const": "out_of_distribution",
+            "title": "Outcome"
+          },
+          "diagnosis": {
+            "type": "null",
+            "title": "Diagnosis"
+          },
+          "support": {
+            "$ref": "#/components/schemas/InsufficientSupport"
+          },
+          "abstention": {
+            "$ref": "#/components/schemas/Abstention"
+          },
+          "model_id": {
+            "type": "string",
+            "pattern": "^model_[a-z0-9_.-]{3,64}$",
+            "title": "Model Id"
+          },
+          "neighbors": {
+            "items": {
+              "$ref": "#/components/schemas/OpaqueNeighbor"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Neighbors"
+          },
+          "prescription": {
+            "type": "null",
+            "title": "Prescription"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "maxItems": 0,
+            "title": "Citations"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisWarning"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "analysis_id",
+          "outcome",
+          "diagnosis",
+          "support",
+          "abstention",
+          "model_id",
+          "neighbors",
+          "prescription",
+          "citations",
+          "warnings"
+        ],
+        "title": "OutOfDistributionAnalysisResult"
+      },
+      "PendingApprovalDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "const": "pending_approval",
+            "title": "Status"
+          },
+          "decision_note": {
+            "type": "null",
+            "title": "Decision Note"
+          },
+          "failure": {
+            "type": "null",
+            "title": "Failure"
+          },
+          "superseded_by_document_id": {
+            "type": "null",
+            "title": "Superseded By Document Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "status",
+          "decision_note",
+          "failure",
+          "superseded_by_document_id"
+        ],
+        "title": "PendingApprovalDocument"
+      },
+      "Prescription": {
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/PrescriptionPriority"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Actions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "summary",
+          "priority",
+          "actions"
+        ],
+        "title": "Prescription"
+      },
+      "PrescriptionPriority": {
+        "type": "string",
+        "enum": [
+          "routine",
+          "scheduled",
+          "urgent"
+        ],
+        "title": "PrescriptionPriority"
+      },
+      "ProcessingDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "const": "processing",
+            "title": "Status"
+          },
+          "decision_note": {
+            "type": "null",
+            "title": "Decision Note"
+          },
+          "failure": {
+            "type": "null",
+            "title": "Failure"
+          },
+          "superseded_by_document_id": {
+            "type": "null",
+            "title": "Superseded By Document Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "status",
+          "decision_note",
+          "failure",
+          "superseded_by_document_id"
+        ],
+        "title": "ProcessingDocument"
+      },
+      "ReceivedDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "const": "received",
+            "title": "Status"
+          },
+          "decision_note": {
+            "type": "null",
+            "title": "Decision Note"
+          },
+          "failure": {
+            "type": "null",
+            "title": "Failure"
+          },
+          "superseded_by_document_id": {
+            "type": "null",
+            "title": "Superseded By Document Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "status",
+          "decision_note",
+          "failure",
+          "superseded_by_document_id"
+        ],
+        "title": "ReceivedDocument"
+      },
+      "RegisterDocumentRequest": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "RegisterDocumentRequest"
+      },
+      "RejectDocumentRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "RejectDocumentRequest"
+      },
+      "RejectedDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "const": "rejected",
+            "title": "Status"
+          },
+          "decision_note": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Decision Note"
+          },
+          "failure": {
+            "type": "null",
+            "title": "Failure"
+          },
+          "superseded_by_document_id": {
+            "type": "null",
+            "title": "Superseded By Document Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "status",
+          "decision_note",
+          "failure",
+          "superseded_by_document_id"
+        ],
+        "title": "RejectedDocument"
+      },
+      "SufficientSupport": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "const": "sufficient",
+            "title": "Level"
+          },
+          "support_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Support Score",
+            "description": "Heurística agregada não calibrada; não representa probabilidade nem confiança estatística."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "level",
+          "support_score"
+        ],
+        "title": "SufficientSupport"
+      },
+      "SupersededDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Document Id"
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,249}\\.[Pp][Dd][Ff]$",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "const": "application/pdf",
+            "title": "Media Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "maximum": 25000000.0,
+            "minimum": 1.0,
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "const": "superseded",
+            "title": "Status"
+          },
+          "decision_note": {
+            "type": "null",
+            "title": "Decision Note"
+          },
+          "failure": {
+            "type": "null",
+            "title": "Failure"
+          },
+          "superseded_by_document_id": {
+            "type": "string",
+            "pattern": "^doc_[a-z0-9_]{3,64}$",
+            "title": "Superseded By Document Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "status",
+          "decision_note",
+          "failure",
+          "superseded_by_document_id"
+        ],
+        "title": "SupersededDocument"
+      },
+      "UndocumentedFaultAnalysisResult": {
+        "properties": {
+          "analysis_id": {
+            "type": "string",
+            "pattern": "^ana_[a-z0-9_]{3,64}$",
+            "title": "Analysis Id"
+          },
+          "outcome": {
+            "type": "string",
+            "const": "undocumented_fault",
+            "title": "Outcome"
+          },
+          "diagnosis": {
+            "$ref": "#/components/schemas/Diagnosis"
+          },
+          "support": {
+            "$ref": "#/components/schemas/SufficientSupport"
+          },
+          "abstention": {
+            "$ref": "#/components/schemas/Abstention"
+          },
+          "model_id": {
+            "type": "string",
+            "pattern": "^model_[a-z0-9_.-]{3,64}$",
+            "title": "Model Id"
+          },
+          "neighbors": {
+            "items": {
+              "$ref": "#/components/schemas/OpaqueNeighbor"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Neighbors"
+          },
+          "prescription": {
+            "type": "null",
+            "title": "Prescription"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "maxItems": 0,
+            "title": "Citations"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisWarning"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "analysis_id",
+          "outcome",
+          "diagnosis",
+          "support",
+          "abstention",
+          "model_id",
+          "neighbors",
+          "prescription",
+          "citations",
+          "warnings"
+        ],
+        "title": "UndocumentedFaultAnalysisResult"
+      },
+      "ValidationIssue": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Field"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "code"
+        ],
+        "title": "ValidationIssue"
+      }
+    }
+  }
+}

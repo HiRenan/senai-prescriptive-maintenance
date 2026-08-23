@@ -32,6 +32,10 @@ A versão atual contém:
   `apps/api`;
 - uma aplicação FastAPI mínima, inicializável pelo Uvicorn, com liveness em
   `GET /health/live`;
+- um contrato OpenAPI v1 congelado para análise com 18 features e cinco
+  resultados fechados, ciclo documental mínimo, portas internas tipadas e fakes
+  inteiramente sintéticos, com snapshot determinístico para futura geração de
+  cliente;
 - configuração tipada e explícita para ambiente e URL PostgreSQL;
 - PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
   Compose;
@@ -74,9 +78,10 @@ A versão atual contém:
 - documentação de governança, segurança, arquitetura e decisões fundamentais.
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
-aplicação, análise de similaridade, vetores integrados à aplicação, recuperação
-de contexto, execução RAG integrada, chamada automática a LLM, autenticação,
-persistência integrada, readiness, infraestrutura AWS, deploy ou interface web.
+aplicação, execução de modelo ou busca real por vizinhos, vetores integrados
+à aplicação, recuperação de contexto, execução RAG integrada, chamada
+automática a LLM, autenticação, persistência integrada, readiness,
+infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
 
@@ -90,7 +95,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, settings, camada de dados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, settings, camada de dados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
