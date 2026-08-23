@@ -7,6 +7,7 @@ services:
     environment:
       PRESCRIPTIVE_MAINTENANCE_DATABASE_URL: postgresql://prescriptive_maintenance:local_only_change_me@postgres:5432/prescriptive_maintenance
       PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT: local
+      PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND: postgres
     ports:
       - "127.0.0.1:${PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT:-8000}:8000"
     depends_on:

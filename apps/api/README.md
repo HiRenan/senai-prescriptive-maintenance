@@ -18,13 +18,30 @@ uv run --frozen poe setup
 Inicie a aplicação em uma interface exclusivamente local:
 
 ```powershell
+$env:PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT = "offline"
+$env:PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND = "memory"
 uv run --frozen uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --port 8000
 ```
 
 `GET /health/live` responde com status HTTP `200`, conteúdo
 `application/json` e corpo `{"status":"ok"}`. A liveness verifica apenas que o
 processo está vivo e não acessa banco, arquivos, rede, configurações externas
-ou outros serviços.
+ou outros serviços. `GET /health/ready` responde `{"status":"ready"}` quando
+todas as dependências obrigatórias do perfil estão disponíveis; no perfil
+`offline`, não há dependência externa a consultar.
+
+Toda resposta recebe `X-Correlation-ID`. Um único identificador ASCII entre 1 e
+64 caracteres, limitado a letras, números, `.`, `_`, `:` e `-` e delimitado por
+letra ou número, é propagado; valor ausente, vazio, duplicado, longo ou inseguro
+é substituído por um ID novo. O registro da requisição é um objeto JSON com
+evento, correlation ID, método, template conhecido da rota — ou o marcador
+seguro `unmatched` — e status. Payload, query string, caminho dinâmico, prompt,
+conteúdo documental, credencial e texto de exceção não entram nesse registro.
+Erros 422 colapsam detalhes do Pydantic para o issue estável
+`request/invalid`; essa perda deliberada de granularidade impede ecoar chaves
+arbitrárias do payload. Erros 409 e 503 também usam somente códigos e mensagens
+definidos pela aplicação. Uma exceção não tratada recebe 500 genérico na mesma
+fronteira, com correlation ID e sem texto da exceção.
 
 ## Contrato HTTP v1
 
@@ -46,16 +63,23 @@ referências opacas e uma página positiva, sem título, caminho ou texto bruto.
 `support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
 medida de confiança.
 
-A aplicação HTTP usa fakes determinísticos e inteiramente sintéticos: ela não
-executa modelo, recuperação, geração, persistência nem leitura de arquivos
-reais. O módulo de persistência descrito abaixo é uma fronteira interna ainda
-não ligada às rotas. O registro documental recebe somente metadados seguros de
-um PDF e nunca implica aprovação. Para regenerar e conferir o snapshot:
+O fluxo HTTP de negócio usa fakes determinísticos e inteiramente sintéticos: ele
+não executa modelo, recuperação, geração, persistência nem leitura de arquivos
+reais. Somente a readiness dos perfis conectados faz o probe PostgreSQL descrito
+abaixo. O módulo de persistência continua como fronteira interna não ligada às
+rotas de negócio. O registro documental recebe somente metadados seguros de um
+PDF e nunca implica aprovação. Para regenerar e conferir o snapshot:
 
 ```powershell
 uv run --frozen python scripts/generate_openapi.py
 uv run --frozen python scripts/generate_openapi.py --check
 ```
+
+Os endpoints de health são operacionais. A readiness nova permanece fora do
+snapshot OpenAPI v1 para não alterar o contrato de negócio congelado; os bodies
+de sucesso e o shape sanitizado dos erros 422, 409 e 503 também foram
+preservados. O correlation ID é devolvido pelo header, sem acrescentar campos
+aos modelos públicos.
 
 A verificação canônica inicia o Uvicorn em loopback e porta efêmera, faz a
 requisição HTTP real e encerra o processo ao final, sem exigir banco ou `.env`:
@@ -117,8 +141,9 @@ não processa bytes, cria chunks nem expõe novas rotas.
 ## Execução em contêiner
 
 O Dockerfile multi-stage instala somente as dependências de produção pelo
-`uv.lock`, executa o Uvicorn como UID/GID `65532` e verifica
-`GET /health/live`. O build parte da raiz porque o lock do workspace é único;
+`uv.lock`, executa o Uvicorn como UID/GID `65532` e usa
+`GET /health/ready` no healthcheck. O build parte da raiz porque o lock do
+workspace é único;
 `Dockerfile.dockerignore` limita o contexto aos manifests, lock, fontes do
 pacote e ao README exigido pelos metadados Python. Os targets `context-audit` e
 `builder-audit`, executados por `uv run --frozen poe applications-audit`, provam
@@ -129,11 +154,15 @@ stop está em [`infra/README.md`](../../infra/README.md).
 
 ## Configuração
 
-`prescriptive_maintenance.settings.Settings` carrega explicitamente dois campos
-obrigatórios: `environment`, restrito a `local`, `test` ou `production`, e
-`database_url`, validado como URL PostgreSQL. As fontes usam o prefixo
-`PRESCRIPTIVE_MAINTENANCE_`; variáveis do processo têm precedência sobre o
-arquivo `.env`, lido opcionalmente em UTF-8.
+`prescriptive_maintenance.settings.Settings` exige `environment`, restrito a
+`local`, `offline` ou `aws`, e `persistence_backend`, restrito a `memory` ou
+`postgres`. O backend `memory` proíbe `database_url`; `postgres` exige essa URL
+validada. `offline` aceita somente memória. `local` e `aws` aceitam ambos os
+backends, sempre de forma explícita; isso permite que uma execução efêmera em
+AWS use os mesmos fakes em memória sem fingir que há um banco. Campos extras,
+aliases não declarados, valores parciais e perfis legados são recusados. As
+fontes usam o prefixo `PRESCRIPTIVE_MAINTENANCE_`; variáveis do processo têm
+precedência sobre o arquivo `.env`, lido opcionalmente em UTF-8.
 
 Copie `.env.example` para `.env` conforme [`infra/README.md`](../../infra/README.md)
 e carregue a configuração somente no ponto que precisar dela:
@@ -144,9 +173,21 @@ from prescriptive_maintenance.settings import Settings
 settings = Settings()
 ```
 
-Não há valores padrão para os campos obrigatórios. Ausências e valores inválidos
-produzem `pydantic.ValidationError`; a aplicação e a liveness não instanciam
-`Settings` durante a importação ou a criação do app.
+Não há valor padrão para o perfil nem para dependências obrigatórias. A
+configuração é carregada e copiada para o tipo canônico durante o lifespan do
+FastAPI, antes de aceitar tráfego. Ausências e valores inválidos encerram o
+startup com `ApplicationStartupError` genérico, sem repetir valores ou exceções
+de parsing. A URL também é omitida da representação de `Settings`. A importação
+do alvo ASGI continua livre de I/O.
+
+Os três perfis usam a mesma porta de readiness. O backend `postgres` executa um
+probe limitado a um segundo, com conexão curta e `SELECT 1`; `memory` seleciona
+a lista vazia de dependências. O perfil e o backend validados permanecem em
+`app.state` para a composição usar exatamente a mesma decisão. Bedrock continua
+opcional e lazy: falha de geração pode degradar uma análise, mas não participa
+da liveness nem da readiness. Essa separação evita declarar o processo morto
+por uma dependência opcional e evita declarar pronto um backend PostgreSQL sem
+conseguir alcançá-lo.
 
 ## Persistência mínima
 

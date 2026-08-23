@@ -30,8 +30,9 @@ A versão atual contém:
 
 - um workspace Python gerenciado por uv, com um backend instalável em
   `apps/api`;
-- uma aplicação FastAPI mínima, inicializável pelo Uvicorn, com liveness em
-  `GET /health/live`;
+- uma aplicação FastAPI inicializável pelo Uvicorn, com liveness exclusiva do
+  processo em `GET /health/live`, readiness operacional em `GET /health/ready`,
+  correlation ID por requisição e logs JSON sanitizados;
 - um contrato OpenAPI v1 congelado para análise com 18 features e cinco
   resultados fechados, ciclo documental mínimo, portas internas tipadas e fakes
   inteiramente sintéticos, com snapshot determinístico para futura geração de
@@ -39,7 +40,8 @@ A versão atual contém:
 - um domínio documental em memória com os sete estados governados, versões
   idempotentes por identidade, número e SHA-256, auditoria imutável, relógio UTC
   injetável e controle otimista de revisão por compare-and-swap;
-- configuração tipada e explícita para ambiente e URL PostgreSQL;
+- configuração tipada e fail-fast para os perfis `local`, `offline` e `aws`,
+  com backend `memory` ou `postgres` obrigatório e dependências coerentes;
 - persistência mínima e transacional de metadados rastreáveis de análise,
   documentos, versões, chunks e evidências, com adapter em memória, adapter
   PostgreSQL, evolução idempotente de versões e migração inicial reversível;
@@ -118,7 +120,7 @@ A versão atual contém:
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
 aplicação, integração da baseline ou dos adapters persistentes ao fluxo HTTP,
 busca semântica real por vizinhos, vetores integrados à aplicação, recuperação
-RAG integrada de ponta a ponta, chamada automática a LLM, autenticação, readiness,
+RAG integrada de ponta a ponta, chamada automática a LLM, autenticação,
 infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
@@ -133,10 +135,10 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada e guardrails internos pré/pós-provider, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, health operacional por perfil, correlation ID, logs JSON, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada e guardrails internos pré/pós-provider, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
-| `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco e aplicações em contêineres são opcionais. |
+| `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação, liveness e readiness offline; banco e aplicações em contêineres são opcionais. |
 | `data/` | Manifesto dos materiais locais, fixtures sintéticas, artefatos públicos aprovados e destinos ignorados para derivados canônicos locais. |
 
 O inventário detalhado está em
@@ -221,9 +223,9 @@ código; `check` é uma sequência fail-fast somente leitura.
 | `uv run --frozen poe applications-build` | Constrói as imagens locais multi-stage da API e da web. |
 | `uv run --frozen poe applications-up` | Constrói e inicia PostgreSQL, API e web e aguarda os healthchecks. |
 | `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |
-| `uv run --frozen poe smoke` | Valida runtimes, configuração, Compose e liveness real. |
+| `uv run --frozen poe smoke` | Valida runtimes, configuração, Compose, liveness e readiness offline reais. |
 | `uv run --frozen poe smoke --with-services` | Acrescenta a validação do PostgreSQL e do pgvector já iniciados. |
-| `uv run --frozen poe smoke --with-services --with-applications` | Acrescenta PostgreSQL, pgvector, health da web, liveness e OpenAPI v1 da API em contêineres. |
+| `uv run --frozen poe smoke --with-services --with-applications` | Acrescenta PostgreSQL, pgvector, health da web, readiness da API e OpenAPI v1 em contêineres. |
 
 Para incluir o banco no smoke:
 
@@ -266,9 +268,15 @@ no Compose, e `services-down` continua preservando o volume PostgreSQL.
 
 ## Configuração local
 
-O backend exige `PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT` e
-`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL` somente quando `Settings` é
-instanciado. A liveness não carrega essas configurações.
+O backend exige `PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT` com um dos perfis
+`local`, `offline` ou `aws` e
+`PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND` com `memory` ou `postgres`.
+`memory` proíbe URL; `postgres` exige
+`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL`. `offline` aceita somente `memory`,
+enquanto `local` e `aws` admitem as duas composições explícitas. A configuração
+é validada no startup e uma falha encerra a inicialização com mensagem
+sanitizada. A liveness não consulta dependências; a readiness consulta somente
+o PostgreSQL quando o backend selecionado é `postgres`.
 
 `.env.example` contém valores obviamente fictícios e exclusivos para
 desenvolvimento local. Copie-o para `.env` apenas quando um fluxo manual
@@ -361,7 +369,7 @@ implementadas**:
 - busca semântica real por similaridade, recuperação RAG integrada de ponta a
   ponta ou
   configuração operacional de LLM;
-- autenticação, autorização, readiness e observabilidade de produção;
+- autenticação, autorização, métricas e exportação de telemetria;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de
   produção.
