@@ -17,6 +17,7 @@ não abre conexão com ele.
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live` e rotas do contrato HTTP v1. | A liveness verifica apenas o processo; as demais rotas usam fakes sintéticos injetáveis. |
 | `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | Não contém adapters de modelo, recuperação, geração ou persistência reais. |
+| `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates de extração/indexação, auditoria append-only, relógio UTC injetável e repositório em memória com revisão/CAS. | Não processa bytes ou chunks, não implementa adapter PostgreSQL e não altera os endpoints do contrato v1. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
@@ -96,9 +97,10 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
   resultados vêm somente de fakes sintéticos; vizinhos pertencem ao modelo e
   citações pertencem à evidência documental, com referências opacas de documento,
   versão e chunk e página positiva, sem título, caminho ou texto bruto.
-- **Persistência:** há repositório local em memória e contrato de escrita
-  pgvector injetável para chunks, mas não existe cliente, SQL, migração ou
-  persistência integrada ao banco da aplicação.
+- **Persistência:** há repositórios locais em memória para o ciclo documental
+  com CAS e para chunks, além de contrato de escrita pgvector injetável para
+  chunks; não existe cliente, SQL, migração ou persistência integrada ao banco
+  da aplicação.
 - **Web:** `apps/web` reserva o limite do workspace; não existe frontend.
 - **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
   categórico aprovado e visão derivada da política são públicos; originais e
