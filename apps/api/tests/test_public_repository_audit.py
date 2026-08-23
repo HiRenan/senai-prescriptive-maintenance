@@ -77,6 +77,22 @@ def test_staged_protected_content_is_rejected_after_rename(
     assert sha256(contents[0]).hexdigest().encode() not in output
 
 
+def test_unmerged_index_stage_is_rejected_without_disclosure(tmp_path: Path) -> None:
+    repository, manifest, _, _ = _synthetic_repository(tmp_path)
+    object_id = _git(repository, "rev-parse", "HEAD:safe.txt").strip()
+    index_record = b"100644 " + object_id + b" 2\tunmerged-synthetic.bin\n"
+    _git(repository, "update-index", "--index-info", input_data=index_record)
+
+    completed = _audit(repository, manifest)
+    output = completed.stdout + completed.stderr
+
+    assert completed.returncode == 1
+    assert json.loads(completed.stderr)["code"] == "repository_invalid"
+    assert b"unmerged-synthetic.bin" not in output
+    assert object_id not in output
+    assert str(repository).encode() not in output
+
+
 def test_removed_protected_content_remains_rejected_from_reachable_history(
     tmp_path: Path,
 ) -> None:
@@ -200,13 +216,18 @@ def _audit(repository: Path, manifest: Path) -> subprocess.CompletedProcess[byte
     )
 
 
-def _git(repository: Path, *arguments: str) -> bytes:
+def _git(
+    repository: Path,
+    *arguments: str,
+    input_data: bytes | None = None,
+) -> bytes:
     executable = shutil.which("git")
     assert executable is not None
     completed = subprocess.run(  # noqa: S603
         (str(Path(executable).resolve()), *arguments),
         cwd=repository,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL if input_data is None else None,
+        input=input_data,
         capture_output=True,
         check=False,
         timeout=20.0,

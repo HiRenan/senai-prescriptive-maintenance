@@ -43,6 +43,7 @@ manifesto público, mantém nomes e fingerprints fora de representações e prod
 apenas contagens agregadas. A auditoria:
 
 - recusa repositório shallow;
+- recusa índice com estágio diferente de zero;
 - percorre o índice atual e os objetos alcançáveis por `HEAD`, referências
   remotas de `origin` e tags;
 - rejeita um basename protegido mesmo com conteúdo diferente;
@@ -82,8 +83,8 @@ Gitleaks 8.30.1, Node.js 22 e pnpm 10.15.1:
 
 | Comando | Resultado observado |
 | --- | --- |
-| `uv run --frozen poe failure-matrix` | 29 casos aprovados; auditoria de 482 blobs, 45 árvores e quatro revisões, com oito identidades protegidas e histórico completo |
-| `uv run --frozen poe check` | Ruff format/check e Pyright aprovados; 1.131 testes aprovados, 43 skips de integrações opcionais e cobertura total de 80,56% |
+| `uv run --frozen poe failure-matrix` | 30 casos e auditoria sanitizada aprovados, com oito identidades protegidas e histórico completo |
+| `uv run --frozen poe check` | Ruff format/check e Pyright aprovados; 1.132 testes aprovados, 43 skips de integrações opcionais e cobertura total de 80,56% |
 | `uv run --frozen poe hooks` | todos os 11 hooks aprovados |
 | `uv run --frozen poe smoke` | runtimes, pacote, configuração explícita, Compose, liveness e readiness offline aprovados |
 | `uv run --frozen poe golden-e2e` | cinco estados, ciclo documental e três probes de segurança aprovados com fake local |

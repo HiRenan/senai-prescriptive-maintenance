@@ -335,13 +335,12 @@ def _index_entries(
         if (
             mode not in {b"100644", b"100755", b"120000", b"160000"}
             or _OBJECT_ID_PATTERN.fullmatch(object_id) is None
-            or stage not in {b"0", b"1", b"2", b"3"}
+            or stage != b"0"
         ):
             raise PublicRepositoryAuditError("repository_invalid")
-        if stage == b"0":
-            paths.append(path)
-            if mode != b"160000":
-                blob_ids.append(object_id.decode("ascii"))
+        paths.append(path)
+        if mode != b"160000":
+            blob_ids.append(object_id.decode("ascii"))
     return tuple(paths), tuple(blob_ids)
 
 
