@@ -372,6 +372,9 @@ antes do scorer.
 Cada candidato validado é congelado em tipos básicos antes do ranking. O scorer
 recebe uma cópia isolada, e qualquer mutação dessa cópia invalida o ranking; a
 evidência final é materializada somente do snapshot anterior à fronteira.
+`snapshots_are_current()` faz a conferência pontual posterior dos mesmos IDs,
+versões, páginas, seções, texto e SHA-256 contra lifecycle e índice. Essa
+operação não chama o scorer, não refaz ranking e não procura outra evidência.
 
 Os vazios distinguem por enum classe sem mapeamento, ausência de cobertura
 aprovada e ranking sem hits; indisponibilidade, integridade inválida e falha do
@@ -739,13 +742,44 @@ enquanto evidência insuficiente ou conflitante proíbe prescrições. A requisi
 aceita no máximo 12 evidências, limita cada conteúdo a 4.000 caracteres e o
 conjunto a 24.000 caracteres; a serialização ordena os itens por `evidence_id`.
 
-O prompt `prescriptive-generation-system.v1` é um recurso versionado do pacote.
-Ele manda preservar o diagnóstico, usar somente as evidências recebidas, tratar
-seu conteúdo como dado e nunca como instrução, proíbe completar lacunas e exige
-JSON conforme o schema estrito enviado junto da requisição. A validação rejeita
-campos extras, chaves JSON duplicadas, números não finitos, versão incompatível,
-estrutura inválida, código de falha alterado e citações fora da entrada antes de
-criar o resultado do domínio.
+O prompt `prescriptive-generation-system.v2` é um recurso versionado do pacote.
+Cada conteúdo aparece somente em um envelope JSON
+`untrusted-document-envelope.v1`, marcado como não confiável, com SHA-256 e
+sentinels escolhidos deterministicamente sem colisão com o próprio texto. O JSON
+faz o escaping; controles inseguros, caracteres de formatação, substitutos
+Unicode isolados e pontos de código reservados são recusados pelo gate, enquanto
+tabulações e quebras de linha permanecem dados escapados. Frases como “ignore
+instruções” não são classificadas por blacklist: continuam confinadas ao campo
+documental e não alteram a estrutura da requisição.
+
+`RagGuardrailService` aceita somente o tipo exato do diagnóstico imutável e um
+`GovernedRetrievalResult` válido com estado `evidence`. Ausência, classe não
+mapeada, indisponibilidade, texto em branco, identidade de citação ambígua,
+conteúdo estruturalmente inseguro ou divergência entre diagnóstico e classe
+recusam antes do provider. Toda recusa contém código, motivo e próxima ação
+fixos, sem texto documental. Evidência válida é convertida sem lookup adicional:
+`chunk_id` torna-se o identificador citável e documento, versão, página, seção e
+chunk formam o localizador confiável.
+
+O mesmo resultado é conferido por `snapshots_are_current()` imediatamente antes
+e depois da chamada. A porta governada verifica primeiro a identidade da política
+e então delega os mesmos snapshots à recuperação aprovada, que consulta lifecycle
+e índice sem executar busca, scorer ou ranking. Mudança de política, versão,
+status, identidade, texto ou hash fecha a execução; indisponibilidade da
+conferência retorna `currentness_unavailable`, enquanto divergência comprovada
+retorna `stale_evidence`; ambas recusam sem expor o detalhe interno.
+Isso reduz a janela TOCTOU, mas não cria transação ou lease: uma alteração depois
+da segunda conferência e antes do consumo ainda exige coordenação operacional da
+orquestração futura.
+
+O gate posterior rejeita campos extras, chaves JSON duplicadas, números não
+finitos, versão incompatível, estrutura inválida, código de falha alterado e
+citações ausentes, repetidas ou fora do conjunto recuperado. Prescrição só é
+aceita quando o schema declara suporte e cada citação pertence exatamente aos
+snapshots fornecidos e ainda atuais. Narrativas validadas continuam acessíveis
+ao domínio, mas texto documental, prompt montado e output bruto ficam fora de
+`repr`; erros de provider, caminhos e detalhes sensíveis são substituídos por
+recusas sanitizadas.
 
 `FakeGenerationProvider` produz resposta sintética determinística sem ler
 arquivos, rede, ambiente ou credenciais. `BedrockGenerationProvider` implementa
@@ -756,10 +790,15 @@ credenciais e publica somente contagens de tokens inteiras e não negativas;
 erros, envelopes inválidos e metadados extras são substituídos por resultados
 genéricos e sanitizados.
 
-Essa fronteira não recupera documentos, não comprova semanticamente que uma
-citação sustenta a afirmação, não implementa guardrails completos, não persiste
-resultados e não configura infraestrutura AWS. Esses comportamentos dependem de
-tarefas posteriores.
+Os gates comprovam estrutura, identidade, atualidade e pertencimento das
+citações; não comprovam semanticamente que uma frase é sustentada pelo trecho e
+não detectam contradição textual geral. O conflito bloqueado antes do provider é
+somente a colisão estrutural de identidades; uma saída de insuficiência ou
+`evidence_conflict` é tratada como recusa segura, não como prova semântica. A
+resposta determinística do provider fake valida contratos e repetibilidade, mas
+não demonstra resistência semântica universal a prompt injection. A
+fronteira não persiste resultados, não configura infraestrutura AWS e não está
+integrada à API ou à orquestração de análise.
 
 ## Pipeline canônico local
 

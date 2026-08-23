@@ -95,6 +95,9 @@ A versão atual contém:
 - contratos v1 de geração para diagnóstico imutável de entrada, evidências,
   avaliação de suporte, prescrições, citações e warnings, com prompt versionado,
   provider fake determinístico e adaptador Bedrock desabilitável;
+- guardrails RAG internos que recusam estado ou evidência inseguros antes do
+  provider, encapsulam documentos em envelopes não confiáveis e revalidam
+  schema, citações e atualidade dos mesmos snapshots depois da chamada;
 - um pipeline canônico local e determinístico para `banner.csv`, com 18 features
   de inferência, ledger completo de disposições, agrupamento temporal de
   ocorrências independente do target, partições cronológicas com purga e
@@ -130,7 +133,7 @@ Os componentes existentes são:
 
 | Componente | Responsabilidade atual |
 | --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada e porta RAG interna governada, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
+| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness, contrato OpenAPI v1 com fakes e portas internas tipadas, domínio documental governado com repositório em memória, recuperação aprovada, porta RAG governada e guardrails internos pré/pós-provider, settings, persistência mínima com adapters em memória/PostgreSQL, contratos de dados, profiler, inventário categórico, política de qualidade, pipeline canônico local, extração e indexação locais rastreáveis dos documentos autorizados e fronteira versionada de geração prescritiva com provider offline e adaptador Bedrock injetável. |
 | `apps/web` | Processo Node mínimo para liveness da fronteira; nenhuma UI foi implementada. |
 | `compose.yaml` e `infra/` | Topologia local com API, web, PostgreSQL/pgvector e script de habilitação da extensão. |
 | `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco e aplicações em contêineres são opcionais. |

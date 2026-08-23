@@ -653,6 +653,91 @@ class ApprovedKnowledgeRetrievalService:
                 mapping_sha256=ranking.mapping_sha256,
             )
 
+    def snapshots_are_current(
+        self,
+        *,
+        fault_class: str,
+        mapping_version: str,
+        mapping_sha256: str,
+        evidence: tuple[RankedKnowledgeSnapshot, ...],
+    ) -> bool | None:
+        """Revalidate exact retrieved snapshots without scoring or reranking."""
+
+        try:
+            clean_fault_class = canonical_fault_class(fault_class)
+        except Exception:
+            return False
+        try:
+            mapping = validate_fault_knowledge_mapping(self._mapping)
+        except Exception:
+            return None
+        if (
+            type(mapping_version) is not str
+            or mapping_version != mapping.mapping_version
+            or type(mapping_sha256) is not str
+            or mapping_sha256 != mapping.mapping_sha256
+            or type(evidence) is not tuple
+            or not evidence
+            or len(evidence) > MAX_TOP_K
+        ):
+            return False
+        try:
+            copied: list[RankedKnowledgeSnapshot] = []
+            for item in cast(tuple[object, ...], evidence):
+                if type(item) is not RankedKnowledgeSnapshot:
+                    return False
+                copied.append(
+                    RankedKnowledgeSnapshot(
+                        document_id=item.document_id,
+                        document_version=item.document_version,
+                        chunk_id=item.chunk_id,
+                        page_number=item.page_number,
+                        section_id=item.section_id,
+                        content=item.content,
+                        content_sha256=item.content_sha256,
+                        score=item.score,
+                    )
+                )
+            expected = tuple(copied)
+            expected_keys = tuple(
+                (item.document_id, item.document_version, item.chunk_id)
+                for item in expected
+            )
+            if len(expected_keys) != len(set(expected_keys)):
+                return False
+        except Exception:
+            return False
+        try:
+            mapped_document_ids = mapping.document_ids_for(clean_fault_class)
+            if mapped_document_ids is None:
+                return False
+            mapped_set = frozenset(mapped_document_ids)
+            if any(item.document_id not in mapped_set for item in expected):
+                return False
+
+            document_ids = tuple(sorted({item.document_id for item in expected}))
+            current, failure = self._eligible_candidates(document_ids)
+            if failure is not None:
+                return None
+            current_by_key = {_evidence_key(item.evidence): item for item in current}
+            for item in expected:
+                candidate = current_by_key.get(
+                    (item.document_id, item.document_version, item.chunk_id)
+                )
+                if candidate is None:
+                    return False
+                chunk = candidate.record.chunk
+                if (
+                    chunk.page_number != item.page_number
+                    or chunk.section_id != item.section_id
+                    or chunk.content != item.content
+                    or chunk.content_sha256 != item.content_sha256
+                ):
+                    return False
+            return True
+        except Exception:
+            return None
+
     def _rank(self, fault_class: str, *, top_k: int) -> _ApprovedRankingResult:
         clean_fault_class = canonical_fault_class(fault_class)
         if type(top_k) is not int or not 1 <= top_k <= MAX_TOP_K:

@@ -70,7 +70,7 @@ def generate_prescription(
             message="Generation provider failed.",
         )
 
-    if not isinstance(response, ProviderResponse):
+    if type(response) is not ProviderResponse:
         return _failure_result(
             request.diagnosis,
             GenerationStatus.INVALID_OUTPUT,
@@ -119,9 +119,15 @@ def validate_provider_output(
     """Validate strict JSON and citation references without exposing raw values."""
 
     if (
-        not isinstance(output_text, str)
+        type(output_text) is not str
         or not output_text.strip()
         or len(output_text) > _MAX_PROVIDER_OUTPUT_CHARACTERS
+        or type(allowed_evidence_ids) is not frozenset
+        or any(
+            type(evidence_id) is not str
+            for evidence_id in cast(frozenset[object], allowed_evidence_ids)
+        )
+        or type(expected_fault_code) is not str
     ):
         raise InvalidProviderOutputError(
             "Generation provider output did not match the contract."
@@ -174,7 +180,16 @@ def _all_citations(output: ProviderOutput) -> tuple[Citation, ...]:
 
 
 def _allowlisted_usage(usage: object) -> ProviderUsage | None:
-    return usage if isinstance(usage, ProviderUsage) else None
+    try:
+        if type(usage) is not ProviderUsage:
+            return None
+        return ProviderUsage(
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            total_tokens=usage.total_tokens,
+        )
+    except Exception:
+        return None
 
 
 def _failure_result(

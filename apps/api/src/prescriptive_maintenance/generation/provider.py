@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from prescriptive_maintenance.generation.contracts import (
@@ -18,8 +18,8 @@ class ProviderRequest:
     """Provider-neutral prompt and JSON payload."""
 
     prompt_version: str
-    system_prompt: str
-    input_json: str
+    system_prompt: str = field(repr=False)
+    input_json: str = field(repr=False)
     diagnosis_fault_code: str
     allowed_evidence_ids: tuple[str, ...]
 
@@ -28,7 +28,7 @@ class ProviderRequest:
 class ProviderResponse:
     """Raw provider text plus allowlisted usage counters only."""
 
-    output_text: str
+    output_text: str = field(repr=False)
     usage: ProviderUsage | None = None
 
 
