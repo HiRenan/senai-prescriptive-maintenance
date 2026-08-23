@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
+import stat
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from shutil import which
+from types import SimpleNamespace
 from typing import BinaryIO, NoReturn, cast
 
 import pytest
@@ -319,6 +322,133 @@ def test_rejects_symlinked_output_before_writing(tmp_path: Path) -> None:
 
     assert str(raised.value) == "Local output path is unsafe."
     assert list(escaped_directory.iterdir()) == []
+
+
+def test_rejects_synthetic_reparse_component_before_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory, manifest_path, _ = _prepare_synthetic_sources(tmp_path)
+    worktree = _initialize_synthetic_git_worktree(tmp_path)
+    reparse_component = worktree / "data" / "processed"
+    reparse_component.mkdir(parents=True)
+    output_directory = reparse_component / "documents"
+    original_lstat = Path.lstat
+
+    def lstat_with_reparse_attribute(path: Path) -> os.stat_result:
+        metadata = original_lstat(path)
+        if path != reparse_component:
+            return metadata
+        return cast(
+            os.stat_result,
+            SimpleNamespace(
+                st_mode=metadata.st_mode,
+                st_file_attributes=getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400),
+            ),
+        )
+
+    monkeypatch.setattr(Path, "lstat", lstat_with_reparse_attribute)
+
+    with pytest.raises(SourceDocumentOutputError) as raised:
+        extract_source_documents(
+            source_directory=source_directory,
+            manifest_path=manifest_path,
+            output_directory=output_directory,
+        )
+
+    assert str(raised.value) == "Local output path is unsafe."
+    assert not output_directory.exists()
+
+
+def test_fails_closed_when_output_component_inspection_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory, manifest_path, _ = _prepare_synthetic_sources(tmp_path)
+    worktree = _initialize_synthetic_git_worktree(tmp_path)
+    inspected_component = worktree / "data" / "processed"
+    inspected_component.mkdir(parents=True)
+    output_directory = inspected_component / "documents"
+    original_lstat = Path.lstat
+
+    def denied_lstat(path: Path) -> os.stat_result:
+        if path == inspected_component:
+            raise PermissionError
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", denied_lstat)
+
+    with pytest.raises(SourceDocumentOutputError) as raised:
+        extract_source_documents(
+            source_directory=source_directory,
+            manifest_path=manifest_path,
+            output_directory=output_directory,
+        )
+
+    assert str(raised.value) == "Local output path is unsafe."
+    assert not output_directory.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junctions require Windows.")
+def test_rejects_real_windows_junction_without_writing_target(tmp_path: Path) -> None:
+    source_directory, manifest_path, _ = _prepare_synthetic_sources(tmp_path)
+    worktree = _initialize_synthetic_git_worktree(tmp_path)
+    escaped_directory = tmp_path / "synthetic-junction-target"
+    escaped_directory.mkdir()
+    (worktree / "data").mkdir()
+    junction = worktree / "data" / "processed"
+    cmd_executable = which("cmd.exe")
+    assert cmd_executable is not None
+    creation = subprocess.run(  # noqa: S603
+        [
+            cmd_executable,
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            str(junction),
+            str(escaped_directory),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if creation.returncode != 0 or not junction.is_junction():
+        if junction.exists() or junction.is_junction():
+            junction.rmdir()
+        pytest.skip("Directory junctions are unavailable in this environment.")
+
+    try:
+        git_executable = which("git")
+        assert git_executable is not None
+        ignored = subprocess.run(  # noqa: S603
+            [
+                git_executable,
+                "-C",
+                str(worktree),
+                "check-ignore",
+                "--quiet",
+                "--",
+                "data/processed/documents/inventory.v1.json",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+        assert ignored.returncode == 0
+
+        with pytest.raises(SourceDocumentOutputError) as raised:
+            extract_source_documents(
+                source_directory=source_directory,
+                manifest_path=manifest_path,
+                output_directory=junction / "documents",
+            )
+
+        assert str(raised.value) == "Local output path is unsafe."
+        assert list(escaped_directory.iterdir()) == []
+    finally:
+        junction.rmdir()
 
 
 def test_extracts_six_native_documents_without_modifying_sources(

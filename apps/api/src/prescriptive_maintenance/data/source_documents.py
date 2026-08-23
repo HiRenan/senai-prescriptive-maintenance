@@ -42,6 +42,9 @@ _NATIVE_REVIEW_ONLY_SIGNALS: Final = frozenset(
     {"text.too_short", "text.low_alphanumeric_ratio"}
 )
 _GIT_COMMAND_TIMEOUT_SECONDS: Final = 10
+_WINDOWS_REPARSE_POINT_ATTRIBUTE: Final = cast(
+    int, getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+)
 
 
 class SourceDocumentError(Exception):
@@ -330,7 +333,9 @@ def _prepare_output_directory(output_directory: Path) -> Path:
     safe_output_directory = _safe_output_path(output_directory)
     _require_git_ignored(safe_output_directory / _INVENTORY_FILENAME)
     try:
+        _reject_unsafe_output_components(safe_output_directory)
         safe_output_directory.mkdir(parents=True, exist_ok=True)
+        _reject_unsafe_output_components(safe_output_directory)
         if not safe_output_directory.is_dir():
             raise SourceDocumentOutputError("Local output directory is unavailable.")
     except SourceDocumentOutputError:
@@ -347,16 +352,34 @@ def _safe_output_path(path: Path) -> Path:
         raise SourceDocumentOutputError("Local output path is unsafe.")
     try:
         absolute_path = path if path.is_absolute() else Path.cwd() / path
-        current = Path(absolute_path.anchor)
-        for part in absolute_path.parts[1:]:
-            current /= part
-            if current.is_symlink():
-                raise SourceDocumentOutputError("Local output path is unsafe.")
+        _reject_unsafe_output_components(absolute_path)
         return absolute_path.resolve(strict=False)
     except SourceDocumentOutputError:
         raise
     except (OSError, RuntimeError):
         raise SourceDocumentOutputError("Local output path is unsafe.") from None
+
+
+def _reject_unsafe_output_components(path: Path) -> None:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise SourceDocumentOutputError("Local output path is unsafe.") from None
+
+        try:
+            is_symlink = stat.S_ISLNK(metadata.st_mode)
+            is_junction = current.is_junction()
+            file_attributes = cast(int, getattr(metadata, "st_file_attributes", 0))
+            is_reparse_point = bool(file_attributes & _WINDOWS_REPARSE_POINT_ATTRIBUTE)
+        except (AttributeError, OSError, TypeError, ValueError):
+            raise SourceDocumentOutputError("Local output path is unsafe.") from None
+        if is_symlink or is_junction or is_reparse_point:
+            raise SourceDocumentOutputError("Local output path is unsafe.")
 
 
 def _require_git_ignored(artifact_path: Path) -> None:
@@ -1128,7 +1151,8 @@ def _summary(document: _DocumentExtraction) -> SourceDocumentSummary:
 
 
 def _write_json_if_changed(path: Path, payload: Mapping[str, object]) -> None:
-    _require_git_ignored(path)
+    safe_path = _safe_output_path(path)
+    _require_git_ignored(safe_path)
     try:
         content = (
             json.dumps(
@@ -1143,15 +1167,18 @@ def _write_json_if_changed(path: Path, payload: Mapping[str, object]) -> None:
         raise SourceDocumentOutputError("Local document artifact is invalid.") from None
 
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_symlink() or (path.exists() and not path.is_file()):
+        _reject_unsafe_output_components(safe_path)
+        safe_path.parent.mkdir(parents=True, exist_ok=True)
+        _reject_unsafe_output_components(safe_path)
+        if safe_path.exists() and not safe_path.is_file():
             raise SourceDocumentOutputError("Local document artifact path is unsafe.")
-        if path.exists() and path.read_bytes() == content:
+        if safe_path.exists() and safe_path.read_bytes() == content:
             return
+        _reject_unsafe_output_components(safe_path)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=".source-documents-",
             suffix=".tmp",
-            dir=path.parent,
+            dir=safe_path.parent,
         )
         temporary_path = Path(temporary_name)
         try:
@@ -1159,7 +1186,8 @@ def _write_json_if_changed(path: Path, payload: Mapping[str, object]) -> None:
                 temporary_file.write(content)
                 temporary_file.flush()
                 os.fsync(temporary_file.fileno())
-            os.replace(temporary_path, path)
+            _reject_unsafe_output_components(safe_path)
+            os.replace(temporary_path, safe_path)
         finally:
             temporary_path.unlink(missing_ok=True)
     except SourceDocumentOutputError:

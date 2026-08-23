@@ -134,8 +134,8 @@ feita. A factory ou o engine podem ser injetados para testes sintéticos.
 Se a saída estiver dentro de qualquer worktree Git, o próprio artefato precisa
 ser confirmado como ignorado antes de cada escrita; destino não ignorado ou
 erro nessa verificação falha fechado. Caminhos explícitos fora de repositórios
-continuam permitidos para testes sintéticos isolados, sem aceitar symlinks ou
-segmentos de escape.
+continuam permitidos para testes sintéticos isolados, sem aceitar symlinks,
+junctions, outros reparse points ou segmentos de escape.
 
 ```python
 from pathlib import Path
