@@ -9,10 +9,12 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from threading import RLock
 from typing import ClassVar, Final, Protocol
+from unicodedata import category as unicode_category
 
 from prescriptive_maintenance.contracts import DocumentStatus
 
 _SHA256_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
+_UNSAFE_TEXT_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs"})
 _ACTIVE_CANDIDATE_STATUSES: Final = frozenset(
     {
         DocumentStatus.RECEIVED,
@@ -137,6 +139,60 @@ class LifecycleAction(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     SUPERSEDED = "superseded"
+
+
+_EVENT_STATUS_TRANSITIONS: Final[
+    dict[
+        LifecycleAction,
+        tuple[frozenset[DocumentStatus | None], DocumentStatus],
+    ]
+] = {
+    LifecycleAction.REGISTERED: (frozenset({None}), DocumentStatus.RECEIVED),
+    LifecycleAction.PROCESSING_STARTED: (
+        frozenset({DocumentStatus.RECEIVED}),
+        DocumentStatus.PROCESSING,
+    ),
+    LifecycleAction.REPROCESSING_STARTED: (
+        frozenset({DocumentStatus.FAILED, DocumentStatus.REJECTED}),
+        DocumentStatus.PROCESSING,
+    ),
+    LifecycleAction.EXTRACTION_SUCCEEDED: (
+        frozenset({DocumentStatus.PROCESSING}),
+        DocumentStatus.PROCESSING,
+    ),
+    LifecycleAction.INDEXING_SUCCEEDED: (
+        frozenset({DocumentStatus.PROCESSING}),
+        DocumentStatus.PENDING_APPROVAL,
+    ),
+    LifecycleAction.PROCESSING_FAILED: (
+        frozenset({DocumentStatus.PROCESSING}),
+        DocumentStatus.FAILED,
+    ),
+    LifecycleAction.APPROVED: (
+        frozenset({DocumentStatus.PENDING_APPROVAL}),
+        DocumentStatus.APPROVED,
+    ),
+    LifecycleAction.REJECTED: (
+        frozenset({DocumentStatus.PENDING_APPROVAL}),
+        DocumentStatus.REJECTED,
+    ),
+    LifecycleAction.SUPERSEDED: (
+        frozenset({DocumentStatus.APPROVED}),
+        DocumentStatus.SUPERSEDED,
+    ),
+}
+_EVENT_STEPS: Final[dict[LifecycleAction, ProcessingStep]] = {
+    LifecycleAction.EXTRACTION_SUCCEEDED: ProcessingStep.EXTRACTION,
+    LifecycleAction.INDEXING_SUCCEEDED: ProcessingStep.INDEXING,
+}
+_REASON_REQUIRED_ACTIONS: Final = frozenset(
+    {
+        LifecycleAction.PROCESSING_FAILED,
+        LifecycleAction.APPROVED,
+        LifecycleAction.REJECTED,
+        LifecycleAction.SUPERSEDED,
+    }
+)
 
 
 def allowed_document_transitions(
@@ -305,6 +361,8 @@ class LifecycleEvent:
     occurred_at: datetime
     actor: str
     reason: str | None
+    step: ProcessingStep | None = None
+    failure_code: str | None = None
 
     def __post_init__(self) -> None:
         if self.sequence < 1:
@@ -313,8 +371,59 @@ class LifecycleEvent:
         _validate_version_number(self.version)
         _require_utc(self.occurred_at)
         _required_text(self.actor, field="actor", maximum=200)
-        if self.reason is not None:
+        expected_sources, expected_target = _EVENT_STATUS_TRANSITIONS[self.action]
+        if (
+            self.source_status not in expected_sources
+            or self.target_status is not expected_target
+        ):
+            raise InvalidDocumentInputError(
+                "Audit action does not match its status transition."
+            )
+        expected_step = _EVENT_STEPS.get(self.action)
+        if expected_step is not None and self.step is not expected_step:
+            raise InvalidDocumentInputError(
+                "Audit action does not match its processing step."
+            )
+        if self.action is LifecycleAction.PROCESSING_FAILED:
+            _validate_processing_step(self.step)
+            if self.failure_code is None:
+                raise InvalidDocumentInputError(
+                    "A processing failure event requires a failure code."
+                )
+            _required_text(self.failure_code, field="failure code", maximum=80)
+        elif self.failure_code is not None:
+            raise InvalidDocumentInputError(
+                "Only processing failure events may contain a failure code."
+            )
+        if (
+            expected_step is None
+            and self.action is not LifecycleAction.PROCESSING_FAILED
+            and self.step is not None
+        ):
+            raise InvalidDocumentInputError(
+                "Audit action cannot contain a processing step."
+            )
+        if self.action in _REASON_REQUIRED_ACTIONS:
+            if self.reason is None:
+                raise InvalidDocumentInputError(
+                    "The audit action requires a non-empty reason."
+                )
             _required_text(self.reason, field="reason", maximum=500)
+        elif self.reason is not None:
+            raise InvalidDocumentInputError("The audit action cannot contain a reason.")
+
+
+@dataclass(frozen=True, slots=True)
+class _LifecycleCommand:
+    """Canonical command payload used only for exact replay recognition."""
+
+    action: LifecycleAction
+    version: int
+    actor: str
+    reason: str | None = None
+    sha256: str | None = None
+    step: ProcessingStep | None = None
+    failure_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,10 +579,24 @@ class GovernedDocument:
 
         _validate_version_number(version)
         clean_hash = _validate_sha256(sha256)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
         if version <= len(self.versions):
             existing = self.versions[version - 1]
             if existing.sha256 == clean_hash:
-                return self
+                registration = next(
+                    (
+                        event
+                        for event in self.history
+                        if event.action is LifecycleAction.REGISTERED
+                        and event.version == version
+                    ),
+                    None,
+                )
+                if registration is not None and registration.actor == clean_actor:
+                    return self
+                raise DocumentVersionConflictError(
+                    "The existing registration has a different audit command."
+                )
             raise DocumentVersionConflictError(
                 "The requested version already identifies different content."
             )
@@ -490,7 +613,6 @@ class GovernedDocument:
             raise InvalidDocumentTransitionError(
                 "The active candidate must finish before another version is registered."
             )
-        clean_actor = _required_text(actor, field="actor", maximum=200)
         instant = self._validate_next_instant(occurred_at)
         new_version = DocumentVersion(
             number=version,
@@ -524,9 +646,8 @@ class GovernedDocument:
     ) -> GovernedDocument:
         """Move a newly received version into its first processing attempt."""
 
+        clean_actor = _required_text(actor, field="actor", maximum=200)
         current = self.version(version)
-        if current.status is DocumentStatus.PROCESSING:
-            return self
         self._ensure_latest(version)
         self._ensure_transition(current.status, DocumentStatus.PROCESSING)
         instant = self._validate_next_instant(occurred_at)
@@ -539,7 +660,7 @@ class GovernedDocument:
             original=current,
             updated=updated,
             action=LifecycleAction.PROCESSING_STARTED,
-            actor=actor,
+            actor=clean_actor,
             reason=None,
             occurred_at=instant,
         )
@@ -554,13 +675,13 @@ class GovernedDocument:
     ) -> GovernedDocument:
         """Resume a failed version or restart both gates after rejection."""
 
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_hash = _validate_sha256(sha256)
         current = self.version(version)
-        if current.sha256 != _validate_sha256(sha256):
+        if current.sha256 != clean_hash:
             raise DocumentContentConflictError(
                 "The reprocessing hash does not identify the requested version."
             )
-        if current.status is DocumentStatus.PROCESSING:
-            return self
         self._ensure_latest(version)
         self._ensure_transition(current.status, DocumentStatus.PROCESSING)
         integrity = (
@@ -580,7 +701,7 @@ class GovernedDocument:
             original=current,
             updated=updated,
             action=LifecycleAction.REPROCESSING_STARTED,
-            actor=actor,
+            actor=clean_actor,
             reason=None,
             occurred_at=instant,
         )
@@ -595,16 +716,23 @@ class GovernedDocument:
     ) -> GovernedDocument:
         """Record one successful integrity gate and await approval when complete."""
 
+        clean_step = _validate_processing_step(step)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
         current = self.version(version)
-        if current.integrity.status_for(step) is ProcessingStepStatus.SUCCEEDED:
-            return self
         self._ensure_latest(version)
         if current.status is not DocumentStatus.PROCESSING:
             raise InvalidDocumentTransitionError(
                 "Processing results require a version in processing."
             )
-        self._ensure_step_order(current.integrity, step)
-        integrity = current.integrity.with_status(step, ProcessingStepStatus.SUCCEEDED)
+        if current.integrity.status_for(clean_step) is ProcessingStepStatus.SUCCEEDED:
+            raise InvalidDocumentTransitionError(
+                "A successful processing step cannot be recorded again."
+            )
+        self._ensure_step_order(current.integrity, clean_step)
+        integrity = current.integrity.with_status(
+            clean_step,
+            ProcessingStepStatus.SUCCEEDED,
+        )
         target = (
             DocumentStatus.PENDING_APPROVAL
             if integrity.complete
@@ -621,16 +749,17 @@ class GovernedDocument:
         )
         action = (
             LifecycleAction.EXTRACTION_SUCCEEDED
-            if step is ProcessingStep.EXTRACTION
+            if clean_step is ProcessingStep.EXTRACTION
             else LifecycleAction.INDEXING_SUCCEEDED
         )
         return self._replace_version_and_record(
             original=current,
             updated=updated,
             action=action,
-            actor=actor,
+            actor=clean_actor,
             reason=None,
             occurred_at=instant,
+            step=clean_step,
         )
 
     def record_step_failed(
@@ -645,29 +774,29 @@ class GovernedDocument:
     ) -> GovernedDocument:
         """Fail one processing gate while retaining any completed gate."""
 
+        clean_step = _validate_processing_step(step)
         clean_code = _required_text(code, field="failure code", maximum=80)
         clean_reason = _required_text(reason, field="failure reason", maximum=500)
         clean_actor = _required_text(actor, field="actor", maximum=200)
         current = self.version(version)
-        if (
-            current.status is DocumentStatus.FAILED
-            and current.failure is not None
-            and current.failure.step is step
-            and current.failure.code == clean_code
-            and current.failure.reason == clean_reason
-        ):
-            return self
         self._ensure_latest(version)
         if current.status is not DocumentStatus.PROCESSING:
             raise InvalidDocumentTransitionError(
                 "Processing failures require a version in processing."
             )
-        self._ensure_step_order(current.integrity, step)
+        if current.integrity.status_for(clean_step) is ProcessingStepStatus.SUCCEEDED:
+            raise InvalidDocumentTransitionError(
+                "A successful processing step cannot regress to failed."
+            )
+        self._ensure_step_order(current.integrity, clean_step)
         self._ensure_transition(current.status, DocumentStatus.FAILED)
         instant = self._validate_next_instant(occurred_at)
-        integrity = current.integrity.with_status(step, ProcessingStepStatus.FAILED)
+        integrity = current.integrity.with_status(
+            clean_step,
+            ProcessingStepStatus.FAILED,
+        )
         failure = ProcessingFailure(
-            step=step,
+            step=clean_step,
             code=clean_code,
             reason=clean_reason,
             actor=clean_actor,
@@ -687,6 +816,8 @@ class GovernedDocument:
             actor=clean_actor,
             reason=clean_reason,
             occurred_at=instant,
+            step=clean_step,
+            failure_code=clean_code,
         )
 
     def approve(
@@ -700,11 +831,7 @@ class GovernedDocument:
         """Approve the latest intact candidate and atomically supersede the current."""
 
         clean_actor = _required_text(actor, field="actor", maximum=200)
-        clean_reason = (
-            None
-            if reason is None
-            else _required_text(reason, field="reason", maximum=500)
-        )
+        clean_reason = _required_text(reason, field="approval reason", maximum=500)
         candidate = self.version(version)
         self._ensure_latest(version)
         if not candidate.integrity.complete:
@@ -774,10 +901,11 @@ class GovernedDocument:
     ) -> GovernedDocument:
         """Reject the latest pending candidate without deleting its audit trail."""
 
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_reason = _required_text(reason, field="rejection reason", maximum=500)
         candidate = self.version(version)
         self._ensure_latest(version)
         self._ensure_transition(candidate.status, DocumentStatus.REJECTED)
-        clean_reason = _required_text(reason, field="rejection reason", maximum=500)
         instant = self._validate_next_instant(occurred_at)
         updated = replace(
             candidate,
@@ -788,7 +916,7 @@ class GovernedDocument:
             original=candidate,
             updated=updated,
             action=LifecycleAction.REJECTED,
-            actor=actor,
+            actor=clean_actor,
             reason=clean_reason,
             occurred_at=instant,
         )
@@ -850,6 +978,8 @@ class GovernedDocument:
         actor: str,
         reason: str | None,
         occurred_at: datetime,
+        step: ProcessingStep | None = None,
+        failure_code: str | None = None,
     ) -> GovernedDocument:
         clean_actor = _required_text(actor, field="actor", maximum=200)
         event = self._event(
@@ -860,6 +990,8 @@ class GovernedDocument:
             occurred_at=occurred_at,
             actor=clean_actor,
             reason=reason,
+            step=step,
+            failure_code=failure_code,
         )
         versions = tuple(
             updated if item.number == updated.number else item for item in self.versions
@@ -881,6 +1013,8 @@ class GovernedDocument:
         actor: str,
         reason: str | None,
         sequence: int | None = None,
+        step: ProcessingStep | None = None,
+        failure_code: str | None = None,
     ) -> LifecycleEvent:
         return LifecycleEvent(
             sequence=len(self.history) + 1 if sequence is None else sequence,
@@ -892,6 +1026,8 @@ class GovernedDocument:
             occurred_at=occurred_at,
             actor=actor,
             reason=reason,
+            step=step,
+            failure_code=failure_code,
         )
 
     def _validate_next_instant(self, value: datetime) -> datetime:
@@ -950,17 +1086,18 @@ class InMemoryDocumentRepository:
         *,
         expected_revision: int,
     ) -> DocumentSnapshot:
-        if expected_revision < 0:
-            raise InvalidDocumentInputError("Expected revision cannot be negative.")
+        clean_expected_revision = _validate_expected_revision(expected_revision)
         with self._lock:
             current = self._documents.get(document.identity)
             actual_revision = 0 if current is None else current.revision
-            if actual_revision != expected_revision:
+            if actual_revision != clean_expected_revision:
                 raise DocumentConcurrencyError(
-                    expected_revision=expected_revision,
+                    expected_revision=clean_expected_revision,
                     actual_revision=actual_revision,
                 )
-            if current is not None:
+            if current is None:
+                _validate_initial_document(document)
+            else:
                 _validate_append_only_update(current.document, document)
             snapshot = DocumentSnapshot(
                 document=document,
@@ -1002,48 +1139,61 @@ class DocumentGovernanceService:
     ) -> DocumentSnapshot:
         """Register once by identity, version and hash, even after a CAS race."""
 
-        current = self._repository.get(identity)
+        clean_identity = _validate_identity(identity)
+        clean_version = _validate_version_number(version)
+        clean_hash = _validate_sha256(sha256)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_expected_revision = _validate_expected_revision(expected_revision)
+        command = _LifecycleCommand(
+            action=LifecycleAction.REGISTERED,
+            version=clean_version,
+            actor=clean_actor,
+            sha256=clean_hash,
+        )
+        current = self._repository.get(clean_identity)
         if current is not None:
-            if (
-                current.document.registered_version(version=version, sha256=sha256)
-                is not None
+            registered = current.document.registered_version(
+                version=clean_version,
+                sha256=clean_hash,
+            )
+            if registered is not None and _matches_registration_command(
+                current.document,
+                command,
             ):
                 return current
-            if current.revision != expected_revision:
+            if current.revision != clean_expected_revision:
                 raise DocumentConcurrencyError(
-                    expected_revision=expected_revision,
+                    expected_revision=clean_expected_revision,
                     actual_revision=current.revision,
                 )
             updated = current.document.register_version(
-                version=version,
-                sha256=sha256,
-                actor=actor,
+                version=clean_version,
+                sha256=clean_hash,
+                actor=clean_actor,
                 occurred_at=self._utc_now(),
             )
         else:
-            if expected_revision != 0:
+            if clean_expected_revision != 0:
                 raise DocumentConcurrencyError(
-                    expected_revision=expected_revision,
+                    expected_revision=clean_expected_revision,
                     actual_revision=0,
                 )
             updated = GovernedDocument.register(
-                identity=identity,
-                version=version,
-                sha256=sha256,
-                actor=actor,
+                identity=clean_identity,
+                version=clean_version,
+                sha256=clean_hash,
+                actor=clean_actor,
                 occurred_at=self._utc_now(),
             )
         try:
             return self._repository.compare_and_swap(
                 updated,
-                expected_revision=expected_revision,
+                expected_revision=clean_expected_revision,
             )
         except DocumentConcurrencyError:
-            raced = self._repository.get(identity)
-            if (
-                raced is not None
-                and raced.document.registered_version(version=version, sha256=sha256)
-                is not None
+            raced = self._repository.get(clean_identity)
+            if raced is not None and _matches_registration_command(
+                raced.document, command
             ):
                 return raced
             raise
@@ -1056,12 +1206,22 @@ class DocumentGovernanceService:
         actor: str,
         expected_revision: int,
     ) -> DocumentSnapshot:
+        clean_identity = _validate_identity(identity)
+        clean_version = _validate_version_number(version)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_expected_revision = _validate_expected_revision(expected_revision)
+        command = _LifecycleCommand(
+            action=LifecycleAction.PROCESSING_STARTED,
+            version=clean_version,
+            actor=clean_actor,
+        )
         return self._mutate(
-            identity=identity,
-            expected_revision=expected_revision,
+            identity=clean_identity,
+            expected_revision=clean_expected_revision,
+            command=command,
             mutation=lambda document, instant: document.start_processing(
-                version=version,
-                actor=actor,
+                version=clean_version,
+                actor=clean_actor,
                 occurred_at=instant,
             ),
         )
@@ -1075,13 +1235,25 @@ class DocumentGovernanceService:
         actor: str,
         expected_revision: int,
     ) -> DocumentSnapshot:
+        clean_identity = _validate_identity(identity)
+        clean_version = _validate_version_number(version)
+        clean_hash = _validate_sha256(sha256)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_expected_revision = _validate_expected_revision(expected_revision)
+        command = _LifecycleCommand(
+            action=LifecycleAction.REPROCESSING_STARTED,
+            version=clean_version,
+            actor=clean_actor,
+            sha256=clean_hash,
+        )
         return self._mutate(
-            identity=identity,
-            expected_revision=expected_revision,
+            identity=clean_identity,
+            expected_revision=clean_expected_revision,
+            command=command,
             mutation=lambda document, instant: document.reprocess(
-                version=version,
-                sha256=sha256,
-                actor=actor,
+                version=clean_version,
+                sha256=clean_hash,
+                actor=clean_actor,
                 occurred_at=instant,
             ),
         )
@@ -1095,13 +1267,30 @@ class DocumentGovernanceService:
         actor: str,
         expected_revision: int,
     ) -> DocumentSnapshot:
+        clean_identity = _validate_identity(identity)
+        clean_version = _validate_version_number(version)
+        clean_step = _validate_processing_step(step)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_expected_revision = _validate_expected_revision(expected_revision)
+        action = (
+            LifecycleAction.EXTRACTION_SUCCEEDED
+            if clean_step is ProcessingStep.EXTRACTION
+            else LifecycleAction.INDEXING_SUCCEEDED
+        )
+        command = _LifecycleCommand(
+            action=action,
+            version=clean_version,
+            actor=clean_actor,
+            step=clean_step,
+        )
         return self._mutate(
-            identity=identity,
-            expected_revision=expected_revision,
+            identity=clean_identity,
+            expected_revision=clean_expected_revision,
+            command=command,
             mutation=lambda document, instant: document.record_step_succeeded(
-                version=version,
-                step=step,
-                actor=actor,
+                version=clean_version,
+                step=clean_step,
+                actor=clean_actor,
                 occurred_at=instant,
             ),
         )
@@ -1117,15 +1306,31 @@ class DocumentGovernanceService:
         actor: str,
         expected_revision: int,
     ) -> DocumentSnapshot:
+        clean_identity = _validate_identity(identity)
+        clean_version = _validate_version_number(version)
+        clean_step = _validate_processing_step(step)
+        clean_code = _required_text(code, field="failure code", maximum=80)
+        clean_reason = _required_text(reason, field="failure reason", maximum=500)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_expected_revision = _validate_expected_revision(expected_revision)
+        command = _LifecycleCommand(
+            action=LifecycleAction.PROCESSING_FAILED,
+            version=clean_version,
+            actor=clean_actor,
+            reason=clean_reason,
+            step=clean_step,
+            failure_code=clean_code,
+        )
         return self._mutate(
-            identity=identity,
-            expected_revision=expected_revision,
+            identity=clean_identity,
+            expected_revision=clean_expected_revision,
+            command=command,
             mutation=lambda document, instant: document.record_step_failed(
-                version=version,
-                step=step,
-                code=code,
-                reason=reason,
-                actor=actor,
+                version=clean_version,
+                step=clean_step,
+                code=clean_code,
+                reason=clean_reason,
+                actor=clean_actor,
                 occurred_at=instant,
             ),
         )
@@ -1139,13 +1344,25 @@ class DocumentGovernanceService:
         reason: str | None,
         expected_revision: int,
     ) -> DocumentSnapshot:
+        clean_identity = _validate_identity(identity)
+        clean_version = _validate_version_number(version)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_reason = _required_text(reason, field="approval reason", maximum=500)
+        clean_expected_revision = _validate_expected_revision(expected_revision)
+        command = _LifecycleCommand(
+            action=LifecycleAction.APPROVED,
+            version=clean_version,
+            actor=clean_actor,
+            reason=clean_reason,
+        )
         return self._mutate(
-            identity=identity,
-            expected_revision=expected_revision,
+            identity=clean_identity,
+            expected_revision=clean_expected_revision,
+            command=command,
             mutation=lambda document, instant: document.approve(
-                version=version,
-                actor=actor,
-                reason=reason,
+                version=clean_version,
+                actor=clean_actor,
+                reason=clean_reason,
                 occurred_at=instant,
             ),
         )
@@ -1159,13 +1376,25 @@ class DocumentGovernanceService:
         reason: str,
         expected_revision: int,
     ) -> DocumentSnapshot:
+        clean_identity = _validate_identity(identity)
+        clean_version = _validate_version_number(version)
+        clean_actor = _required_text(actor, field="actor", maximum=200)
+        clean_reason = _required_text(reason, field="rejection reason", maximum=500)
+        clean_expected_revision = _validate_expected_revision(expected_revision)
+        command = _LifecycleCommand(
+            action=LifecycleAction.REJECTED,
+            version=clean_version,
+            actor=clean_actor,
+            reason=clean_reason,
+        )
         return self._mutate(
-            identity=identity,
-            expected_revision=expected_revision,
+            identity=clean_identity,
+            expected_revision=clean_expected_revision,
+            command=command,
             mutation=lambda document, instant: document.reject(
-                version=version,
-                actor=actor,
-                reason=reason,
+                version=clean_version,
+                actor=clean_actor,
+                reason=clean_reason,
                 occurred_at=instant,
             ),
         )
@@ -1175,36 +1404,68 @@ class DocumentGovernanceService:
         *,
         identity: str,
         expected_revision: int,
+        command: _LifecycleCommand,
         mutation: Callable[[GovernedDocument, datetime], GovernedDocument],
     ) -> DocumentSnapshot:
         current = self.get(identity)
         if current.revision != expected_revision:
-            try:
-                replay = mutation(
-                    current.document,
-                    current.document.history[-1].occurred_at,
-                )
-            except DocumentLifecycleError:
-                replay = None
-            if replay == current.document:
+            if current.revision == expected_revision + 1 and _matches_latest_command(
+                current.document, command
+            ):
                 return current
             raise DocumentConcurrencyError(
                 expected_revision=expected_revision,
                 actual_revision=current.revision,
             )
         updated = mutation(current.document, self._utc_now())
-        if updated == current.document:
-            return current
-        return self._repository.compare_and_swap(
-            updated,
-            expected_revision=expected_revision,
-        )
+        try:
+            return self._repository.compare_and_swap(
+                updated,
+                expected_revision=expected_revision,
+            )
+        except DocumentConcurrencyError:
+            raced = self._repository.get(identity)
+            if (
+                raced is not None
+                and raced.revision == expected_revision + 1
+                and _matches_latest_command(raced.document, command)
+            ):
+                return raced
+            raise
 
     def _utc_now(self) -> datetime:
         value = self._clock.now()
         if value.tzinfo is None or value.utcoffset() is None:
             raise DocumentClockError("Document lifecycle clock must be timezone-aware.")
         return value.astimezone(UTC)
+
+
+def _validate_initial_document(document: GovernedDocument) -> None:
+    if len(document.versions) != 1 or len(document.history) != 1:
+        raise DocumentAuditConflictError(
+            "An initial document save must contain only its registration."
+        )
+    event = document.history[0]
+    if event.action is not LifecycleAction.REGISTERED:
+        raise DocumentAuditConflictError(
+            "An initial document save must begin with registration."
+        )
+    try:
+        expected = GovernedDocument.register(
+            identity=document.identity,
+            version=event.version,
+            sha256=document.version(event.version).sha256,
+            actor=event.actor,
+            occurred_at=event.occurred_at,
+        )
+    except DocumentLifecycleError:
+        raise DocumentAuditConflictError(
+            "The initial document aggregate is not a valid registration."
+        ) from None
+    if expected != document:
+        raise DocumentAuditConflictError(
+            "The initial document aggregate is not a valid registration."
+        )
 
 
 def _validate_append_only_update(
@@ -1236,6 +1497,146 @@ def _validate_append_only_update(
             raise DocumentAuditConflictError(
                 "Stored document version identity and content are immutable."
             )
+    try:
+        expected = _rebuild_audited_update(current, candidate)
+    except DocumentLifecycleError:
+        raise DocumentAuditConflictError(
+            "The document aggregate contains an impossible lifecycle evolution."
+        ) from None
+    if expected != candidate:
+        raise DocumentAuditConflictError(
+            "The document aggregate does not match its appended audit command."
+        )
+
+
+def _rebuild_audited_update(
+    current: GovernedDocument,
+    candidate: GovernedDocument,
+) -> GovernedDocument:
+    event = candidate.history[-1]
+    if event.action is LifecycleAction.REGISTERED:
+        registered = candidate.version(event.version)
+        return current.register_version(
+            version=event.version,
+            sha256=registered.sha256,
+            actor=event.actor,
+            occurred_at=event.occurred_at,
+        )
+    if event.action is LifecycleAction.PROCESSING_STARTED:
+        return current.start_processing(
+            version=event.version,
+            actor=event.actor,
+            occurred_at=event.occurred_at,
+        )
+    if event.action is LifecycleAction.REPROCESSING_STARTED:
+        return current.reprocess(
+            version=event.version,
+            sha256=current.version(event.version).sha256,
+            actor=event.actor,
+            occurred_at=event.occurred_at,
+        )
+    if event.action in {
+        LifecycleAction.EXTRACTION_SUCCEEDED,
+        LifecycleAction.INDEXING_SUCCEEDED,
+    }:
+        return current.record_step_succeeded(
+            version=event.version,
+            step=_required_event_step(event),
+            actor=event.actor,
+            occurred_at=event.occurred_at,
+        )
+    if event.action is LifecycleAction.PROCESSING_FAILED:
+        return current.record_step_failed(
+            version=event.version,
+            step=_required_event_step(event),
+            code=_required_event_failure_code(event),
+            reason=_required_event_reason(event),
+            actor=event.actor,
+            occurred_at=event.occurred_at,
+        )
+    if event.action is LifecycleAction.APPROVED:
+        return current.approve(
+            version=event.version,
+            actor=event.actor,
+            reason=_required_event_reason(event),
+            occurred_at=event.occurred_at,
+        )
+    if event.action is LifecycleAction.REJECTED:
+        return current.reject(
+            version=event.version,
+            actor=event.actor,
+            reason=_required_event_reason(event),
+            occurred_at=event.occurred_at,
+        )
+    raise DocumentAuditConflictError(
+        "A supersession cannot be appended without its replacement approval."
+    )
+
+
+def _required_event_step(event: LifecycleEvent) -> ProcessingStep:
+    if event.step is None:
+        raise InvalidDocumentInputError("The audit command requires a processing step.")
+    return _validate_processing_step(event.step)
+
+
+def _required_event_failure_code(event: LifecycleEvent) -> str:
+    if event.failure_code is None:
+        raise InvalidDocumentInputError("The audit command requires a failure code.")
+    return _required_text(event.failure_code, field="failure code", maximum=80)
+
+
+def _required_event_reason(event: LifecycleEvent) -> str:
+    if event.reason is None:
+        raise InvalidDocumentInputError("The audit command requires a reason.")
+    return _required_text(event.reason, field="reason", maximum=500)
+
+
+def _matches_registration_command(
+    document: GovernedDocument,
+    command: _LifecycleCommand,
+) -> bool:
+    if command.action is not LifecycleAction.REGISTERED:
+        return False
+    try:
+        version = document.version(command.version)
+    except DocumentLifecycleError:
+        return False
+    if version.sha256 != command.sha256:
+        return False
+    return any(
+        _event_matches_command(event, command)
+        for event in document.history
+        if event.action is LifecycleAction.REGISTERED
+        and event.version == command.version
+    )
+
+
+def _matches_latest_command(
+    document: GovernedDocument,
+    command: _LifecycleCommand,
+) -> bool:
+    if not _event_matches_command(document.history[-1], command):
+        return False
+    if command.sha256 is None:
+        return True
+    try:
+        return document.version(command.version).sha256 == command.sha256
+    except DocumentLifecycleError:
+        return False
+
+
+def _event_matches_command(
+    event: LifecycleEvent,
+    command: _LifecycleCommand,
+) -> bool:
+    return (
+        event.action is command.action
+        and event.version == command.version
+        and event.actor == command.actor
+        and event.reason == command.reason
+        and event.step is command.step
+        and event.failure_code == command.failure_code
+    )
 
 
 def _validate_identity(value: str) -> str:
@@ -1245,6 +1646,20 @@ def _validate_identity(value: str) -> str:
 def _validate_version_number(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise InvalidDocumentInputError("Document version must be a positive integer.")
+    return value
+
+
+def _validate_expected_revision(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise InvalidDocumentInputError(
+            "Expected revision must be a non-negative integer."
+        )
+    return value
+
+
+def _validate_processing_step(value: object) -> ProcessingStep:
+    if not isinstance(value, ProcessingStep):
+        raise InvalidDocumentInputError("Processing step is invalid.")
     return value
 
 
@@ -1259,12 +1674,34 @@ def _validate_sha256(value: object) -> str:
 def _required_text(value: object, *, field: str, maximum: int) -> str:
     if not isinstance(value, str):
         raise InvalidDocumentInputError(f"{field.capitalize()} must be text.")
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        raise InvalidDocumentInputError(
+            f"{field.capitalize()} must contain safe UTF-8 text."
+        ) from None
+    if any(
+        unicode_category(character) in _UNSAFE_TEXT_CATEGORIES
+        or _is_unicode_noncharacter(character)
+        for character in value
+    ):
+        raise InvalidDocumentInputError(
+            f"{field.capitalize()} must contain safe UTF-8 text."
+        )
     cleaned = value.strip()
     if not cleaned or len(cleaned) > maximum:
         raise InvalidDocumentInputError(
             f"{field.capitalize()} must contain 1 to {maximum} characters."
         )
     return cleaned
+
+
+def _is_unicode_noncharacter(character: str) -> bool:
+    code_point = ord(character)
+    return 0xFDD0 <= code_point <= 0xFDEF or code_point & 0xFFFF in {
+        0xFFFE,
+        0xFFFF,
+    }
 
 
 def _require_utc(value: datetime) -> datetime:
