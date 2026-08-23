@@ -1049,6 +1049,74 @@ class DocumentSnapshot:
             raise InvalidDocumentInputError("Stored revision must be positive.")
 
 
+def is_document_snapshot_audited(value: object) -> bool:
+    """Verify that one snapshot is the exact replay of its append-only history."""
+
+    try:
+        if (
+            type(value) is not DocumentSnapshot
+            or type(value.revision) is not int
+            or value.revision < 1
+            or type(value.document) is not GovernedDocument
+            or type(value.document.versions) is not tuple
+            or not value.document.versions
+            or type(value.document.history) is not tuple
+            or not value.document.history
+            or any(
+                type(version) is not DocumentVersion
+                for version in value.document.versions
+            )
+            or any(
+                type(event) is not LifecycleEvent for event in value.document.history
+            )
+        ):
+            return False
+
+        document = value.document
+        first = document.history[0]
+        if first.action is not LifecycleAction.REGISTERED:
+            return False
+        replayed = GovernedDocument.register(
+            identity=document.identity,
+            version=first.version,
+            sha256=document.version(first.version).sha256,
+            actor=first.actor,
+            occurred_at=first.occurred_at,
+        )
+        if replayed.history != (first,):
+            return False
+
+        cursor = 1
+        revision = 1
+        while cursor < len(document.history):
+            event = document.history[cursor]
+            expected_events = (event,)
+            replay_event = event
+            if event.action is LifecycleAction.SUPERSEDED:
+                if cursor + 1 >= len(document.history):
+                    return False
+                approval = document.history[cursor + 1]
+                if approval.action is not LifecycleAction.APPROVED:
+                    return False
+                expected_events = (event, approval)
+                replay_event = approval
+
+            updated = _rebuild_audited_update(
+                replayed,
+                document,
+                event=replay_event,
+            )
+            if updated.history[len(replayed.history) :] != expected_events:
+                return False
+            replayed = updated
+            cursor += len(expected_events)
+            revision += 1
+
+        return revision == value.revision and replayed == document
+    except Exception:
+        return False
+
+
 class DocumentRepository(Protocol):
     """Minimal persistence port required by the lifecycle service."""
 
@@ -1512,8 +1580,10 @@ def _validate_append_only_update(
 def _rebuild_audited_update(
     current: GovernedDocument,
     candidate: GovernedDocument,
+    *,
+    event: LifecycleEvent | None = None,
 ) -> GovernedDocument:
-    event = candidate.history[-1]
+    event = candidate.history[-1] if event is None else event
     if event.action is LifecycleAction.REGISTERED:
         registered = candidate.version(event.version)
         return current.register_version(

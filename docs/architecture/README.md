@@ -20,6 +20,7 @@ fábricas injetadas e permanece desacoplado das rotas HTTP.
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live` e rotas do contrato HTTP v1. | A liveness verifica apenas o processo; as demais rotas usam fakes sintéticos injetáveis. |
 | `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas e orquestração determinística. | A aplicação continua injetando fakes; não conecta a baseline nem adapters de recuperação, geração ou persistência reais. |
 | `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates monotônicos de extração/indexação, auditoria append-only com texto seguro, replay semântico exato, relógio UTC injetável e repositório em memória cujo CAS valida o comando e o agregado completos. | Não processa bytes ou chunks, não implementa adapter PostgreSQL e não altera os endpoints do contrato v1. |
+| `apps/api/src/prescriptive_maintenance/knowledge_retrieval.py` | Configuração externa de classe canônica para documentos opacos com versão, hash semântico e referências validadas; serviço fail-closed que seleciona somente a versão aprovada vigente, confere integridade do chunk antes do scorer e produz ranking limitado, determinístico e sem conteúdo. | Não inclui configuração real, scorer semântico, busca pgvector, provider, endpoint, persistência, geração ou recuperação RAG integrada. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Settings tipados para `environment` e `database_url`, carregados sob demanda. | A aplicação não instancia settings na criação nem na liveness. |
 | `apps/api/src/prescriptive_maintenance/persistence/` | Metadados imutáveis de análise/documento/versão/chunk/evidência, evolução idempotente de versões, repositórios tipados, unidade transacional, adapter em memória, adapter psycopg e migração inicial reversível. | Não persiste conteúdo, features, vetores ou narrativas e ainda não é chamado pelas rotas HTTP. |
@@ -144,10 +145,10 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou pipeline de transformação tabular da aplicação;
 - integração das rotas HTTP com os repositórios persistentes;
-- integração operacional do adapter de modelo, adapters reais de recuperação,
-  embedding semântico, índice vetorial, conexão pgvector e uso de vetores pela
-  aplicação, busca por similaridade, recuperação governada de contexto,
-  execução RAG integrada ou configuração operacional de LLM;
+- integração operacional do adapter de modelo, scorer real, embedding semântico,
+  índice vetorial, conexão pgvector e uso de vetores pela aplicação, busca
+  semântica por similaridade, recuperação RAG integrada ou configuração
+  operacional de LLM;
 - autenticação, autorização e endpoint de readiness;
 - frontend, experiência de usuário ou assets visuais;
 - recursos AWS, deploy, ambiente de produção ou observabilidade operacional.

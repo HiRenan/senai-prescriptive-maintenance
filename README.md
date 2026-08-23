@@ -68,6 +68,10 @@ A versão atual contém:
   documentos, sem reabrir PDFs, com limites e overlap versionados, IDs por
   conteúdo e proveniência, embeddings fake hash locais não semânticos para CI,
   repositório em memória e fronteira pgvector dependente de writer injetado;
+- uma configuração externa e auditável de classes canônicas para documentos
+  lógicos opacos, com versão e SHA-256 determinístico, e um serviço interno que
+  filtra lifecycle e integridade antes de um scorer injetado, limita o top-k e
+  devolve somente proveniência navegável sem conteúdo;
 - um catálogo v2 das 26 colunas e um contrato Pandera estrito, ordenado e sem
   coerção implícita, acompanhado de relatórios sanitizados de violação;
 - um profiler determinístico sobre DataFrames já carregados, com indicadores
@@ -104,9 +108,9 @@ A versão atual contém:
 
 Não há, nesta etapa, regras de negócio completas, ingestão contínua pela
 aplicação, integração da baseline ou dos adapters persistentes ao fluxo HTTP,
-busca real por vizinhos, vetores integrados à aplicação, recuperação de
-contexto, execução RAG integrada, chamada automática a LLM, autenticação,
-readiness, infraestrutura AWS, deploy ou interface web.
+busca semântica real por vizinhos, vetores integrados à aplicação, recuperação
+RAG integrada, chamada automática a LLM, autenticação, readiness,
+infraestrutura AWS, deploy ou interface web.
 
 ## Arquitetura atual
 
@@ -345,8 +349,8 @@ implementadas**:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou orquestração do pipeline canônico pela aplicação;
 - integração das rotas HTTP com a persistência, a baseline e o uso de vetores;
-- busca por similaridade, recuperação governada de contexto, execução RAG
-  integrada ou configuração operacional de LLM;
+- busca semântica real por similaridade, recuperação RAG integrada ou
+  configuração operacional de LLM;
 - autenticação, autorização, readiness e observabilidade de produção;
 - frontend ou qualquer experiência de usuário;
 - infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de

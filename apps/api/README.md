@@ -341,6 +341,50 @@ e estado `failed`; estados `completed`, `attention_required`, `partial` e
 documento. Busca vetorial, recuperação governada, lifecycle, API e UI não fazem
 parte desta fronteira.
 
+## Recuperação documental aprovada
+
+`prescriptive_maintenance.knowledge_retrieval` liga o lifecycle e os chunks por
+IDs opacos sem reabrir PDFs nem descobrir arquivos. A configuração
+`fault-knowledge-mapping.v1` contém `schema_version`, uma `mapping_version`
+auditável, `mapping_sha256` e a lista ordenada de classes canônicas com seus
+`document_ids`. O SHA-256 é calculado sobre a semântica normalizada; classes ou
+referências duplicadas, campos extras, referência documental desconhecida e
+alteração sem atualização do hash falham fechado.
+
+O arquivo real não é fornecido pelo pacote porque a associação pode ser derivada
+dos materiais locais. Ele deve ser informado por caminho explícito, por exemplo
+`data/external/knowledge/fault-knowledge-mapping.v1.json`; `data/external/` já é
+ignorado. `load_fault_knowledge_mapping()` apenas lê esse caminho, enquanto
+`fault_knowledge_mapping_json_bytes()` oferece serialização determinística para
+auditoria local. Nenhum mapeamento real é publicado pelo repositório.
+
+`ApprovedKnowledgeRetrievalService` resolve somente a classe exata configurada e
+valida, para cada documento, a versão vigente `approved`, os gates completos de
+extração e indexação e a coerência do registro indexado. Versões `rejected`,
+`failed`, `superseded`, candidatas ainda não aprovadas, versões antigas, páginas
+com falha e embeddings ausentes são removidos antes de qualquer chamada ao
+`KnowledgeChunkScorer`. O serviço não procura outra classe ou documento quando
+o conjunto fica vazio. Estados explícitos de página ou embedding inelegível não
+se confundem com corrupção: qualquer quebra estrutural, de identidade ou de
+SHA-256 em uma versão declarada íntegra pelo lifecycle aborta toda a recuperação
+antes do scorer.
+
+Cada candidato validado é congelado em tipos básicos antes do ranking. O scorer
+recebe uma cópia isolada, e qualquer mutação dessa cópia invalida o ranking; a
+evidência final é materializada somente do snapshot anterior à fronteira.
+
+Os vazios distinguem por enum classe sem mapeamento, ausência de cobertura
+aprovada e ranking sem hits; indisponibilidade, integridade inválida e falha do
+scorer também permanecem tipadas. Scores precisam ser finitos, o desempate usa
+IDs e localização em ordem total e o top-k respeita o limite interno de 10. Cada
+`RankedKnowledgeEvidence` contém exclusivamente `document_id`,
+`document_version`, `chunk_id`, `page_number`, `section_id` e `score`, sem texto,
+título, caminho, nome de fonte ou vetor.
+
+Essa fronteira não implementa scorer semântico, consulta pgvector, provider,
+endpoint, persistência nova, geração ou recuperação RAG integrada. Essas
+integrações permanecem fora da SEN-56.
+
 ## Contrato tabular de `banner`
 
 `prescriptive_maintenance.data.BANNER_COLUMN_CATALOG` é a fonte versionada e
