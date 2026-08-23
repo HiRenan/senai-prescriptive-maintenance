@@ -385,6 +385,42 @@ Essa fronteira não implementa scorer semântico, consulta pgvector, provider,
 endpoint, persistência nova, geração ou recuperação RAG integrada. Essas
 integrações permanecem fora da SEN-56.
 
+## Recuperação governada para RAG
+
+`prescriptive_maintenance.governed_retrieval` define a porta interna consumível
+pela futura orquestração RAG. `GovernedKnowledgeRetrievalService` recebe a
+disposição tipada do modelo e encerra `normal` e `out_of_distribution` como
+`no_evidence`, sem consultar a recuperação aprovada. Uma falha sem classe
+documental encerra como `unmapped_fault`; uma classe canônica configurada é
+delegada exclusivamente ao `ApprovedKnowledgeRetrievalService`, sem fallback
+para outra classe ou busca genérica.
+
+A SEN-56 mantém o resultado content-free existente e oferece, para essa porta
+interna, `retrieve_snapshots()`. Os dois resultados derivam da mesma rotina de
+filtro, scoring, ordenação e revalidação final. O snapshot interno acrescenta o
+texto exato e seu `content_sha256` aos IDs de documento, versão, chunk, página e
+seção. Não existe uma segunda leitura depois do ranking: se lifecycle, revisão,
+identidade ou conteúdo mudarem durante o scorer, nada é materializado. O texto
+não entra no contrato HTTP, em logs ou na persistência desta tarefa.
+
+O limiar mínimo é obrigatório em `GovernedRetrievalPolicy`; versão, valor e
+schema formam um SHA-256 semântico, com o `float.hex()` do limiar para identidade
+inequívoca. Evidência com score exatamente igual ao limiar é aceita. O resultado
+preserva a ordem total e o top-k da SEN-56, copia texto e metadados na fronteira
+e aplica os mesmos limites já definidos para geração: quantidade máxima,
+4.000 caracteres por item e 24.000 no total. Conteúdo individual maior não é
+truncado e produz `retrieval_unavailable`; quando apenas o total seria excedido,
+permanece o maior prefixo ranqueado que cabe integralmente no orçamento.
+
+Ausência de cobertura aprovada, ranking vazio e itens abaixo do limiar tornam-se
+`no_evidence`; classe não mapeada torna-se `unmapped_fault`; indisponibilidade,
+corrupção, quebra do contrato do adapter e falha de ranking tornam-se
+`retrieval_unavailable`. Assim, ausência legítima não é confundida com falha
+técnica. Nenhum limiar operacional, mapeamento real ou conteúdo documental é
+versionado. Esta camada não chama geração/LLM, não implementa guardrails, não
+altera endpoints e não adiciona banco, consulta pgvector ou integração com o
+fluxo HTTP.
+
 ## Contrato tabular de `banner`
 
 `prescriptive_maintenance.data.BANNER_COLUMN_CATALOG` é a fonte versionada e
