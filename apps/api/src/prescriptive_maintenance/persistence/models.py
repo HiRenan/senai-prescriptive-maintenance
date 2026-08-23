@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Final
+from datetime import UTC, datetime, timedelta, tzinfo
+from typing import Final, cast
 
 from prescriptive_maintenance.domain import AnalysisOutcome
 
@@ -19,6 +20,13 @@ _MODEL_ID: Final = re.compile(r"^model_[a-z0-9_.-]{3,64}$")
 _PROMPT_ID: Final = re.compile(r"^prompt_[a-z0-9_.-]{3,64}$")
 _CONFIGURATION_ID: Final = re.compile(r"^config_[a-z0-9_.-]{3,64}$")
 _SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
+_DATETIME_REDUCTION_PROTOCOL: Final = 4
+_DATETIME_STATE_SIZE: Final = 10
+_DATETIME_MICROSECOND_START: Final = 7
+_DATETIME_FROM_STATE: Final = cast(
+    Callable[[type[datetime], bytes, tzinfo], datetime],
+    datetime.__new__,
+)
 
 
 def _validate_identifier(value: str, pattern: re.Pattern[str], label: str) -> None:
@@ -26,8 +34,14 @@ def _validate_identifier(value: str, pattern: re.Pattern[str], label: str) -> No
         raise ValueError(f"{label} does not match its traceable identifier format.")
 
 
-def _validate_aware_datetime(value: datetime, label: str) -> None:
-    if value.utcoffset() is None:
+def _validate_aware_datetime(value: object, label: str) -> None:
+    if not isinstance(value, datetime):
+        raise ValueError(f"{label} must be timezone-aware.")
+    try:
+        offset = datetime.utcoffset(value)
+    except Exception:
+        raise ValueError(f"{label} must be timezone-aware.") from None
+    if offset is None:
         raise ValueError(f"{label} must be timezone-aware.")
 
 
@@ -37,22 +51,96 @@ def _base_text(value: str) -> str:
     return str.__add__("", value)
 
 
+def _validated_datetime_state(
+    value: datetime,
+    *,
+    expected_constructor: type[datetime],
+) -> tuple[bytes, tzinfo]:
+    raw_reduction: object = datetime.__reduce_ex__(
+        value,
+        _DATETIME_REDUCTION_PROTOCOL,
+    )
+    if type(raw_reduction) is not tuple:
+        raise ValueError("created_at could not be canonicalized safely.")
+    reduction = cast(tuple[object, ...], raw_reduction)
+    if len(reduction) != 2:
+        raise ValueError("created_at could not be canonicalized safely.")
+
+    constructor, raw_arguments = reduction
+    # The reducer's callable is identity-checked only; it is never executed.
+    if constructor is not expected_constructor:
+        raise ValueError("created_at could not be canonicalized safely.")
+    if type(raw_arguments) is not tuple:
+        raise ValueError("created_at could not be canonicalized safely.")
+    arguments = cast(tuple[object, ...], raw_arguments)
+    if len(arguments) != 2:
+        raise ValueError("created_at could not be canonicalized safely.")
+
+    state, zone = arguments
+    if (
+        type(state) is not bytes
+        or len(state) != _DATETIME_STATE_SIZE
+        or not isinstance(zone, tzinfo)
+    ):
+        raise ValueError("created_at could not be canonicalized safely.")
+    return state, zone
+
+
 def _base_utc_datetime(value: datetime) -> datetime:
     """Preserve an aware instant in an exact UTC ``datetime``."""
 
     _validate_aware_datetime(value, "created_at")
-    base_value = datetime(
-        value.year,
-        value.month,
-        value.day,
-        value.hour,
-        value.minute,
-        value.second,
-        value.microsecond,
-        tzinfo=value.tzinfo,
-        fold=value.fold,
-    )
-    return base_value.astimezone(UTC)
+    try:
+        source_state, source_zone = _validated_datetime_state(
+            value,
+            expected_constructor=type(value),
+        )
+        base_value = _DATETIME_FROM_STATE(datetime, source_state, source_zone)
+        if type(base_value) is not datetime:
+            raise ValueError("created_at could not be canonicalized safely.")
+
+        cloned_state, cloned_zone = _validated_datetime_state(
+            base_value,
+            expected_constructor=datetime,
+        )
+        if cloned_state != source_state or cloned_zone is not source_zone:
+            raise ValueError("created_at could not be canonicalized safely.")
+
+        source_offset = datetime.utcoffset(value)
+        cloned_offset = datetime.utcoffset(base_value)
+        if (
+            source_offset is None
+            or cloned_offset is None
+            or timedelta.__eq__(source_offset, cloned_offset) is not True
+        ):
+            raise ValueError("created_at could not be canonicalized safely.")
+
+        canonical = datetime.astimezone(base_value, UTC)
+        if type(canonical) is not datetime:
+            raise ValueError("created_at could not be canonicalized safely.")
+        canonical_state, canonical_zone = _validated_datetime_state(
+            canonical,
+            expected_constructor=datetime,
+        )
+        canonical_offset = datetime.utcoffset(canonical)
+        if (
+            canonical_zone is not UTC
+            or canonical_offset is None
+            or timedelta.__eq__(canonical_offset, timedelta(0)) is not True
+            or source_state[_DATETIME_MICROSECOND_START:]
+            != canonical_state[_DATETIME_MICROSECOND_START:]
+            or timedelta.__eq__(
+                datetime.__sub__(canonical, base_value),
+                timedelta(0),
+            )
+            is not True
+        ):
+            raise ValueError("created_at could not be canonicalized safely.")
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError("created_at could not be canonicalized safely.") from None
+    return canonical
 
 
 @dataclass(frozen=True, slots=True)

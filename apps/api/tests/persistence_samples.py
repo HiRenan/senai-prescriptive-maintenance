@@ -1,7 +1,9 @@
 """Entirely synthetic persistence aggregates shared by adapter tests."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
-from typing import Final
+from datetime import tzinfo as DateTimeZone
+from typing import Final, SupportsIndex, cast
 
 from prescriptive_maintenance.domain import AnalysisOutcome
 from prescriptive_maintenance.persistence import (
@@ -17,6 +19,27 @@ SYNTHETIC_DATASET_ID: Final = "a" * 64
 SYNTHETIC_FORBIDDEN_PAYLOAD: Final = (
     "synthetic raw payload that must never be persisted"
 )
+SYNTHETIC_LYING_TIME: Final = datetime(
+    2032,
+    2,
+    3,
+    4,
+    5,
+    6,
+    789012,
+    tzinfo=UTC,
+    fold=1,
+)
+_SYNTHETIC_REPORTED_TIME: Final = datetime(
+    2033,
+    12,
+    31,
+    23,
+    59,
+    58,
+    123456,
+    tzinfo=timezone(timedelta(hours=14)),
+)
 
 
 class SyntheticTaintedStr(str):
@@ -29,6 +52,87 @@ class SyntheticTaintedDateTime(datetime):
     """Accepted datetime subtype carrying forbidden caller-owned state."""
 
     raw_content: str
+
+
+class LyingDateTime(datetime):
+    """Synthetic subtype whose virtual surface reports a different instant."""
+
+    raw_content: str
+    virtual_reads: list[str]
+
+    def _record(self, member: str) -> None:
+        self.virtual_reads.append(member)
+
+    @property
+    def year(self) -> int:
+        self._record("year")
+        return _SYNTHETIC_REPORTED_TIME.year
+
+    @property
+    def month(self) -> int:
+        self._record("month")
+        return _SYNTHETIC_REPORTED_TIME.month
+
+    @property
+    def day(self) -> int:
+        self._record("day")
+        return _SYNTHETIC_REPORTED_TIME.day
+
+    @property
+    def hour(self) -> int:
+        self._record("hour")
+        return _SYNTHETIC_REPORTED_TIME.hour
+
+    @property
+    def minute(self) -> int:
+        self._record("minute")
+        return _SYNTHETIC_REPORTED_TIME.minute
+
+    @property
+    def second(self) -> int:
+        self._record("second")
+        return _SYNTHETIC_REPORTED_TIME.second
+
+    @property
+    def microsecond(self) -> int:
+        self._record("microsecond")
+        return _SYNTHETIC_REPORTED_TIME.microsecond
+
+    @property
+    def fold(self) -> int:
+        self._record("fold")
+        return _SYNTHETIC_REPORTED_TIME.fold
+
+    @property
+    def tzinfo(self) -> DateTimeZone | None:
+        self._record("tzinfo")
+        return _SYNTHETIC_REPORTED_TIME.tzinfo
+
+    def utcoffset(self) -> timedelta | None:
+        self._record("utcoffset")
+        return datetime.utcoffset(_SYNTHETIC_REPORTED_TIME)
+
+    def timestamp(self) -> float:
+        self._record("timestamp")
+        return datetime.timestamp(_SYNTHETIC_REPORTED_TIME)
+
+    def astimezone(self, tz: DateTimeZone | None = None) -> datetime:
+        self._record("astimezone")
+        return datetime.astimezone(_SYNTHETIC_REPORTED_TIME, tz)
+
+    def isoformat(self, sep: str = "T", timespec: str = "auto") -> str:
+        self._record("isoformat")
+        return datetime.isoformat(_SYNTHETIC_REPORTED_TIME, sep, timespec)
+
+    def __reduce_ex__(
+        self,
+        protocol: SupportsIndex,
+    ) -> str | tuple[object, ...]:
+        self._record("__reduce_ex__")
+        return cast(
+            str | tuple[object, ...],
+            datetime.__reduce_ex__(_SYNTHETIC_REPORTED_TIME, protocol),
+        )
 
 
 SYNTHETIC_DOCUMENT_VERSION_V1: Final = DocumentVersionMetadata(
@@ -129,6 +233,23 @@ def _tainted_datetime(value: datetime) -> SyntheticTaintedDateTime:
     return tainted
 
 
+def _lying_datetime() -> LyingDateTime:
+    value = LyingDateTime(
+        2032,
+        2,
+        3,
+        4,
+        5,
+        6,
+        789012,
+        tzinfo=UTC,
+        fold=1,
+    )
+    value.raw_content = SYNTHETIC_FORBIDDEN_PAYLOAD
+    value.virtual_reads = []
+    return value
+
+
 def synthetic_tainted_scalar_aggregates() -> tuple[
     DocumentMetadata,
     AnalysisMetadata,
@@ -180,6 +301,37 @@ def synthetic_tainted_scalar_aggregates() -> tuple[
     return document, analysis
 
 
+def synthetic_lying_datetime_aggregates() -> tuple[
+    DocumentMetadata,
+    AnalysisMetadata,
+    tuple[LyingDateTime, ...],
+]:
+    """Place hostile datetime subclasses in every persisted timestamp field."""
+
+    document_created_at = _lying_datetime()
+    version_created_at = tuple(_lying_datetime() for _ in SYNTHETIC_DOCUMENT.versions)
+    analysis_created_at = _lying_datetime()
+    versions = tuple(
+        replace(version, created_at=created_at)
+        for version, created_at in zip(
+            SYNTHETIC_DOCUMENT.versions,
+            version_created_at,
+            strict=True,
+        )
+    )
+    document = replace(
+        SYNTHETIC_DOCUMENT,
+        created_at=document_created_at,
+        versions=versions,
+    )
+    analysis = replace(SYNTHETIC_ANALYSIS, created_at=analysis_created_at)
+    return (
+        document,
+        analysis,
+        (document_created_at, *version_created_at, analysis_created_at),
+    )
+
+
 def assert_persisted_scalars_are_canonical(
     document: DocumentMetadata,
     analysis: AnalysisMetadata,
@@ -228,3 +380,26 @@ def assert_persisted_scalars_are_canonical(
     assert all(type(value) is int for value in integer_values)
     assert type(analysis.outcome) is AnalysisOutcome
     assert all(not hasattr(value, "raw_content") for value in scalar_values)
+
+
+def assert_lying_datetimes_are_canonical(
+    document: DocumentMetadata,
+    analysis: AnalysisMetadata,
+    sources: tuple[LyingDateTime, ...],
+) -> None:
+    """Assert hostile virtual members were ignored and the instant survived."""
+
+    persisted = (
+        document.created_at,
+        *(version.created_at for version in document.versions),
+        analysis.created_at,
+    )
+    expected_epoch = datetime.timestamp(SYNTHETIC_LYING_TIME)
+
+    assert all(type(value) is datetime for value in persisted)
+    assert all(value == SYNTHETIC_LYING_TIME for value in persisted)
+    assert all(value.tzinfo is UTC for value in persisted)
+    assert all(value.microsecond == 789012 for value in persisted)
+    assert all(datetime.timestamp(value) == expected_epoch for value in persisted)
+    assert all(not hasattr(value, "raw_content") for value in persisted)
+    assert all(source.virtual_reads == [] for source in sources)

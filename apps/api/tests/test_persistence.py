@@ -10,7 +10,9 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT,
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
+    assert_lying_datetimes_are_canonical,
     assert_persisted_scalars_are_canonical,
+    synthetic_lying_datetime_aggregates,
     synthetic_tainted_scalar_aggregates,
 )
 from prescriptive_maintenance.contracts import AnalysisOutcome as ApiAnalysisOutcome
@@ -309,6 +311,27 @@ def test_in_memory_canonicalizes_every_nested_scalar_value() -> None:
     assert_persisted_scalars_are_canonical(
         recovered_document,
         recovered_analysis,
+    )
+
+
+def test_in_memory_ignores_hostile_datetime_overrides_and_preserves_instant() -> None:
+    document, analysis, sources = synthetic_lying_datetime_aggregates()
+    store = InMemoryStore()
+    with InMemoryUnitOfWork(store) as transaction:
+        transaction.documents.add(document)
+        transaction.analyses.add(analysis)
+        transaction.commit()
+
+    with InMemoryUnitOfWork(store) as query:
+        recovered_document = query.documents.get(document.document_id)
+        recovered_analysis = query.analyses.get(analysis.analysis_id)
+
+    assert recovered_document is not None
+    assert recovered_analysis is not None
+    assert_lying_datetimes_are_canonical(
+        recovered_document,
+        recovered_analysis,
+        sources,
     )
 
 

@@ -18,7 +18,9 @@ from persistence_samples import (
     SYNTHETIC_DOCUMENT,
     SYNTHETIC_DOCUMENT_VERSION_V2,
     SYNTHETIC_INITIAL_DOCUMENT,
+    assert_lying_datetimes_are_canonical,
     assert_persisted_scalars_are_canonical,
+    synthetic_lying_datetime_aggregates,
     synthetic_tainted_scalar_aggregates,
 )
 from prescriptive_maintenance.domain import AnalysisOutcome
@@ -449,6 +451,34 @@ def test_postgres_canonicalizes_every_nested_scalar_value(
     assert_persisted_scalars_are_canonical(
         recovered_document,
         recovered_analysis,
+    )
+
+
+def test_postgres_ignores_hostile_datetime_overrides_and_preserves_instant(
+    postgres_connection_factory: PostgresConnectionFactory,
+) -> None:
+    migration_connection = postgres_connection_factory()
+    try:
+        upgrade(migration_connection)
+    finally:
+        migration_connection.close()
+
+    document, analysis, sources = synthetic_lying_datetime_aggregates()
+    with PostgresUnitOfWork(postgres_connection_factory) as transaction:
+        transaction.documents.add(document)
+        transaction.analyses.add(analysis)
+        transaction.commit()
+
+    with PostgresUnitOfWork(postgres_connection_factory) as query:
+        recovered_document = query.documents.get(document.document_id)
+        recovered_analysis = query.analyses.get(analysis.analysis_id)
+
+    assert recovered_document is not None
+    assert recovered_analysis is not None
+    assert_lying_datetimes_are_canonical(
+        recovered_document,
+        recovered_analysis,
+        sources,
     )
 
 
