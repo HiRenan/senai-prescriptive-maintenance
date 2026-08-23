@@ -23,6 +23,7 @@ sem repetir extensamente a mesma orientação.
 | [`validation/model-evaluation.md`](validation/model-evaluation.md) | Protocolo, métricas, benchmark e limitações da avaliação reprodutível SEN-53. |
 | [`validation/prescription-orchestration.md`](validation/prescription-orchestration.md) | Decisões, timeout limitado, metadados, estados e riscos residuais da composição prescritiva SEN-59. |
 | [`validation/similarity-index.md`](validation/similarity-index.md) | Contrato, integridade e paridade sintética do índice de similaridade SEN-52. |
+| [`validation/analysis-integration.md`](validation/analysis-integration.md) | Binding autorizado, projeção dos cinco estados, persistência e evidências da integração ponta a ponta SEN-46. |
 | [`../data/README.md`](../data/README.md) | Preparação local, integridade e fronteira dos materiais e fixtures. |
 
 ## Idioma

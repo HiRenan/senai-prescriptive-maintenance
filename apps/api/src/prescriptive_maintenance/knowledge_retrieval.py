@@ -166,6 +166,22 @@ class FaultKnowledgeMapping:
 
 
 @dataclass(frozen=True, slots=True)
+class FaultKnowledgeMappingIdentity:
+    """Content-free identity of the mapping held by an approved retriever."""
+
+    mapping_version: str
+    mapping_sha256: str
+
+    def __post_init__(self) -> None:
+        if not _matches_text_pattern(self.mapping_version, _VERSION_PATTERN):
+            raise FaultKnowledgeMappingError(
+                "Fault knowledge mapping version is invalid."
+            )
+        if not _matches_text_pattern(self.mapping_sha256, _SHA256_PATTERN):
+            raise FaultKnowledgeMappingError("Fault knowledge mapping hash is invalid.")
+
+
+@dataclass(frozen=True, slots=True)
 class RankedKnowledgeEvidence:
     """Content-free evidence navigable to one exact indexed section."""
 
@@ -569,6 +585,15 @@ class ApprovedKnowledgeRetrievalService:
         self._documents = documents
         self._chunks = chunks
         self._scorer = scorer
+
+    @property
+    def mapping_identity(self) -> FaultKnowledgeMappingIdentity:
+        """Return a defensive identity of the validated mapping in use."""
+
+        return FaultKnowledgeMappingIdentity(
+            mapping_version=self._mapping.mapping_version,
+            mapping_sha256=self._mapping.mapping_sha256,
+        )
 
     def retrieve(self, fault_class: str, *, top_k: int) -> KnowledgeRetrievalResult:
         """Return only approved current evidence from the exact mapped class."""

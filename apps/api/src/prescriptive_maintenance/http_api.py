@@ -34,8 +34,8 @@ from prescriptive_maintenance.fakes import (
     build_synthetic_analysis_service,
 )
 from prescriptive_maintenance.services import (
+    AnalysisLifecycleService,
     AnalysisNotFoundError,
-    AnalysisService,
     AnalysisUnavailableError,
     DocumentConflictError,
     DocumentLifecycleService,
@@ -142,7 +142,7 @@ def _error_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
 
 def build_api_router(
     *,
-    analysis_service: AnalysisService,
+    analysis_service: AnalysisLifecycleService,
     document_service: DocumentLifecycleService,
 ) -> APIRouter:
     """Bind API v1 contracts to injected application services."""

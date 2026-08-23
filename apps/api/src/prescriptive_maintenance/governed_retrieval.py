@@ -17,6 +17,7 @@ from prescriptive_maintenance.generation.contracts import (
     MAX_TOTAL_EVIDENCE_CONTENT_CHARACTERS,
 )
 from prescriptive_maintenance.knowledge_retrieval import (
+    FaultKnowledgeMappingIdentity,
     KnowledgeRetrievalReason,
     KnowledgeSnapshotRetrievalResult,
     RankedKnowledgeSnapshot,
@@ -103,6 +104,32 @@ def build_governed_retrieval_policy(
             minimum_score=canonical_score,
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class GovernedRetrievalBinding:
+    """Effective policy and approved mapping identities used for retrieval."""
+
+    policy_schema_version: int
+    policy_version: str
+    policy_sha256: str
+    mapping_version: str
+    mapping_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.policy_schema_version) is not int
+            or self.policy_schema_version != GOVERNED_RETRIEVAL_POLICY_SCHEMA_VERSION
+            or type(self.policy_version) is not str
+            or _VERSION_PATTERN.fullmatch(self.policy_version) is None
+            or type(self.policy_sha256) is not str
+            or _SHA256_PATTERN.fullmatch(self.policy_sha256) is None
+            or type(self.mapping_version) is not str
+            or _VERSION_PATTERN.fullmatch(self.mapping_version) is None
+            or type(self.mapping_sha256) is not str
+            or _SHA256_PATTERN.fullmatch(self.mapping_sha256) is None
+        ):
+            raise ValueError("Governed retrieval binding is invalid.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +233,9 @@ class GovernedRetrievalResult:
 class ApprovedKnowledgeRetriever(Protocol):
     """SEN-56 boundary reused without repeating governance filters."""
 
+    @property
+    def mapping_identity(self) -> FaultKnowledgeMappingIdentity: ...
+
     def retrieve_snapshots(
         self,
         fault_class: str,
@@ -230,6 +260,9 @@ class ApprovedSnapshotCurrentness(Protocol):
 class RagKnowledgeRetrievalPort(Protocol):
     """Retrieval decision consumed by future RAG orchestration."""
 
+    @property
+    def runtime_binding(self) -> GovernedRetrievalBinding: ...
+
     def retrieve(
         self,
         *,
@@ -250,12 +283,37 @@ class GovernedKnowledgeRetrievalService:
     ) -> None:
         if type(policy) is not GovernedRetrievalPolicy:
             raise ValueError("Governed retrieval policy is invalid.")
+        try:
+            raw_mapping_identity = approved_retrieval.mapping_identity
+            if type(raw_mapping_identity) is not FaultKnowledgeMappingIdentity:
+                raise TypeError
+            mapping_identity = FaultKnowledgeMappingIdentity(
+                mapping_version=raw_mapping_identity.mapping_version,
+                mapping_sha256=raw_mapping_identity.mapping_sha256,
+            )
+        except Exception:
+            raise ValueError(
+                "Approved knowledge mapping binding is unavailable."
+            ) from None
         self._approved_retrieval = approved_retrieval
         self._policy = GovernedRetrievalPolicy(
             schema_version=policy.schema_version,
             policy_version=policy.policy_version,
             minimum_score=policy.minimum_score,
             policy_sha256=policy.policy_sha256,
+        )
+        self._mapping_identity = mapping_identity
+
+    @property
+    def runtime_binding(self) -> GovernedRetrievalBinding:
+        """Return the effective policy and real approved mapping identities."""
+
+        return GovernedRetrievalBinding(
+            policy_schema_version=self._policy.schema_version,
+            policy_version=self._policy.policy_version,
+            policy_sha256=self._policy.policy_sha256,
+            mapping_version=self._mapping_identity.mapping_version,
+            mapping_sha256=self._mapping_identity.mapping_sha256,
         )
 
     def retrieve(

@@ -50,6 +50,7 @@ from prescriptive_maintenance.governed_retrieval import (
 from prescriptive_maintenance.knowledge_retrieval import (
     ApprovedKnowledgeRetrievalService,
     FaultKnowledgeMappingError,
+    FaultKnowledgeMappingIdentity,
     FaultKnowledgeReferenceError,
     IndexedChunkReader,
     KnowledgeChunkScorer,
@@ -195,6 +196,12 @@ class _StaticApprovedRetriever:
     failure: Exception | None = None
     calls: list[tuple[str, int]] = field(
         default_factory=lambda: list[tuple[str, int]]()
+    )
+    mapping_identity: FaultKnowledgeMappingIdentity = field(
+        default_factory=lambda: FaultKnowledgeMappingIdentity(
+            mapping_version=_MAPPING_VERSION,
+            mapping_sha256="3" * 64,
+        )
     )
 
     def retrieve_snapshots(
@@ -536,6 +543,28 @@ def _governed_retrieval(
             minimum_score=minimum_score,
         ),
     )
+
+
+def test_governed_runtime_binding_comes_from_real_policy_and_mapping() -> None:
+    approved, _ = _approved_retrieval(
+        records=(),
+        scorer=_StaticScorer(),
+    )
+    policy = build_governed_retrieval_policy(
+        policy_version=_POLICY_VERSION,
+        minimum_score=0.75,
+    )
+
+    binding = GovernedKnowledgeRetrievalService(
+        approved_retrieval=approved,
+        policy=policy,
+    ).runtime_binding
+
+    assert binding.policy_schema_version == policy.schema_version
+    assert binding.policy_version == policy.policy_version
+    assert binding.policy_sha256 == policy.policy_sha256
+    assert binding.mapping_version == approved.mapping_identity.mapping_version
+    assert binding.mapping_sha256 == approved.mapping_identity.mapping_sha256
 
 
 def test_mapping_hash_and_bytes_are_deterministic_and_load_from_explicit_path(

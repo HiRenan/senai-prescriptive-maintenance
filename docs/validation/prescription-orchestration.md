@@ -5,8 +5,8 @@
 A SEN-59 adiciona um caso de uso interno e puro entre o resultado do modelo e os
 guardrails RAG já existentes. `PrescriptionOrchestrationService` recebe um
 `ModelPrediction`; ele não executa o modelo, não conhece HTTP e não persiste o
-resultado. Essa fronteira reduz o risco de chamadas acidentais ao provider sem
-antecipar a integração da API.
+resultado. A SEN-46 passou a compor essa fronteira pela API sem mover execução
+do modelo ou persistência para dentro dela.
 
 O resultado do modelo é copiado e revalidado na entrada. Disposição, forma da
 abstenção, diagnóstico público, suporte finito, identidade do modelo, vizinhos
@@ -28,6 +28,12 @@ não mapeada encerram sem provider. Falha técnica de recuperação encerra como
 schema, citações ou currentness: esses invariantes continuam pertencendo às
 fronteiras SEN-56, SEN-57 e SEN-58.
 
+No construtor, a orquestração obtém um snapshot defensivo do binding efetivo da
+recuperação. A policy vem do `GovernedKnowledgeRetrievalService` e a identidade
+do mapeamento vem da `FaultKnowledgeMapping` realmente carregada pelo serviço
+aprovado. Cada resultado recuperado é comparado novamente antes do provider;
+divergência de policy ou mapeamento degrada sem chamada.
+
 ## Estados e preservação de contexto
 
 O contrato fecha quatro estados: `generated`, `skipped`, `refused` e
@@ -45,7 +51,9 @@ pós-provider, permanecem acessíveis:
 - `model_id`;
 - vizinhos content-free.
 
-Snapshot documental, conteúdo, prompt e output bruto nunca entram no resultado.
+Snapshot documental com conteúdo, prompt e output bruto nunca entram no
+resultado. Uma trace content-free guarda apenas policy, mapeamento e referências
+opacas das evidências recuperadas para a auditoria da integração.
 As ações e justificativas aceitas continuam nos contratos estruturados da
 geração, com suporte documental, citações e warnings. “Seguro” significa aqui
 que os gates estruturais foram satisfeitos; não significa garantia semântica ou
@@ -111,8 +119,9 @@ a liberação do slot em `finally`.
 Os testes são inteiramente sintéticos e offline. Eles cobrem estados sem chamada,
 IDs e subclasses hostis, mutação de contratos, output sem citação, erro e
 desabilitação, relógio não monotônico ou transbordado, uso malformado, repetição,
-corrida concorrente, timeout seguido de `busy`, descarte de conclusão tardia e
-liberação do slot. O `FakeGenerationProvider` existente permanece o fake oficial;
+corrida concorrente, timeout seguido de `busy`, descarte de conclusão tardia,
+liberação do slot, binding real e divergência antes do provider. O
+`FakeGenerationProvider` existente permanece o fake oficial;
 nenhum SDK, credencial, rede ou chamada Bedrock live é usado.
 
 A segunda revalidação de snapshots reduz TOCTOU, mas não cria transação ou lease.

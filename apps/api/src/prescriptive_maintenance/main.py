@@ -29,7 +29,7 @@ from prescriptive_maintenance.operations import (
     RequiredDependencyUnavailableError,
 )
 from prescriptive_maintenance.services import (
-    AnalysisService,
+    AnalysisLifecycleService,
     DocumentLifecycleService,
 )
 from prescriptive_maintenance.settings import Settings, load_settings
@@ -54,7 +54,7 @@ async def _readiness(request: Request) -> dict[str, str]:
 
 def create_app(
     *,
-    analysis_service: AnalysisService | None = None,
+    analysis_service: AnalysisLifecycleService | None = None,
     document_service: DocumentLifecycleService | None = None,
     settings: Settings | None = None,
     settings_loader: Callable[[], Settings] = load_settings,

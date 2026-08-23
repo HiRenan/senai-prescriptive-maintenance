@@ -20,18 +20,19 @@ aplicado.
 | Área | Implementação comprovável | Limite atual |
 | --- | --- | --- |
 | `apps/api/src/prescriptive_maintenance/main.py` | Fábrica `create_app()`, alvo ASGI `app`, `GET /health/live`, `GET /health/ready` e rotas v1; o lifespan seleciona o registry documental pelo perfil validado. | A liveness verifica apenas o processo, a readiness consulta somente a dependência obrigatória e análise, recuperação e geração continuam sintéticas no runtime padrão. |
-| `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas, erros sanitizados e exemplos sintéticos. | Não conecta baseline, recuperação ou geração reais; o fake documental permanece apenas em exemplos e testes explícitos. |
+| `apps/api/src/prescriptive_maintenance/{contracts,ports,services,fakes}.py` | União fechada dos cinco resultados de análise, 18 features, ciclo documental, portas tipadas, erros sanitizados e exemplos sintéticos. | A factory padrão continua sintética; dependências integradas exigem injeção explícita. |
 | `apps/api/src/prescriptive_maintenance/document_lifecycle.py` | Agregado documental versionado, matriz fechada dos sete estados, gates monotônicos, auditoria append-only, replay semântico exato, relógio UTC injetável e CAS que valida comando e agregado completos. | Não processa bytes ou chunks e não conhece HTTP ou PostgreSQL. |
 | `apps/api/src/prescriptive_maintenance/document_registry.py` | Registro de metadados v1 sobre o domínio real, identidade lógica por filename ASCII canônico, IDs opacos por versão, projeções dos sete estados, replay exato e adapter em memória concorrente. | O request não transporta bytes; tamanho e SHA-256 são declarados, sem upload, assinatura, storage, OCR ou indexação. |
 | `apps/api/src/prescriptive_maintenance/knowledge_retrieval.py` | Configuração externa de classe canônica para documentos opacos com versão, hash semântico e referências validadas; uma rotina fail-closed seleciona somente a versão aprovada vigente, confere integridade antes do scorer e revalida o mesmo snapshot antes de derivar tanto o ranking content-free quanto o snapshot interno com texto e hash. A conferência pontual posterior valida os mesmos snapshots sem scorer ou reranking. | Não inclui configuração real, scorer semântico, busca pgvector, provider, endpoint, persistência ou geração. O conteúdo enriquecido não cruza a API. |
-| `apps/api/src/prescriptive_maintenance/governed_retrieval.py` | Porta RAG interna e exception-total que bloqueia normal/OOD, mapeia ausência, classe não documentada e falha técnica, aplica limiar com identidade SHA-256 e limita o prefixo ranqueado pelos budgets existentes de evidência. | Não chama LLM, não converte para o contrato de geração, não implementa guardrails, não consulta índice diretamente e não está integrada às rotas HTTP. |
-| `apps/api/src/prescriptive_maintenance/prescription_orchestration.py` | Composição interna pura que valida o resultado do modelo, chama recuperação apenas para falha documentável, reutiliza os guardrails RAG, limita o provider síncrono por timeout e slot unitário e devolve estados e metadados allowlisted. | Não executa o modelo, não persiste, não configura provider real, não oferece cancelamento do provider síncrono e não está ligada às rotas HTTP. |
+| `apps/api/src/prescriptive_maintenance/governed_retrieval.py` | Porta RAG interna e exception-total que bloqueia normal/OOD, mapeia ausência, classe não documentada e falha técnica, aplica limiar com identidade SHA-256, expõe o binding efetivo de policy/mapeamento e limita o prefixo ranqueado pelos budgets existentes de evidência. | Não chama LLM, não converte para o contrato de geração, não implementa guardrails e não consulta índice diretamente. |
+| `apps/api/src/prescriptive_maintenance/prescription_orchestration.py` | Composição interna pura que valida o resultado do modelo, liga o binding efetivo da recuperação, chama busca apenas para falha documentável, reutiliza os guardrails RAG, limita o provider síncrono por timeout e slot unitário e devolve estados e metadados allowlisted. | Não executa o modelo, não persiste, não configura provider real e não oferece cancelamento do provider síncrono. |
+| `apps/api/src/prescriptive_maintenance/analysis_integration.py` | Composição explícita da rota de análise com autorização imutável de dataset/modelo/índice/recuperação/geração/projeção, paridade de vizinhos, cinco estados públicos, citações usadas, UoW, cache posterior ao commit e logs por estágio. | Não é selecionada pela factory padrão, não autoriza artefato real, mantém o `GET` completo somente no processo e não armazena features, conteúdo ou narrativas. |
 | `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Perfis `local`, `offline` e `aws`, backend obrigatório `memory`/`postgres` e URL coerente, carregados no lifespan. | A importação e a liveness não instanciam dependências externas. |
 | `apps/api/src/prescriptive_maintenance/persistence/` | Metadados imutáveis de análise/documento/versão/chunk/evidência, registry de ciclo/auditoria, UoW, adapter psycopg, CAS transacional e migrações reversíveis para metadados e índice de similaridade. | As rotas documentais usam somente metadados; conteúdo, features e narrativas não são persistidos. Migrações continuam explícitas. |
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
 | `apps/api/src/prescriptive_maintenance/generation/` | Diagnóstico imutável de entrada, contratos `prescriptive-generation.v1`, limites de evidência, prompt v2, envelope documental não confiável, gates tipados pré/pós-provider, recusas sanitizadas, validação estrita de citações, provider fake determinístico e adaptador Bedrock com cliente injetado de forma preguiçosa. | Não faz chamada automática, não prova suporte semântico, não elimina a janela após a revalidação final, não lê credenciais e não contém SDK ou configuração de infraestrutura AWS. |
-| `apps/api/src/prescriptive_maintenance/modeling/` | Baseline k-NN em memória sobre 18 features, `StandardScaler` de treino, distância euclidiana, suporte heurístico, política versionada de thresholds, abstenção tipada, adapter `ModelPort`, artefato NumPy/JSON íntegro, índice derivado versionado com adapters exatos em memória e PostgreSQL/pgvector e harness temporal com plano congelado, métricas agregadas e benchmark. | Não está ligada às rotas, não calibra probabilidade, não usa o teste no fit, não faz tuning, não usa busca aproximada ou GPU; a avaliação é reavaliação de um teste historicamente observado e não aprova o modelo para operação. |
+| `apps/api/src/prescriptive_maintenance/modeling/` | Baseline k-NN em memória sobre 18 features, `StandardScaler` de treino, distância euclidiana, suporte heurístico, política versionada de thresholds, abstenção tipada, adapter `ModelPort`, artefato NumPy/JSON íntegro, índice derivado versionado com adapters exatos em memória e PostgreSQL/pgvector e harness temporal com plano congelado, métricas agregadas e benchmark. | Não está ligada às rotas nem à factory padrão, não calibra probabilidade, não usa o teste no fit, não faz tuning, não usa busca aproximada ou GPU; a avaliação é reavaliação de um teste historicamente observado e não aprova o modelo para operação. |
 | `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, persistência, dados, geração e modelo, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | A suíte padrão não acessa materiais originais, serviços externos nem credenciais; a integração PostgreSQL é opcional e usa schema descartável. |
 | `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da readiness. | Não inclui dependências de desenvolvimento nem executa migrações automaticamente; a readiness segue o backend configurado. |
 | `apps/web` | Workspace privado, servidor HTTP sem dependências, Dockerfile multi-stage e `GET /health/live`. | Não contém UI, framework, componentes, estilos, assets ou comportamento visual. |
@@ -121,8 +122,9 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 
 - **Aplicação:** FastAPI e configuração são código de produção; Dockerfiles,
   smoke e Compose são suporte ao empacotamento, desenvolvimento e validação.
-- **Contrato de análise:** schemas, portas e orquestração são executáveis, mas os
-  resultados vêm somente de fakes sintéticos; vizinhos pertencem ao modelo e
+- **Contrato de análise:** schemas, portas e integração são executáveis; a factory
+  padrão devolve resultados de fakes sintéticos e uma composição autorizada deve
+  ser injetada explicitamente. Vizinhos pertencem ao modelo e
   citações pertencem à evidência documental, com referências opacas de documento,
   versão e chunk e página positiva, sem título, caminho ou texto bruto.
 - **Modelo:** a baseline e o adapter são executáveis e carregáveis localmente,
@@ -131,8 +133,9 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
 - **Persistência:** o backend oferece repositórios e unidade de trabalho com
   adapters em memória e PostgreSQL, além de migrações reversíveis. As rotas do
   ciclo documental selecionam o registry real por `Settings`, reconstroem a
-  auditoria e usam CAS transacional; análise e indexação permanecem
-  desacopladas. Não há persistência de bytes documentais.
+  auditoria e usam CAS transacional. A integração de análise usa uma UoW
+  injetada para metadados e referências, sem persistir resposta completa,
+  features, narrativas ou bytes documentais.
 - **Web:** `apps/web` reserva o limite do workspace e oferece somente liveness
   operacional para o contêiner; não existe frontend ou rota visual.
 - **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
@@ -148,7 +151,12 @@ intencional de histórico linear entre `develop` e `main` estão registrados no
   `FAULT` com evidência governada chegue ao provider. O slot unitário evita
   crescimento de chamadas síncronas órfãs; timeout não cancela a chamada tardia,
   que permanece descartada e mantém a instância ocupada até retornar. Não há
-  retry, fila, cache global, persistência nem integração com a API.
+  retry, fila, cache global ou persistência nessa camada; a integração explícita
+  coordena essas fronteiras sem mudar suas responsabilidades.
+- **Integração da análise:** autorização e bindings são conferidos antes de todas
+  as jornadas e novamente por resultado. O ranking do modelo deve coincidir com
+  o índice; projeção e cópias precedem a transação; o cache local vem somente
+  depois do commit. A factory padrão e os containers continuam sintéticos.
 - **Recuperação para RAG:** a decisão governada consome o snapshot já filtrado e
   revalidado pela recuperação documental, nunca faz uma segunda busca por
   conteúdo e mantém texto somente na fronteira interna. Política e mapeamento
@@ -168,11 +176,8 @@ Os itens abaixo não fazem parte da arquitetura executável atual:
 - regras operacionais completas de diagnóstico e manutenção prescritiva;
 - ingestão contínua ou pipeline de transformação tabular da aplicação;
 - upload multipart/streaming, validação de bytes e armazenamento documental;
-- integração das rotas de análise com seus repositórios persistentes;
-- integração operacional do adapter de modelo, scorer real, embedding semântico,
-  índice vetorial, conexão pgvector e uso de vetores pela aplicação, integração
-  do índice de similaridade e da composição RAG com adapters reais e rotas HTTP
-  ou configuração operacional de LLM;
+- composição operacional autorizada com artefato de modelo aprovado, scorer real,
+  embedding semântico, conexão pgvector e configuração de LLM;
 - autenticação e autorização;
 - frontend, experiência de usuário ou assets visuais;
 - recursos AWS aplicados, deploy, ambiente de produção ou observabilidade
