@@ -26,13 +26,13 @@ local integralmente identificado e autorizado.
 
 | Capacidade | O que existe | Limite que importa |
 | --- | --- | --- |
-| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, dois modos explícitos, health checks, correlation ID e erros sanitizados. | O runtime local/offline não autentica; no perfil AWS, a HTTP API exige JWT Cognito. O repositório não distribui artefatos privados nem configuração operacional. |
+| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, consulta fundamentada em linguagem natural, dois modos explícitos, health checks, correlation ID e erros sanitizados. | O runtime local/offline não autentica; no perfil AWS, a HTTP API exige JWT Cognito. O repositório não distribui artefatos privados nem configuração operacional. |
 | Dados | Pipeline local auditado, contrato de 18 features, split temporal e checker determinístico. | A fonte e os derivados por registro permanecem locais e ignorados; a CI usa somente fixtures sintéticas. |
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
-| Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
+| Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração, guardrails pré/pós-provider e assistente extrativo TF-IDF com citações. | A API registra metadados, não recebe bytes; o corpus público do assistente é sintético e fixo, e não prova qualidade semântica sobre os documentos privados. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
-| Web | Painel responsivo de análise e gestão documental em React/TypeScript, temas claro e escuro, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Vitest/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
-| AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline; preflight e OIDC do workflow de deploy em modo foundation passaram no run `32725423445`. | O controlador parou antes do Terraform; state e Budget permaneceram ausentes, sem recursos gerenciados pelo perfil, plan remoto, `apply`, deploy, smoke ou teardown. |
+| Web | Painel responsivo de análise, assistente e gestão documental em React/TypeScript, temas claro e escuro, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Vitest/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
+| AWS | Perfil Terraform efêmero, OIDC e workflows manuais protegidos, validados offline e exercitados na conta autorizada. | A primeira foundation live alcançou a criação dos recursos e parou por permissões EC2 ausentes no contrato; não existe ainda URL pública, login, smoke ou deploy concluído. |
 
 Nos environments AWS, região, AZ e domínio são variáveis (`vars`); account ID,
 bucket de state, certificado e role exclusiva são segredos (`secrets`), assim como
@@ -89,7 +89,8 @@ uv run --frozen uvicorn prescriptive_maintenance.main:app `
 ```
 
 Os endpoints operacionais ficam em `GET /health/live` e
-`GET /health/ready`. O contrato de negócio, os endpoints e o ciclo documental
+`GET /health/ready`; o assistente usa `POST /assistant/query`. O contrato de
+negócio, os endpoints e o ciclo documental
 estão no [README do backend](apps/api/README.md); o snapshot OpenAPI canônico está em
 [`apps/api/openapi/v1.json`](apps/api/openapi/v1.json).
 
@@ -130,7 +131,8 @@ uv run --frozen poe services-down
 O painel fica em `127.0.0.1:3000` e localiza a API por `API_BASE_URL`, cujo
 padrão é `http://127.0.0.1:8000` e cujo valor no Compose é `http://api:8000`. O
 navegador chama sempre a mesma origem da página: o processo web encaminha a
-análise e somente as seis operações documentais publicadas no contrato, então a
+análise, o assistente e somente as seis operações documentais publicadas no
+contrato, então a
 API não precisa de exceção de CORS. O [README do painel](apps/web/README.md)
 descreve os fluxos, os contratos gerados e os estados apresentados.
 
@@ -152,7 +154,7 @@ código que o comprova.
 
 ```text
 apps/api       API, domínio, dados, modelo, recuperação, geração e persistência
-apps/web       painel de análise e gestão documental e processo que o serve
+apps/web       painel de análise, assistente e gestão documental e processo que o serve
 data           manifesto, fixtures sintéticas e derivados públicos permitidos
 docs           arquitetura, cards, decisões, runbooks e evidências
 infra          Compose local e perfil Terraform AWS demo
@@ -210,6 +212,12 @@ diagnóstico secundário, e a
 [correção da SEN-78](docs/validation/model-evaluation-v2.md) registra fórmulas e
 denominadores. Nenhuma medição é métrica de produção ou aprova automação.
 
+O assistente usa recuperação lexical determinística sobre um corpus sintético
+aprovado. Quando a similaridade cosseno TF-IDF atinge o limiar fechado, ele
+extrai a resposta e devolve documento, versão, chunk, página e seção; abaixo do
+limiar responde `insufficient_evidence` e não inventa orientação. Ele não usa
+LLM, Bedrock nem os PDFs privados durante a execução pública.
+
 O custo AWS de USD 2,72 com contingência para uma janela de oito horas é uma
 **estimativa**, não gasto observado. As hipóteses, a data de referência e a
 ausência de execução live estão no
@@ -240,7 +248,8 @@ Não estão implementados:
   preenchido e provider de geração real habilitado;
 - autenticação e autorização fora do perfil AWS demo, rate limiting e operação
   de produção;
-- infraestrutura AWS aplicada, plan remoto, deploy, smoke ou teardown live.
+- infraestrutura AWS live concluída, URL pública, smoke autenticado ou teardown
+  final comprovado.
 
 Esses itens são futuro, não compromisso desta versão.
 
