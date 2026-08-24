@@ -3,6 +3,7 @@ import {
   DOCUMENT_OPERATIONS,
 } from "../generated/document-contract.js";
 import type { DocumentOperation } from "../generated/document-contract.js";
+import { ASSISTANT_OPERATION } from "../generated/assistant-contract.js";
 
 const documentIdExpression = new RegExp(DOCUMENT_ID_PATTERN);
 
@@ -43,6 +44,12 @@ export function isAllowedApiRequest(method: string, pathname: string): boolean {
     return false;
   }
   if (method === "POST" && pathname === "/analysis") {
+    return true;
+  }
+  if (
+    method === ASSISTANT_OPERATION.method &&
+    pathname === ASSISTANT_OPERATION.path
+  ) {
     return true;
   }
   return Object.values(DOCUMENT_OPERATIONS).some(

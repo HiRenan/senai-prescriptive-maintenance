@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { join, normalize, resolve, sep } from "node:path";
 
 import { ANALYSIS_STATUSES } from "./src/generated/analysis-contract.js";
+import { ASSISTANT_OPERATION } from "./src/generated/assistant-contract.js";
 import {
   DOCUMENT_ID_PATTERN,
   DOCUMENT_OPERATIONS,
@@ -15,6 +16,7 @@ const rawPort = process.env.PORT ?? "3000";
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 const API_PREFIX = "/api";
 const ANALYSIS_ROUTE = "/api/analysis";
+const ASSISTANT_ROUTE = `${API_PREFIX}${ASSISTANT_OPERATION.path}`;
 const JSON_CONTENT_TYPE = "application/json";
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 256 * 1024;
@@ -161,6 +163,14 @@ function proxyRoutes(pathname) {
       method: "POST",
       upstreamPath: "/analysis",
       statuses: ANALYSIS_STATUSES,
+      hasRequestBody: true,
+    });
+  }
+  if (pathname === ASSISTANT_ROUTE) {
+    routes.push({
+      method: ASSISTANT_OPERATION.method,
+      upstreamPath: ASSISTANT_OPERATION.path,
+      statuses: ASSISTANT_OPERATION.statuses,
       hasRequestBody: true,
     });
   }

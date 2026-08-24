@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, cast
 
 from fastapi import FastAPI, Request, status
@@ -17,6 +17,11 @@ from prescriptive_maintenance.analysis_runtime import (
 )
 from prescriptive_maintenance.contracts import API_CONTRACT_VERSION
 from prescriptive_maintenance.document_registry import RuntimeDocumentLifecycleService
+from prescriptive_maintenance.grounded_assistant import (
+    AssistantQueryService,
+    ConfiguredAssistantService,
+    build_synthetic_grounded_assistant,
+)
 from prescriptive_maintenance.http_api import (
     ApiContractError,
     build_api_router,
@@ -60,6 +65,7 @@ async def _readiness(request: Request) -> dict[str, str]:
 def create_app(
     *,
     analysis_service: AnalysisLifecycleService | None = None,
+    assistant_service: AssistantQueryService | None = None,
     document_service: DocumentLifecycleService | None = None,
     settings: Settings | None = None,
     settings_loader: Callable[[], Settings] = load_settings,
@@ -75,6 +81,7 @@ def create_app(
     if selected_document_service is None:
         raise AssertionError("Document service composition is incomplete.")
     runtime_analysis_service = ConfiguredAnalysisService()
+    runtime_assistant_service = ConfiguredAssistantService()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
@@ -86,6 +93,7 @@ def create_app(
                 loaded_settings.model_dump(mode="python")
             )
             runtime_analysis_service.select(selected_settings.analysis_mode)
+            runtime_assistant_service.select(selected_settings.analysis_mode)
             if runtime_document_service is not None:
                 runtime_document_service.configure(selected_settings)
         except Exception:
@@ -106,11 +114,26 @@ def create_app(
                 runtime_analysis_service.configure(runtime_composition.service)
             except Exception:
                 runtime_composition = None
+        if assistant_service is not None:
+            if selected_settings.analysis_mode != "synthetic_demo":
+                raise ApplicationStartupError(
+                    "Application startup configuration is invalid."
+                )
+            runtime_assistant_service.configure(assistant_service)
+        elif selected_settings.analysis_mode == "synthetic_demo":
+            with suppress(Exception):
+                runtime_assistant_service.configure(
+                    build_synthetic_grounded_assistant()
+                )
         try:
             readiness = ReadinessService(
                 selected_settings,
                 database_probe=database_probe,
-                runtime_available=runtime_analysis_service.available,
+                runtime_available=runtime_analysis_service.available
+                and (
+                    selected_settings.analysis_mode != "synthetic_demo"
+                    or runtime_assistant_service.available
+                ),
                 timeout_seconds=readiness_timeout_seconds,
             )
         except Exception:
@@ -122,6 +145,7 @@ def create_app(
         application.state.persistence_backend = selected_settings.persistence_backend
         application.state.analysis_mode = selected_settings.analysis_mode
         application.state.analysis_runtime = runtime_composition
+        application.state.assistant_service = runtime_assistant_service
         application.state.document_service = selected_document_service
         yield
 
@@ -161,6 +185,7 @@ def create_app(
     application.include_router(
         build_api_router(
             analysis_service=runtime_analysis_service,
+            assistant_service=runtime_assistant_service,
             document_service=selected_document_service,
         )
     )
