@@ -83,6 +83,12 @@ ALLOWED_HOST_VARIABLES = {"PATH"}
 DEFAULT_CAPTURE_BYTES = 1_000_000
 MAX_CAPTURE_BYTES = 50_000_000
 SESSION_SAFETY_SECONDS = 300
+DELIVERY_IDENTITY_KEYS = (
+    "account_id",
+    "frontend_domain",
+    "name_prefix",
+    "region",
+)
 
 
 @dataclass(slots=True)
@@ -244,6 +250,13 @@ def validated_configuration(environment: Mapping[str, str]) -> dict[str, str]:
         "state_bucket": state_bucket,
         "state_key": state_key,
     }
+
+
+def delivery_identity(configuration: Mapping[str, str]) -> dict[str, str]:
+    identity = {key: configuration.get(key) for key in DELIVERY_IDENTITY_KEYS}
+    if any(type(value) is not str for value in identity.values()):
+        fail("Identidade AWS da entrega está ausente ou inválida.")
+    return cast(dict[str, str], identity)
 
 
 def require_session_window(
@@ -660,13 +673,14 @@ def audit_pulled_state(
     configuration: Mapping[str, str],
     expected_image: str | None = None,
 ) -> None:
+    identity = delivery_identity(configuration)
     audit_state(path, mode=mode)
     if mode in {"fresh", "destroyed"}:
         if snapshot is not None:
             audit_state_snapshot(
                 snapshot,
                 mode=mode,
-                identity=configuration,
+                identity=identity,
                 expected_image=expected_image,
             )
         return
@@ -675,7 +689,7 @@ def audit_pulled_state(
     audit_state_snapshot(
         snapshot,
         mode=mode,
-        identity=configuration,
+        identity=identity,
         expected_image=expected_image,
     )
 
@@ -1177,6 +1191,7 @@ def deploy_operation(configuration: Mapping[str, str], temporary: Path) -> None:
         region=configuration.get("region"),
         domain=configuration.get("frontend_domain"),
     )
+    identity = delivery_identity(configuration)
     require_sen46_baseline(configuration)
     token = validate_token(os.environ.get("AWS_DEMO_SMOKE_BEARER_TOKEN"))
     buildx_builder, docker_config = validated_buildx_configuration(os.environ)
@@ -1221,7 +1236,7 @@ def deploy_operation(configuration: Mapping[str, str], temporary: Path) -> None:
         load_plan(runtime_json),
         mode="deploy",
         phase="runtime",
-        identity=configuration,
+        identity=identity,
         expected_image=image_reference,
     )
     require_session_window(configuration, 3_600)
@@ -1303,6 +1318,7 @@ def teardown_operation(configuration: Mapping[str, str], temporary: Path) -> Non
         region=configuration.get("region"),
         domain=configuration.get("frontend_domain"),
     )
+    identity = delivery_identity(configuration)
     base_environment = child_environment(
         os.environ,
         digest=PLACEHOLDER_DIGEST,
@@ -1344,7 +1360,7 @@ def teardown_operation(configuration: Mapping[str, str], temporary: Path) -> Non
             load_plan(destroy_json),
             mode="destroy",
             phase=None,
-            identity=configuration,
+            identity=identity,
         )
         require_session_window(configuration, 3_600)
         terraform_apply(base_environment, destroy_plan)
