@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Final, Literal, Self
+from unicodedata import category, normalize
 
 from pydantic import (
     BaseModel,
@@ -12,6 +13,7 @@ from pydantic import (
     Field,
     RootModel,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -55,6 +57,18 @@ SupportScore = Annotated[
         description=(
             "Heurística agregada não calibrada; não representa probabilidade "
             "nem confiança estatística."
+        ),
+    ),
+]
+AssistantSimilarityScore = Annotated[
+    float,
+    Field(
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description=(
+            "Similaridade cosseno TF-IDF normalizada; não representa acurácia, "
+            "probabilidade nem confiança estatística."
         ),
     ),
 ]
@@ -105,6 +119,43 @@ class AnalysisRequest(ContractModel):
 
     features: AnalysisFeatures
     top_k: Annotated[int, Field(ge=1, le=MAX_TOP_K)] = DEFAULT_TOP_K
+
+
+class AssistantQueryRequest(ContractModel):
+    """Untrusted natural-language question accepted by the assistant."""
+
+    question: Annotated[
+        str,
+        Field(
+            min_length=3,
+            max_length=500,
+            description="Pergunta normalizada em NFC, sem controles ou formatação.",
+        ),
+    ]
+
+    @field_validator("question", mode="before")
+    @classmethod
+    def normalize_question(cls, value: object) -> object:
+        if type(value) is not str or not 1 <= len(value) <= 500:
+            raise ValueError("Assistant question is invalid.")
+        try:
+            value.encode("utf-8", errors="strict")
+        except UnicodeError:
+            raise ValueError("Assistant question is invalid.") from None
+        for character in value:
+            codepoint = ord(character)
+            character_category = category(character)
+            if (
+                character_category in {"Cf", "Cs"}
+                or (character_category == "Cc" and character not in "\t\n\r")
+                or 0xFDD0 <= codepoint <= 0xFDEF
+                or codepoint & 0xFFFF in {0xFFFE, 0xFFFF}
+            ):
+                raise ValueError("Assistant question is invalid.")
+        normalized = " ".join(normalize("NFC", value).split())
+        if not 3 <= len(normalized) <= 500:
+            raise ValueError("Assistant question is invalid.")
+        return normalized
 
 
 class Diagnosis(ContractModel):
@@ -191,6 +242,41 @@ class Citation(ContractModel):
     document_version: DocumentVersionRef
     chunk: ChunkRef
     page_number: Annotated[int, Field(ge=1)]
+
+
+class AnsweredAssistantResult(ContractModel):
+    status: Literal["answered"]
+    answer: Annotated[str, Field(min_length=1, max_length=2_000)]
+    score: AssistantSimilarityScore
+    threshold: AssistantSimilarityScore
+    policy_version: Annotated[
+        str,
+        StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"),
+    ]
+    citations: tuple[Citation, ...] = Field(min_length=1, max_length=3)
+    human_review_notice: Annotated[str, Field(min_length=1, max_length=500)]
+
+
+class InsufficientEvidenceAssistantResult(ContractModel):
+    status: Literal["insufficient_evidence"]
+    message: Annotated[str, Field(min_length=1, max_length=500)]
+    max_score: AssistantSimilarityScore | None
+    threshold: AssistantSimilarityScore
+    policy_version: Annotated[
+        str,
+        StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"),
+    ]
+    citations: tuple[Citation, ...] = Field(max_length=0)
+
+
+AssistantResult = Annotated[
+    AnsweredAssistantResult | InsufficientEvidenceAssistantResult,
+    Field(discriminator="status"),
+]
+
+
+class AssistantResponse(RootModel[AssistantResult]):
+    """Closed assistant result: extracted evidence or explicit abstention."""
 
 
 class AnalysisWarning(ContractModel):

@@ -13,6 +13,7 @@ from prescriptive_maintenance.contracts import (
     DEFAULT_TOP_K,
     MAX_TOP_K,
     AnalysisResponse,
+    AssistantResponse,
     DocumentResponse,
 )
 from prescriptive_maintenance.openapi import openapi_bytes
@@ -53,6 +54,7 @@ def test_openapi_has_frozen_paths_and_unique_operation_ids() -> None:
         "/health/live",
         "/analysis",
         "/analysis/{analysis_id}",
+        "/assistant/query",
         "/documents",
         "/documents/{document_id}",
         "/documents/{document_id}/approve",
@@ -111,6 +113,10 @@ def test_openapi_distinguishes_analysis_and_document_error_descriptions() -> Non
 
     assert paths["/analysis"]["post"]["responses"]["503"]["description"] == (
         "A análise está temporariamente indisponível."
+    )
+    assert (
+        paths["/assistant/query"]["post"]["responses"]["503"]["description"]
+        == "O assistente está temporariamente indisponível."
     )
     for path, method in (
         ("/documents", "post"),
@@ -240,6 +246,9 @@ def test_openapi_examples_cover_five_outcomes_and_document_states() -> None:
     document_examples = schema["paths"]["/documents/{document_id}"]["get"]["responses"][
         "200"
     ]["content"]["application/json"]["examples"]
+    assistant_examples = schema["paths"]["/assistant/query"]["post"]["responses"][
+        "200"
+    ]["content"]["application/json"]["examples"]
 
     assert set(analysis_examples) == {
         "normal",
@@ -257,10 +266,13 @@ def test_openapi_examples_cover_five_outcomes_and_document_states() -> None:
         "failed",
         "superseded",
     }
+    assert set(assistant_examples) == {"answered", "insufficient_evidence"}
     for example in analysis_examples.values():
         AnalysisResponse.model_validate_json(json.dumps(example["value"]))
     for example in document_examples.values():
         DocumentResponse.model_validate_json(json.dumps(example["value"]))
+    for example in assistant_examples.values():
+        AssistantResponse.model_validate_json(json.dumps(example["value"]))
 
 
 def test_every_local_reference_resolves_for_future_client_generation() -> None:
@@ -278,12 +290,17 @@ def test_every_local_reference_resolves_for_future_client_generation() -> None:
 
     analysis_response = schemas["AnalysisResponse"]
     document_response = schemas["DocumentResponse"]
+    assistant_response = schemas["AssistantResponse"]
     assert analysis_response["discriminator"]["propertyName"] == "outcome"
     assert document_response["discriminator"]["propertyName"] == "status"
+    assert assistant_response["discriminator"]["propertyName"] == "status"
     for reference in analysis_response["oneOf"]:
         component = reference["$ref"].rsplit("/", maxsplit=1)[-1]
         assert "outcome" in schemas[component]["required"]
     for reference in document_response["oneOf"]:
+        component = reference["$ref"].rsplit("/", maxsplit=1)[-1]
+        assert "status" in schemas[component]["required"]
+    for reference in assistant_response["oneOf"]:
         component = reference["$ref"].rsplit("/", maxsplit=1)[-1]
         assert "status" in schemas[component]["required"]
 

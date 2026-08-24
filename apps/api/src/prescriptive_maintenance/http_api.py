@@ -15,6 +15,8 @@ from prescriptive_maintenance.contracts import (
     AnalysisResponse,
     ApprovedDocument,
     ApproveDocumentRequest,
+    AssistantQueryRequest,
+    AssistantResponse,
     DocumentId,
     DocumentListResponse,
     DocumentResponse,
@@ -32,6 +34,11 @@ from prescriptive_maintenance.fakes import (
     SYNTHETIC_DOCUMENT_REGISTER_REQUEST,
     SyntheticDocumentService,
     build_synthetic_analysis_service,
+)
+from prescriptive_maintenance.grounded_assistant import (
+    AssistantQueryService,
+    AssistantUnavailableError,
+    build_synthetic_grounded_assistant,
 )
 from prescriptive_maintenance.services import (
     AnalysisLifecycleService,
@@ -124,6 +131,40 @@ def document_response_examples() -> dict[str, dict[str, Any]]:
     }
 
 
+def assistant_request_examples() -> dict[str, Example]:
+    return {
+        "answered": Example(
+            summary="Pergunta coberta pelo corpus sintético",
+            value={"question": "Como verificar vibração radial elevada na bomba?"},
+        ),
+        "insufficient_evidence": Example(
+            summary="Pergunta fora do corpus sintético",
+            value={"question": "Qual é a previsão do tempo para amanhã?"},
+        ),
+    }
+
+
+def assistant_response_examples() -> dict[str, dict[str, Any]]:
+    service = build_synthetic_grounded_assistant()
+    questions = {
+        "answered": "Como verificar vibração radial elevada na bomba?",
+        "insufficient_evidence": "Qual é a previsão do tempo para amanhã?",
+    }
+    return {
+        name: {
+            "summary": (
+                "Resposta extrativa sintética"
+                if name == "answered"
+                else "Abstenção por evidência insuficiente"
+            ),
+            "value": service.query(AssistantQueryRequest(question=question)).model_dump(
+                mode="json"
+            ),
+        }
+        for name, question in questions.items()
+    }
+
+
 _ANALYSIS_UNAVAILABLE_DESCRIPTION = "A análise está temporariamente indisponível."
 _DOCUMENT_CONFLICT_DESCRIPTION = (
     "O comando documental conflita com o estado armazenado."
@@ -161,11 +202,49 @@ def _error_responses(
 def build_api_router(
     *,
     analysis_service: AnalysisLifecycleService,
+    assistant_service: AssistantQueryService,
     document_service: DocumentLifecycleService,
 ) -> APIRouter:
     """Bind API v1 contracts to injected application services."""
 
     router = APIRouter()
+
+    @router.post(
+        "/assistant/query",
+        response_model=AssistantResponse,
+        operation_id="queryAssistant",
+        tags=["assistant"],
+        summary="Consulta evidências documentais aprovadas",
+        responses={
+            200: {
+                "description": "Resposta extrativa citada ou abstenção explícita.",
+                "content": {
+                    "application/json": {"examples": assistant_response_examples()}
+                },
+            },
+            **_error_responses(
+                422,
+                503,
+                description_overrides={
+                    503: "O assistente está temporariamente indisponível."
+                },
+            ),
+        },
+    )
+    def query_assistant(  # pyright: ignore[reportUnusedFunction]
+        payload: Annotated[
+            AssistantQueryRequest,
+            Body(openapi_examples=assistant_request_examples()),
+        ],
+    ) -> AssistantResponse:
+        try:
+            return assistant_service.query(payload)
+        except AssistantUnavailableError:
+            _raise_api_error(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "assistant_unavailable",
+                "O assistente está temporariamente indisponível.",
+            )
 
     @router.post(
         "/analysis",
