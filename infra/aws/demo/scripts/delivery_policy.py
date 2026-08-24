@@ -61,6 +61,7 @@ SECRET_ACCESS_PATTERN = re.compile(r"\bsecrets\s*(?:\.|\[)")
 CONTEXT_ACCESS_PATTERN = re.compile(r"\b(?:secrets|vars)\s*(?:\.|\[)")
 EXPECTED_ACTIONS = (
     "actions/checkout",
+    "actions/setup-node",
     "actions/setup-python",
     "aws-actions/configure-aws-credentials",
     "docker/setup-buildx-action",
@@ -1074,7 +1075,7 @@ def audit_contract(contract: Mapping[str, Any]) -> dict[str, str]:
             fail("Contrato não pode repetir uma action.")
         action_pins[action] = sha
     if tuple(sorted(action_pins)) != EXPECTED_ACTIONS:
-        fail("Contrato deve fixar exatamente as cinco actions aprovadas.")
+        fail("Contrato deve fixar exatamente as seis actions aprovadas.")
 
     roles = mapping(contract.get("roles"), context="roles")
     if tuple(sorted(roles)) != EXPECTED_ROLE_NAMES:

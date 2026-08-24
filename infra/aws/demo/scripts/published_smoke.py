@@ -301,9 +301,9 @@ def run_published_smoke(
         index_text = index.body.decode("utf-8")
     except UnicodeError:
         fail("Index publicado não é UTF-8.")
-    if (
-        f"./assets/{staged.source_sha}/main.js" not in index_text
-        or f"./assets/{staged.source_sha}/styles.css" not in index_text
+    published_assets = {key for key in staged.by_key() if key.startswith("assets/")}
+    if not published_assets or any(
+        f"./{key}" not in index_text for key in published_assets
     ):
         fail("Index publicado não aponta para os assets imutáveis atuais.")
 
@@ -318,7 +318,7 @@ def run_published_smoke(
         ):
             fail("Asset publicado não está disponível com MIME correto.")
         if response.headers.get("cache-control") != expected.cache_control:
-            fail("Asset publicado não possui cache imutável.")
+            fail("Asset publicado não possui o cache declarado na publicação.")
         _assert_security_headers(response, api=api_origin, cognito=cognito_origin)
         try:
             expected_body = expected.path.read_bytes()

@@ -1256,8 +1256,11 @@ def deploy_operation(configuration: Mapping[str, str], temporary: Path) -> None:
     cognito_client_id = terraform_output(runtime_environment, "cognito_client_id")
     cognito_origin = terraform_output(runtime_environment, "cognito_hosted_ui_origin")
     stage_root = temporary / "frontend-stage"
+    dist_root = REPOSITORY_ROOT / "apps/web/dist"
+    if not (dist_root / "index.html").is_file():
+        fail("Build do frontend ausente: execute 'poe web-build' antes da publicação.")
     staged = stage_frontend(
-        REPOSITORY_ROOT / "apps/web/src",
+        dist_root,
         stage_root,
         configuration["source_sha"],
     )
