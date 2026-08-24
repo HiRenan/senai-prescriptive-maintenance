@@ -185,6 +185,24 @@
             "Resource": "*"
           }
         ]
+      },
+      "permission_policy_publication": {
+        "mode": "inline",
+        "documents": [
+          {
+            "name": "${NAME_PREFIX}-demo-plan-v1",
+            "sids": [
+              "ManageStateLockOnly",
+              "ReadDemoBucketLocations",
+              "ReadDemoBuckets",
+              "ReadDemoEcrRepository",
+              "ReadDemoIamRoles",
+              "ReadDemoResources",
+              "ReadStateBucket",
+              "ReadStateObject"
+            ]
+          }
+        ]
       }
     },
     "deploy": {
@@ -527,12 +545,10 @@
               "ec2:AuthorizeSecurityGroupIngress",
               "ec2:ModifySubnetAttribute",
               "ec2:ModifyVpcAttribute",
-              "ecs:DeregisterTaskDefinition",
               "ecs:UpdateClusterSettings",
               "ecs:UpdateService",
               "logs:PutRetentionPolicy",
               "logs:TagResource",
-              "servicediscovery:TagResource",
               "sqs:SetQueueAttributes",
               "sqs:TagQueue"
             ],
@@ -542,12 +558,33 @@
               "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
               "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
               "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/*/${NAME_PREFIX}-demo*",
-              "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
               "arn:aws:sqs:${AWS_REGION}:${AWS_ACCOUNT_ID}:${NAME_PREFIX}-demo-*"
             ],
             "Condition": {
               "StringEquals": {
                 "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "TaskDeregister",
+            "Effect": "Allow",
+            "Action": "ecs:DeregisterTaskDefinition",
+            "Resource": "*"
+          },
+          {
+            "Sid": "CloudMapTag",
+            "Effect": "Allow",
+            "Action": "servicediscovery:TagResource",
+            "Resource": "*",
+            "Condition": {
+              "ForAllValues:StringEquals": {
+                "aws:TagKeys": [
+                  "Profile"
+                ]
+              },
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
               }
             }
           },
@@ -650,10 +687,12 @@
             "Action": "ecs:RegisterTaskDefinition",
             "Resource": "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/${NAME_PREFIX}-demo-api:*",
             "Condition": {
-              "StringEquals": {
-                "aws:RequestTag/Profile": "aws-demo",
+              "NumericEquals": {
                 "ecs:task-cpu": "256",
                 "ecs:task-memory": "512"
+              },
+              "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo"
               }
             }
           },
@@ -684,6 +723,55 @@
                 "aws:RequestTag/Profile": "aws-demo"
               }
             }
+          }
+        ]
+      },
+      "permission_policy_publication": {
+        "mode": "customer-managed",
+        "documents": [
+          {
+            "name": "${NAME_PREFIX}-demo-deploy-core-v1",
+            "sids": [
+              "ApiSlr",
+              "Buckets",
+              "EcrAuth",
+              "EcrCreate",
+              "EcrReads",
+              "EcsSlr",
+              "GlobalReads",
+              "IamCreate",
+              "IamWrites",
+              "ManageStateLockOnly",
+              "ManageStateObject",
+              "PassEcs",
+              "ReadDemoIamRoles",
+              "ReadStateBucket",
+              "S3Locs"
+            ]
+          },
+          {
+            "name": "${NAME_PREFIX}-demo-deploy-runtime-v1",
+            "sids": [
+              "AlarmCreate",
+              "ApiCreate",
+              "ApiWrites",
+              "BudgetRW",
+              "CfPolicyNew",
+              "CfTagCreate",
+              "CloudMapNew",
+              "CloudMapTag",
+              "CognitoRW",
+              "CognitoTag",
+              "Ec2Create",
+              "EcrWrites",
+              "EcsCreate",
+              "GlobalNew",
+              "LogCreate",
+              "QueueCreate",
+              "TaggedRW",
+              "TaskDeregister",
+              "TaskNew"
+            ]
           }
         ]
       }
@@ -880,7 +968,6 @@
               "iam:ListRoles",
               "logs:DescribeLogGroups",
               "logs:ListTagsForResource",
-              "resourcegroupstaggingapi:GetResources",
               "s3:ListAllMyBuckets",
               "servicediscovery:GetNamespace",
               "servicediscovery:GetOperation",
@@ -892,7 +979,8 @@
               "sqs:GetQueueUrl",
               "sqs:ListQueueTags",
               "sqs:ListQueues",
-              "sts:GetCallerIdentity"
+              "sts:GetCallerIdentity",
+              "tag:GetResources"
             ],
             "Resource": "*"
           },
@@ -956,7 +1044,6 @@
               "ec2:RevokeSecurityGroupIngress",
               "ecs:DeleteCluster",
               "ecs:DeleteService",
-              "ecs:DeregisterTaskDefinition",
               "ecs:UpdateService",
               "logs:DeleteLogGroup",
               "servicediscovery:DeleteNamespace",
@@ -970,7 +1057,6 @@
               "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
               "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${NAME_PREFIX}-demo",
               "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:service/${NAME_PREFIX}-demo/${NAME_PREFIX}-demo-api",
-              "arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/${NAME_PREFIX}-demo-api:*",
               "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/apigateway/${NAME_PREFIX}-demo",
               "arn:aws:logs:${AWS_REGION}:${AWS_ACCOUNT_ID}:log-group:/aws/ecs/${NAME_PREFIX}-demo/api",
               "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:namespace/*",
@@ -983,6 +1069,38 @@
                 "aws:ResourceTag/Profile": "aws-demo"
               }
             }
+          },
+          {
+            "Sid": "DestroyTaskDefinitions",
+            "Effect": "Allow",
+            "Action": "ecs:DeregisterTaskDefinition",
+            "Resource": "*"
+          }
+        ]
+      },
+      "permission_policy_publication": {
+        "mode": "inline",
+        "documents": [
+          {
+            "name": "${NAME_PREFIX}-demo-teardown-v1",
+            "sids": [
+              "DestroyDemoApiGateway",
+              "DestroyDemoBucketObjects",
+              "DestroyDemoBuckets",
+              "DestroyDemoBudget",
+              "DestroyDemoCognitoClient",
+              "DestroyDemoEcrRepository",
+              "DestroyDemoIamRoles",
+              "DestroyTaggedDemoResources",
+              "DestroyTaskDefinitions",
+              "DestroyUntaggableCloudFrontPolicies",
+              "InventoryDemoResourcesGlobal",
+              "ManageStateLockOnly",
+              "ManageStateObject",
+              "ReadDemoBucketLocations",
+              "ReadDemoIamRoles",
+              "ReadStateBucket"
+            ]
           }
         ]
       }

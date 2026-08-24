@@ -2,9 +2,11 @@
 
 Este diretório registra o contrato de segurança e a operação automatizada da
 SEN-68. O código prepara validação, plano, deploy e teardown, mas **nenhuma dessas
-operações foi executada na AWS nesta tarefa**. Roles, provedor OIDC, environments,
-reviewers, backend S3, domínio, certificado, usuário de smoke e valores reais
-continuam sendo bootstrap externo autorizado.
+operações foi executada na AWS nesta tarefa**. Roles, provedor OIDC, backend S3,
+domínio, certificado, usuário de smoke e valores reais continuam sendo bootstrap
+externo autorizado; o contrato não cria nem altera esses controles. Os três
+environments e o reviewer também são externos, embora sua configuração efetiva
+tenha sido validada somente para leitura em 23/08/2026.
 
 O contrato público [`delivery-contract.v1.json`](delivery-contract.v1.json) usa
 somente placeholders e fixa repositório, ref, subjects OIDC, referências completas
@@ -12,6 +14,8 @@ das actions, backend e
 fronteiras IAM. `delivery_policy.py` vincula cada permission policy à combinação
 exata de `Sid`, `Action` e `Resource`; mudar uma ação ou ampliar um recurso exige
 alteração deliberada do contrato, do fingerprint e das regressões.
+`permission_policy_publication` fixa também nome, versão, modo inline ou
+customer-managed e o particionamento exato de cada documento publicado.
 
 ## Fluxos
 
@@ -26,12 +30,15 @@ Os workflows manuais compartilham `concurrency: aws-demo-state` e não cancelam
 uma execução em andamento. O job de preflight possui somente `actions: read` e
 `contents: read`: além de rejeitar repositório, evento, ref, confirmação ou SHA
 fora da allowlist, consulta a API REST do GitHub e exige que o environment exato
-exista, tenha um único gate de reviewers, impeça autoaprovação e aceite somente
-a deployment branch literal `main`. Environment ausente, resposta truncada,
-schema novo, ausência de reviewer ou branch policy mais ampla reprovam antes de
-qualquer solicitação OIDC. O job protegido possui somente `contents: read` e
-`id-token: write`; credenciais AWS temporárias só nascem depois da aprovação do
-environment. Pull requests e forks nunca alcançam esse job.
+exista, tenha somente `HiRenan` como reviewer, `prevent_self_review = false`,
+`can_admins_bypass = false` e aceite somente a deployment branch literal
+`main`. Esse fallback de operador único mantém dois atos manuais — dispatch e
+`Approve and deploy` — sem alegar revisão independente. Environment ausente,
+resposta truncada, schema novo, reviewer diferente, bypass administrativo ou
+branch policy mais ampla reprovam antes de qualquer solicitação OIDC. O job
+protegido possui somente `contents: read` e `id-token: write`; credenciais AWS
+temporárias só nascem depois da aprovação do environment. Pull requests e forks
+nunca alcançam esse job.
 
 O `source_sha` precisa ser exatamente o `GITHUB_SHA` do dispatch em `main` e o
 HEAD efetivamente obtido pelo checkout. Aceitar apenas ancestralidade permitiria
@@ -154,6 +161,62 @@ fundamenta esses nomes. ECR separa leitura no ARN exato, criação condicionada 
 `aws:RequestTag/Profile` e upload/configuração condicionados por
 `aws:ResourceTag/Profile`; somente `ecr:GetAuthorizationToken` permanece global.
 
+As quatro correções de compatibilidade com o IAM permanecem explícitas e
+regredidas. `ecs:DeregisterTaskDefinition` fica sozinho em `TaskDeregister` e
+`DestroyTaskDefinitions`, sem condição e com `Resource: "*"`, porque a
+[matriz oficial do ECS](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerservice.html)
+não oferece resource-level authorization nem condition key para essa ação.
+`servicediscovery:TagResource` também fica sozinho em `CloudMapTag` com
+`Resource: "*"`: a
+[matriz oficial do Cloud Map](https://docs.aws.amazon.com/service-authorization/latest/reference/list_servicediscovery.html)
+deixa `Resource types` vazio para a ação e admite apenas
+`aws:RequestTag/${TagKey}` e `aws:TagKeys`. O statement exige exatamente
+`aws:RequestTag/Profile = aws-demo` e `aws:TagKeys = ["Profile"]`. Esses são os
+únicos dois tipos de ação acrescentados com wildcard global; nenhum deles
+compartilha statement com outra permissão.
+`ecs:RegisterTaskDefinition` compara `ecs:task-cpu` e `ecs:task-memory` com
+`NumericEquals`, mantendo a tag do request em `StringEquals`. Por fim, a ação IAM
+do inventário é `tag:GetResources`; `resourcegroupstaggingapi` continua sendo
+apenas o namespace do comando AWS CLI.
+
+### Publicação e margem das permission policies
+
+O contrato declara como cada policy deve ser publicada. Plan e teardown usam um
+documento inline cada; deploy usa duas customer-managed policies versionadas e
+anexadas à mesma role. Essa divisão não altera ações, recursos ou condições: cada
+Sid aparece exatamente uma vez, e o auditor falha se houver omissão, duplicidade,
+mudança de modo ou nome sem versão.
+
+Os tamanhos abaixo usam JSON canônico já renderizado com valores sintéticos
+seguros; espaços em branco não entram na contagem. O gate exige pelo menos 1.024
+caracteres livres em inline policies e 900 em cada customer-managed policy.
+
+| role/documento | modo | tamanho | limite | margem |
+| --- | --- | ---: | ---: | ---: |
+| plan / `senai-pm-demo-plan-v1` | inline | 2.853 | 10.240 | 7.387 |
+| deploy / `senai-pm-demo-deploy-core-v1` | customer-managed | 4.987 | 6.144 | 1.157 |
+| deploy / `senai-pm-demo-deploy-runtime-v1` | customer-managed | 5.050 | 6.144 | 1.094 |
+| teardown / `senai-pm-demo-teardown-v1` | inline | 6.727 | 10.240 | 3.513 |
+
+Sem particionamento, o deploy renderizado ocuparia 9.999 dos 10.240 caracteres
+inline e deixaria só 241 de margem. As duas policies anexadas consomem 2 das 10
+associações customer-managed padrão da role, preservando 8 para uma evolução
+deliberada. Uma policy futura, inclusive de frontend, deve ganhar nome versionado
+e só pode ser anexada depois de passar pelos mesmos limites; não se remove
+condição nem se amplia wildcard para acomodá-la.
+
+O administrador gera os quatro documentos sanitizados e o manifesto de hashes
+em um diretório novo antes do bootstrap:
+
+```powershell
+uv run --frozen python infra/aws/demo/scripts/delivery_policy.py `
+  --render-directory C:/secure-local/aws-demo-policies-v1
+```
+
+O diretório é local e não deve ser versionado. Cada documento gerado deve passar
+por `aws accessanalyzer validate-policy --policy-type IDENTITY_POLICY` antes de
+qualquer publicação; ausência de credenciais mantém essa prova live pendente.
+
 ### Wildcards residuais, ação por ação
 
 Uma **conta AWS exclusiva da demo, sem workloads de produção ou compartilhados,
@@ -209,6 +272,13 @@ state aparece nos statements globais abaixo.
   `servicediscovery:CreatePrivateDnsNamespace`. Motivo: a autorização oficial
   não oferece ARN de recurso pré-existente para essas criações; todas exigem
   `aws:RequestTag/Profile = aws-demo`.
+- Deploy, `TaskDeregister`: `ecs:DeregisterTaskDefinition`. Motivo: a matriz ECS
+  não oferece resource-level authorization nem condition key para a ação; ela
+  permanece sozinha, sem outras ações e sob o gate de state/plano exato.
+- Deploy, `CloudMapTag`: `servicediscovery:TagResource`. Motivo: a matriz Cloud
+  Map não oferece resource-level authorization para essa ação, portanto exige
+  `Resource: "*"`; o statement isolado permite somente a request tag
+  `Profile = aws-demo` e somente a tag key `Profile`.
 - Deploy, `CfPolicyNew`: `cloudfront:CreateCachePolicy`,
   `cloudfront:CreateOriginAccessControl` e
   `cloudfront:CreateResponseHeadersPolicy`. Motivo: essas criações não oferecem
@@ -235,16 +305,20 @@ state aparece nos statements globais abaixo.
   `ecr:DescribeRepositories`, `ecs:DescribeClusters`, `ecs:DescribeServices`,
   `ecs:DescribeTaskDefinition`, `ecs:ListClusters`,
   `ecs:ListTagsForResource`, `iam:ListRoles`, `logs:DescribeLogGroups`,
-  `logs:ListTagsForResource`, `resourcegroupstaggingapi:GetResources`,
+  `logs:ListTagsForResource`,
   `s3:ListAllMyBuckets`, `servicediscovery:GetNamespace`,
   `servicediscovery:GetOperation`, `servicediscovery:GetService`,
   `servicediscovery:ListNamespaces`, `servicediscovery:ListServices`,
   `servicediscovery:ListTagsForResource`, `sqs:GetQueueAttributes`,
-  `sqs:GetQueueUrl`, `sqs:ListQueueTags`, `sqs:ListQueues` e
-  `sts:GetCallerIdentity`. Motivo: depois da exclusão, ARNs/IDs já podem não
-  existir; as listagens somente leitura precisam enumerar a conta/região para
+  `sqs:GetQueueUrl`, `sqs:ListQueueTags`, `sqs:ListQueues`,
+  `sts:GetCallerIdentity` e `tag:GetResources`. Motivo: depois da exclusão,
+  ARNs/IDs já podem não existir; as listagens somente leitura precisam enumerar
+  a conta/região para
   provar ausência dentro do escopo. O parser aceita apenas nomes, ARNs e tags
   canônicos e falha em qualquer erro, truncamento ou schema novo.
+- Teardown, `DestroyTaskDefinitions`: `ecs:DeregisterTaskDefinition`. Mesma
+  limitação da matriz ECS; a ação fica isolada e depende da identidade exata do
+  state/plano aprovada antes do destroy.
 
 #### Wildcards confinados a ARN ou path
 
@@ -267,9 +341,9 @@ enumerada para não esconder privilégio dentro de um ARN aparentemente restrito
   `cloudwatch:TagResource`, `ec2:AssociateRouteTable`,
   `ec2:AuthorizeSecurityGroupEgress`, `ec2:AuthorizeSecurityGroupIngress`,
   `ec2:ModifySubnetAttribute`, `ec2:ModifyVpcAttribute`,
-  `ecs:DeregisterTaskDefinition`, `ecs:UpdateClusterSettings`,
+  `ecs:UpdateClusterSettings`,
   `ecs:UpdateService`, `logs:PutRetentionPolicy`, `logs:TagResource`,
-  `servicediscovery:TagResource`, `sqs:SetQueueAttributes` e `sqs:TagQueue`.
+  `sqs:SetQueueAttributes` e `sqs:TagQueue`.
   IDs gerados usam wildcard, mas account/região e prefixos de log/fila/alarm
   permanecem no ARN e toda ação exige `aws:ResourceTag/Profile = aws-demo`.
 - Deploy, `CfTagCreate` (ARN): `cloudfront:TagResource`. O distribution ID
@@ -296,7 +370,7 @@ enumerada para não esconder privilégio dentro de um ARN aparentemente restrito
   `aws:RequestTag/Profile = aws-demo`.
 - Deploy, `TaskNew` (ARN): `ecs:RegisterTaskDefinition`. Somente a
   revisão gerada usa wildcard; family, account e região são exatos, e o request
-  exige `Profile = aws-demo`, CPU `256` e memória `512`.
+  exige `Profile = aws-demo`, CPU numérica `256` e memória numérica `512`.
 - Teardown, `DestroyDemoBucketObjects` (ARN): `s3:DeleteObject` e
   `s3:DeleteObjectVersion`. O wildcard cobre qualquer key/version somente nos
   três buckets de nome exato; esvaziá-los é pré-requisito técnico de delete.
@@ -319,11 +393,11 @@ enumerada para não esconder privilégio dentro de um ARN aparentemente restrito
   `ec2:DeleteSecurityGroup`, `ec2:DeleteSubnet`, `ec2:DeleteTags`,
   `ec2:DeleteVpc`, `ec2:DeleteVpcEndpoints`, `ec2:DisassociateRouteTable`,
   `ec2:RevokeSecurityGroupEgress`, `ec2:RevokeSecurityGroupIngress`,
-  `ecs:DeleteCluster`, `ecs:DeleteService`, `ecs:DeregisterTaskDefinition`,
-  `ecs:UpdateService`, `logs:DeleteLogGroup`,
+  `ecs:DeleteCluster`, `ecs:DeleteService`, `ecs:UpdateService`,
+  `logs:DeleteLogGroup`,
   `servicediscovery:DeleteNamespace`, `servicediscovery:DeleteService` e
-  `sqs:DeleteQueue`. IDs/revisões gerados usam wildcard, mas account/região,
-  families/names/prefixos disponíveis e
+  `sqs:DeleteQueue`. IDs gerados usam wildcard, mas account/região,
+  names/prefixos disponíveis e
   `aws:ResourceTag/Profile = aws-demo` são obrigatórios; o gate ainda compara
   todos os valores `before` com a identidade canônica.
 
@@ -335,7 +409,7 @@ As matrizes oficiais que justificam resource types e condition keys são:
 [IAM](https://docs.aws.amazon.com/service-authorization/latest/reference/list_identityandaccessmanagementiam.html),
 [Cognito User Pools](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazoncognitouserpools.html),
 [CloudWatch Logs](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazoncloudwatchlogs.html),
-[Cloud Map](https://docs.aws.amazon.com/service-authorization/latest/reference/list_awscloudmap.html),
+[Cloud Map](https://docs.aws.amazon.com/service-authorization/latest/reference/list_servicediscovery.html),
 [SQS](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonsqs.html),
 [API Gateway](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonapigatewaymanagement.html)
 e [Resource Groups Tagging API](https://docs.aws.amazon.com/service-authorization/latest/reference/list_resourcegroupstaggingapi.html).
@@ -366,8 +440,9 @@ repositório:
    contrato versionado; configure `MaxSessionDuration = 3600` na role de plan e
    `MaxSessionDuration = 7200` nas roles de deploy e teardown;
 3. environments `aws-demo-plan`, `aws-demo-deploy` e `aws-demo-teardown`, cada
-   um com um gate de reviewers obrigatórios, prevenção de autoaprovação e uma
-   única custom deployment branch literal `main`;
+   um com exatamente o usuário `HiRenan` (`id = 107653306`) como reviewer,
+   `prevent_self_review = false`, `can_admins_bypass = false` e uma única custom
+   deployment branch literal `main`;
 4. domínio DNS e certificado ACM válido de `us-east-1`, já exigidos pela SEN-67;
 5. variáveis comuns abaixo e o secret de e-mail do Budget em cada environment
    aplicável.
@@ -387,9 +462,10 @@ repositório:
 Reviewers, branch policy, secrets e variables são controles externos do GitHub;
 YAML não consegue criá-los. O preflight consegue comprovar via API somente a
 forma efetiva já configurada e falha antes de OIDC quando ela não é exata. Na
-data desta entrega, os três environments, reviewers e branch restrictions ainda
-não existem: isso é uma dependência externa conhecida e bloqueia qualquer
-execução real. A fundação não exige usuário Cognito ou token. O runtime usa a
+data desta entrega, uma consulta somente leitura comprovou os três environments
+com o operador único, bypass administrativo desabilitado e branch `main` exatos.
+Essa evidência não cria nem congela a configuração: o preflight precisa repeti-la
+em cada execução. A fundação não exige usuário Cognito ou token. O runtime usa a
 baseline SEN-46 fixa do contrato e permanece bloqueado enquanto a autenticação
 do smoke não estiver configurada. A SEN-68 não cria senha ou usuário durante a
 implementação e não acrescenta API, autenticação da aplicação ou UI.
@@ -686,6 +762,8 @@ Os gates locais não usam credencial, endpoint ou subprocesso AWS:
 
 ```powershell
 uv run --frozen python infra/aws/demo/scripts/delivery_policy.py
+uv run --frozen python infra/aws/demo/scripts/delivery_policy.py `
+  --render-directory <diretório-local-novo>
 uv run --frozen python infra/aws/demo/scripts/delivery_regression.py
 uv run --frozen poe check
 uv run --frozen poe hooks
@@ -702,15 +780,16 @@ externa explícita.
 
 - O bootstrap e a prova real dependem de autorização e conta AWS; nenhum check
   offline substitui a avaliação das policies pelo serviço.
-- A permission policy canônica de deploy ocupa 10.232 dos 10.240 bytes aceitos
-  pelo gate para inline policies de uma role, antes da substituição dos
-  placeholders. O bootstrap precisa renderizar, medir e validar a policy no IAM;
-  qualquer excesso ou ação faltante bloqueia o exercício e exige uma divisão
-  deliberada de policies, nunca remoção de condição ou ampliação por wildcard.
-- Os três environments/reviewers/restrições a `main` permanecem controles
-  externos e ainda estão ausentes. Mesmo depois do bootstrap, a API REST e a
-  aprovação humana precisam passar em cada exercício; subjects de environment
-  não carregam a ref no próprio claim.
+- A policy lógica de deploy ocupa 9.999 dos 10.240 caracteres inline e por isso
+  é publicada em dois documentos customer-managed de 4.987 e 5.050 caracteres,
+  com margens de 1.157 e 1.094. O bootstrap precisa usar exatamente essa divisão,
+  medir de novo e validar cada documento no Access Analyzer; qualquer excesso ou
+  ação faltante bloqueia o exercício.
+- Os três environments/reviewer/restrições a `main` permanecem controles
+  externos, embora a configuração efetiva tenha sido comprovada somente para
+  leitura em 23/08/2026. A API REST e a segunda aprovação do mesmo operador
+  precisam passar em cada exercício; os dois atos manuais não constituem revisão
+  independente, e subjects de environment não carregam a ref no próprio claim.
 - Um deploy interrompido depois da fundação pode deixar recursos cobrados. O
   operador deve conservar o state e acionar o teardown protegido; nunca apagar o
   backend para “limpar”.
