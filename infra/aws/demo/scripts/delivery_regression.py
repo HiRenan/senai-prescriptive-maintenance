@@ -536,6 +536,16 @@ def prove_contract_mutations_rejected() -> int:
 
     mutations.append(unencrypted_frontend_put)
 
+    def missing_deploy_billing_write(contract: dict[str, Any]) -> None:
+        remove_permission_statement(contract, "deploy", "BudgetPortalRW")
+
+    mutations.append(missing_deploy_billing_write)
+
+    def missing_teardown_billing_write(contract: dict[str, Any]) -> None:
+        remove_permission_statement(contract, "teardown", "BudgetPortalRW")
+
+    mutations.append(missing_teardown_billing_write)
+
     def without_provider_action(
         role_name: str, sid: str, action: str
     ) -> Callable[[dict[str, Any]], None]:
@@ -551,6 +561,12 @@ def prove_contract_mutations_rejected() -> int:
                 "plan", "ReadDemoIamRoles", "iam:ListAttachedRolePolicies"
             ),
             without_provider_action(
+                "plan", "ReadDemoResources", "aws-portal:ViewBilling"
+            ),
+            without_provider_action(
+                "plan", "ReadDemoResources", "ec2:DescribeNetworkAcls"
+            ),
+            without_provider_action(
                 "plan", "ReadDemoResources", "ec2:DescribeVpcAttribute"
             ),
             without_provider_action(
@@ -559,6 +575,8 @@ def prove_contract_mutations_rejected() -> int:
             without_provider_action(
                 "deploy", "ReadDemoIamRoles", "iam:ListAttachedRolePolicies"
             ),
+            without_provider_action("deploy", "GlobalReads", "aws-portal:ViewBilling"),
+            without_provider_action("deploy", "GlobalReads", "ec2:DescribeNetworkAcls"),
             without_provider_action(
                 "deploy", "GlobalReads", "ec2:DescribeVpcAttribute"
             ),
@@ -572,6 +590,16 @@ def prove_contract_mutations_rejected() -> int:
                 "teardown",
                 "ReadDemoIamRoles",
                 "iam:ListInstanceProfilesForRole",
+            ),
+            without_provider_action(
+                "teardown",
+                "InventoryDemoResourcesGlobal",
+                "aws-portal:ViewBilling",
+            ),
+            without_provider_action(
+                "teardown",
+                "InventoryDemoResourcesGlobal",
+                "ec2:DescribeNetworkAcls",
             ),
             without_provider_action(
                 "teardown", "InventoryDemoResourcesGlobal", "ec2:DescribeVpcAttribute"
