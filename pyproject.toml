@@ -78,13 +78,20 @@ help = "Verifica se o contrato web rastreado corresponde ao OpenAPI v1."
 cmd = "python scripts/generate_web_contract.py --check"
 
 [tool.poe.tasks.web-typecheck]
-help = "Executa a verificação de tipos TypeScript sobre as fontes da web."
-cmd = "corepack pnpm exec tsc --noEmit"
-executor = { type = "simple" }
+help = "Executa a verificação de tipos TypeScript sobre fontes e testes da web."
+sequence = [
+  { cmd = "corepack pnpm exec tsc --project apps/web/tsconfig.app.json", executor = { type = "simple" } },
+  { cmd = "corepack pnpm exec tsc --project apps/web/tsconfig.test.json", executor = { type = "simple" } },
+]
 
 [tool.poe.tasks.web-test]
-help = "Executa os testes essenciais do fluxo web com o runner do Node."
+help = "Executa os testes essenciais do fluxo web com o Vitest."
 cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web test"
+executor = { type = "simple" }
+
+[tool.poe.tasks.web-build]
+help = "Constrói o bundle de produção da web com o Vite."
+cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web build"
 executor = { type = "simple" }
 
 [tool.poe.tasks.web-browser-test]
@@ -106,6 +113,7 @@ sequence = [
   "web-contract-check",
   "web-typecheck",
   "web-test",
+  "web-build",
   "aws-demo-frontend-regression",
 ]
 
