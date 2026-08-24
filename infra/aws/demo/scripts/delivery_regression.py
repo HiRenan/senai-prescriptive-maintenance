@@ -382,6 +382,32 @@ def prove_contract_mutations_rejected() -> int:
 
     mutations.append(invalid_tag_condition)
 
+    def request_tag_on_existing_vpc(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "Ec2CreateInTaggedVpc")
+        condition = cast(dict[str, Any], statement["Condition"])
+        equals = cast(dict[str, str], condition["StringEquals"])
+        equals["aws:RequestTag/Profile"] = equals.pop("aws:ResourceTag/Profile")
+
+    mutations.append(request_tag_on_existing_vpc)
+
+    def resource_tag_on_new_ec2_resources(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "Ec2CreateTagged")
+        condition = cast(dict[str, Any], statement["Condition"])
+        equals = cast(dict[str, str], condition["StringEquals"])
+        equals["aws:ResourceTag/Profile"] = equals.pop("aws:RequestTag/Profile")
+
+    mutations.append(resource_tag_on_new_ec2_resources)
+
+    def request_tag_on_existing_endpoint_network(contract: dict[str, Any]) -> None:
+        statement = permission_statement(
+            contract, "deploy", "Ec2EndpointInTaggedNetwork"
+        )
+        condition = cast(dict[str, Any], statement["Condition"])
+        equals = cast(dict[str, str], condition["StringEquals"])
+        equals["aws:RequestTag/Profile"] = equals.pop("aws:ResourceTag/Profile")
+
+    mutations.append(request_tag_on_existing_endpoint_network)
+
     def conditioned_deploy_task_deregister(contract: dict[str, Any]) -> None:
         remove_permission_statement(contract, "deploy", "TaskDeregister")
         statement = permission_statement(contract, "deploy", "TaggedRW")
