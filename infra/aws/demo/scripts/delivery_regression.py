@@ -2687,7 +2687,14 @@ def prove_terraform_init_is_readonly() -> int:
 
 def prove_missing_state_is_canonical() -> int:
     original_capture_silent = aws_delivery.capture_silent
+    configuration = {
+        "account_id": "000000000000",
+        "state_bucket": "synthetic-state-bucket",
+        "state_key": aws_delivery.STATE_KEY,
+    }
     pull_content = b""
+    state_present = False
+    listing_override: bytes | None = None
 
     def fake_capture_silent(
         name: str,
@@ -2695,6 +2702,37 @@ def prove_missing_state_is_canonical() -> int:
         **kwargs: object,
     ) -> bytes:
         del kwargs
+        if name == "aws":
+            expected = (
+                "s3api",
+                "list-objects-v2",
+                "--bucket",
+                configuration["state_bucket"],
+                "--prefix",
+                configuration["state_key"],
+                "--max-keys",
+                "2",
+                "--expected-bucket-owner",
+                configuration["account_id"],
+                "--no-paginate",
+                "--output",
+                "json",
+                "--no-cli-pager",
+            )
+            if tuple(arguments) != expected:
+                raise DeliveryRegressionError(
+                    "Consulta de presença do state divergiu do escopo exato."
+                )
+            if listing_override is not None:
+                return listing_override
+            contents = [{"Key": configuration["state_key"]}] if state_present else []
+            return json.dumps(
+                {
+                    "Contents": contents,
+                    "IsTruncated": False,
+                    "KeyCount": len(contents),
+                }
+            ).encode("utf-8")
         if name != "terraform":
             raise DeliveryRegressionError("Consulta de state usou executável inválido.")
         if arguments[-2:] == ["state", "pull"]:
@@ -2708,20 +2746,58 @@ def prove_missing_state_is_canonical() -> int:
         with tempfile.TemporaryDirectory(prefix="sen68-state-pull-") as temporary:
             root = Path(temporary)
             missing, missing_snapshot = aws_delivery.terraform_state_list(
-                {}, root, suffix="missing", allow_missing=True
+                configuration, {}, root, suffix="missing", allow_missing=True
             )
             if missing.read_bytes() != b"" or missing_snapshot is not None:
                 raise DeliveryRegressionError("State ausente não ficou canônico.")
             expect_failure(
                 lambda: aws_delivery.terraform_state_list(
-                    {}, root, suffix="required", allow_missing=False
+                    configuration, {}, root, suffix="required", allow_missing=False
+                ),
+                AwsDeliveryError,
+            )
+            listing_override = json.dumps(
+                {"Contents": [], "IsTruncated": True, "KeyCount": 0}
+            ).encode("utf-8")
+            expect_failure(
+                lambda: aws_delivery.terraform_state_list(
+                    configuration, {}, root, suffix="truncated", allow_missing=True
+                ),
+                AwsDeliveryError,
+            )
+            listing_override = json.dumps(
+                {
+                    "Contents": [{"Key": f"{configuration['state_key']}.tflock"}],
+                    "IsTruncated": False,
+                    "KeyCount": 1,
+                }
+            ).encode("utf-8")
+            expect_failure(
+                lambda: aws_delivery.terraform_state_list(
+                    configuration, {}, root, suffix="unexpected", allow_missing=True
+                ),
+                AwsDeliveryError,
+            )
+            listing_override = b'{"IsTruncated":false,"KeyCount":'
+            expect_failure(
+                lambda: aws_delivery.terraform_state_list(
+                    configuration, {}, root, suffix="invalid", allow_missing=True
+                ),
+                AwsDeliveryError,
+            )
+            listing_override = None
+            state_present = True
+            pull_content = b""
+            expect_failure(
+                lambda: aws_delivery.terraform_state_list(
+                    configuration, {}, root, suffix="empty", allow_missing=True
                 ),
                 AwsDeliveryError,
             )
             pull_content = b' {"version":4} '
             expect_failure(
                 lambda: aws_delivery.terraform_state_list(
-                    {}, root, suffix="malformed", allow_missing=True
+                    configuration, {}, root, suffix="malformed", allow_missing=True
                 ),
                 AwsDeliveryError,
             )
@@ -2735,7 +2811,7 @@ def prove_missing_state_is_canonical() -> int:
                 }
             ).encode("utf-8")
             existing, existing_snapshot = aws_delivery.terraform_state_list(
-                {}, root, suffix="existing", allow_missing=True
+                configuration, {}, root, suffix="existing", allow_missing=True
             )
             if (
                 existing.read_text(encoding="utf-8") != "aws_vpc.demo\n"
@@ -2751,7 +2827,7 @@ def prove_missing_state_is_canonical() -> int:
                 )
     finally:
         aws_delivery.capture_silent = original_capture_silent
-    return 4
+    return 8
 
 
 def prove_plan_requires_existing_foundation() -> int:
@@ -2769,13 +2845,14 @@ def prove_plan_requires_existing_foundation() -> int:
         del args, kwargs
 
     def missing_state(
+        configuration: Mapping[str, str],
         environment: Mapping[str, str],
         temporary: Path,
         *,
         suffix: str,
         allow_missing: bool = False,
     ) -> Path:
-        del environment, temporary, suffix
+        del configuration, environment, temporary, suffix
         observed["allow_missing"] = allow_missing
         raise AwsDeliveryError("State sintético ausente.")
 
