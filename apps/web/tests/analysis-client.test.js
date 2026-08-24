@@ -126,6 +126,25 @@ test("o tempo limite aborta a requisição e é reportado como timeout", async (
   assert.equal(output.failure.kind, "timeout");
 });
 
+test("uma implementação que ignora abort não aplica a resposta tardia", async () => {
+  const lateClient = createAnalysisClient({
+    endpoint: "/api/analysis",
+    timeoutMs: 5,
+    fetchImpl: async () => {
+      await new Promise((fulfil) => setTimeout(fulfil, 15));
+      return new Response(JSON.stringify(responseExample("normal")), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  const output = await lateClient.requestAnalysis(requestExample("normal"));
+
+  assert.equal(output.ok, false);
+  assert.equal(output.failure.kind, "timeout");
+});
+
 test("um corpo 200 que não é JSON é recusado", async () => {
   const output = await client(
     respondWith(200, null, { raw: "não é json" }),

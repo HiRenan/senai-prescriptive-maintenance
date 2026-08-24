@@ -8,6 +8,8 @@ import { toneMark } from "./marks.js";
 /**
  * @typedef {import("../core/presentation.js").ReportView} ReportView
  * @typedef {import("../generated/analysis-contract.js").AnalysisFeatures} AnalysisFeatures
+ * @typedef {"online" | "offline"} ReportSource
+ * @typedef {{ label: string, run: () => void } | null} ReportAction
  */
 
 /**
@@ -25,9 +27,12 @@ function block(label, children, modifier = "") {
 
 /**
  * @param {ReportView} report
+ * @param {ReportSource} source
+ * @param {boolean} previous
+ * @param {Date} executedAt
  * @returns {HTMLElement}
  */
-function masthead(report) {
+function masthead(report, source, previous, executedAt) {
   const identifiers = report.identifiers.map((entry) =>
     el("div", { class: "identifier" }, [
       el("dt", {}, [entry.label]),
@@ -36,17 +41,43 @@ function masthead(report) {
   );
   identifiers.push(
     el("div", { class: "identifier" }, [
+      el("dt", {}, ["Origem"]),
+      el("dd", {}, [
+        source === "offline" ? "Fixture sintética offline" : "API de análise",
+      ]),
+    ]),
+  );
+  identifiers.push(
+    el("div", { class: "identifier" }, [
       el("dt", {}, ["Execução local"]),
-      el("dd", { class: "mono" }, [formatInstant(new Date())]),
+      el("dd", { class: "mono" }, [formatInstant(executedAt)]),
     ]),
   );
   return el("header", { class: "verdict" }, [
     el("p", { class: "verdict-kicker" }, [
-      report.kind === "result" ? "Resultado do contrato v1" : "Nenhum resultado obtido",
+      report.kind === "result"
+        ? source === "offline"
+          ? "Demonstração offline do contrato v1"
+          : "Resultado do contrato v1"
+        : "Nenhum resultado obtido",
     ]),
+    previous
+      ? el("p", { class: "previous-result" }, [
+          "Resultado anterior preservado. Ele não pertence à tentativa atual.",
+        ])
+      : null,
     el("div", { class: "verdict-head" }, [
       el("span", { class: "verdict-mark" }, [toneMark(report.tone)]),
-      el("h2", { class: "verdict-title", id: "report-heading" }, [report.title]),
+      el(
+        "h2",
+        {
+          class: "verdict-title",
+          id: "report-heading",
+          tabindex: "-1",
+          "data-report-focus": "",
+        },
+        [report.title],
+      ),
     ]),
     el("p", { class: "verdict-statement" }, [report.statement]),
     el("dl", { class: "identifiers" }, identifiers),
@@ -333,10 +364,95 @@ function comparisonBlock(features) {
 }
 
 /**
+ * @param {ReportAction} action
+ * @returns {HTMLElement | null}
+ */
+function actionControl(action) {
+  if (action === null) {
+    return null;
+  }
+  const button = el("button", { type: "button", class: "button button-primary" }, [
+    action.label,
+  ]);
+  button.addEventListener("click", action.run);
+  return el("div", { class: "report-actions" }, [button]);
+}
+
+/**
+ * @param {object} state
+ * @param {string} state.kicker
+ * @param {string} state.title
+ * @param {string} state.statement
+ * @param {string} state.nextStep
+ * @param {"degraded" | "failed"} state.tone
+ * @param {readonly string[]} [state.details]
+ * @param {ReportAction} [state.action]
+ * @returns {HTMLElement}
+ */
+function statePanel(state) {
+  return el("section", { class: "report-state", "data-tone": state.tone }, [
+    el("p", { class: "verdict-kicker" }, [state.kicker]),
+    el(
+      "h2",
+      { class: "report-state-title", tabindex: "-1", "data-report-focus": "" },
+      [state.title],
+    ),
+    el("p", { class: "report-state-statement" }, [state.statement]),
+    state.details === undefined || state.details.length === 0
+      ? null
+      : el(
+          "ul",
+          { class: "report-state-details" },
+          state.details.map((detail) => el("li", {}, [detail])),
+        ),
+    el("div", { class: "next-step" }, [
+      el("p", { class: "next-step-label" }, ["Próximo passo"]),
+      el("p", { class: "next-step-text" }, [state.nextStep]),
+    ]),
+    actionControl(state.action ?? null),
+  ]);
+}
+
+/**
+ * @param {ReportView} report
+ * @param {AnalysisFeatures | null} features
+ * @param {ReportSource} source
+ * @param {boolean} previous
+ * @param {Date} executedAt
+ * @returns {readonly HTMLElement[]}
+ */
+function reportBlocks(report, features, source, previous, executedAt) {
+  return [
+    masthead(report, source, previous, executedAt),
+    nextStep(report),
+    prescriptionBlock(report),
+    diagnosisBlock(report),
+    supportBlock(report),
+    abstentionBlock(report),
+    citationsBlock(report),
+    neighborsBlock(report),
+    warningsBlock(report),
+    issuesBlock(report),
+    integrityBlock(report),
+    features === null ? null : comparisonBlock(features),
+  ].filter((node) => node !== null);
+}
+
+/**
  * @typedef {object} ReportSurface
  * @property {() => void} showIdle
- * @property {() => void} showLoading
- * @property {(report: ReportView, features: AnalysisFeatures | null) => void} showReport
+ * @property {(source: ReportSource) => void} showLoading
+ * @property {(
+ *   report: ReportView,
+ *   features: AnalysisFeatures,
+ *   source: ReportSource,
+ * ) => void} showReport
+ * @property {(
+ *   report: ReportView,
+ *   source: ReportSource,
+ *   action?: ReportAction,
+ * ) => void} showFailure
+ * @property {() => void} focus
  */
 
 /**
@@ -344,19 +460,26 @@ function comparisonBlock(features) {
  * @returns {ReportSurface}
  */
 export function createReportView(root) {
+  /** @type {{ report: ReportView, features: AnalysisFeatures,
+   *   source: ReportSource, executedAt: Date } | null} */
+  let lastValid = null;
+
   /**
    * @param {string} tone
    * @param {boolean} busy
+   * @param {boolean} [previous]
    * @returns {void}
    */
-  function prepare(tone, busy) {
+  function prepare(tone, busy, previous = false) {
     clear(root);
     root.setAttribute("data-tone", tone);
     root.setAttribute("aria-busy", busy ? "true" : "false");
+    root.toggleAttribute("data-previous", previous);
   }
 
   return {
     showIdle() {
+      lastValid = null;
       prepare("idle", false);
       root.append(
         el("div", { class: "idle" }, [
@@ -372,11 +495,34 @@ export function createReportView(root) {
         ]),
       );
     },
-    showLoading() {
+    showLoading(source) {
+      if (lastValid !== null) {
+        prepare(lastValid.report.tone, true, true);
+        root.append(
+          statePanel({
+            kicker: source === "offline" ? "Modo offline" : "Nova solicitação",
+            title: "Nova análise em andamento",
+            statement:
+              "O laudo abaixo continua visível, mas é o último resultado concluído e não descreve a leitura em processamento.",
+            nextStep: "Aguarde a conclusão antes de usar o novo resultado.",
+            tone: "degraded",
+          }),
+          ...reportBlocks(
+            lastValid.report,
+            lastValid.features,
+            lastValid.source,
+            true,
+            lastValid.executedAt,
+          ),
+        );
+        return;
+      }
       prepare("idle", true);
       root.append(
         el("div", { class: "loading" }, [
-          el("p", { class: "loading-kicker" }, ["Executando"]),
+          el("p", { class: "loading-kicker" }, [
+            source === "offline" ? "Preparando fixture offline" : "Executando",
+          ]),
           el("h2", { class: "loading-title", id: "report-heading" }, [
             "Analisando a leitura enviada",
           ]),
@@ -388,27 +534,51 @@ export function createReportView(root) {
         ]),
       );
     },
-    showReport(report, features) {
+    showReport(report, features, source) {
+      const executedAt = new Date();
+      lastValid = { report, features, source, executedAt };
       prepare(report.tone, false);
-      const blocks = [
-        masthead(report),
-        nextStep(report),
-        prescriptionBlock(report),
-        diagnosisBlock(report),
-        supportBlock(report),
-        abstentionBlock(report),
-        citationsBlock(report),
-        neighborsBlock(report),
-        warningsBlock(report),
-        issuesBlock(report),
-        integrityBlock(report),
-        features === null ? null : comparisonBlock(features),
-      ];
-      for (const node of blocks) {
-        if (node !== null) {
-          root.append(node);
-        }
+      root.append(...reportBlocks(report, features, source, false, executedAt));
+    },
+    showFailure(report, source, action = null) {
+      if (lastValid !== null) {
+        const details = [
+          ...report.identifiers.map((entry) => `${entry.label}: ${entry.value}`),
+          ...report.issues.map((issue) => `${issue.label}: ${issue.code}`),
+          ...report.integrity,
+        ];
+        prepare(lastValid.report.tone, false, true);
+        root.append(
+          statePanel({
+            kicker: "Tentativa sem novo resultado",
+            title: report.title,
+            statement: report.statement,
+            nextStep: report.nextStep,
+            tone: "failed",
+            details,
+            action,
+          }),
+          ...reportBlocks(
+            lastValid.report,
+            lastValid.features,
+            lastValid.source,
+            true,
+            lastValid.executedAt,
+          ),
+        );
+        return;
       }
+      const executedAt = new Date();
+      prepare(report.tone, false);
+      root.append(...reportBlocks(report, null, source, false, executedAt));
+      const control = actionControl(action);
+      if (control !== null) {
+        root.append(control);
+      }
+    },
+    focus() {
+      const target = root.querySelector("[data-report-focus]");
+      (target instanceof HTMLElement ? target : root).focus();
     },
   };
 }

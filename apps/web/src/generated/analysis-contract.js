@@ -665,6 +665,43 @@ export const SYNTHETIC_ANALYSIS_EXAMPLES = Object.freeze([
       },
       "top_k": 3
     },
+    response: {
+      "analysis_id": "ana_synthetic_normal",
+      "outcome": "normal",
+      "diagnosis": {
+        "code": "synthetic_normal",
+        "summary": "Condição sintética dentro da faixa esperada."
+      },
+      "support": {
+        "level": "sufficient",
+        "support_score": 0.98
+      },
+      "abstention": null,
+      "model_id": "model_synthetic_v1",
+      "neighbors": [
+        {
+          "neighbor_ref": "neighbor_synthetic_01",
+          "rank": 1,
+          "fault_code": "synthetic_normal",
+          "distance": 0.4
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_02",
+          "rank": 2,
+          "fault_code": "synthetic_normal",
+          "distance": 1.3
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_03",
+          "rank": 3,
+          "fault_code": "synthetic_normal",
+          "distance": 2.2
+        }
+      ],
+      "prescription": null,
+      "citations": [],
+      "warnings": []
+    },
   }),
   Object.freeze({
     name: "documented_fault",
@@ -691,6 +728,69 @@ export const SYNTHETIC_ANALYSIS_EXAMPLES = Object.freeze([
         "rpm": 1100.0
       },
       "top_k": 3
+    },
+    response: {
+      "analysis_id": "ana_synthetic_documented_fault",
+      "outcome": "documented_fault",
+      "diagnosis": {
+        "code": "synthetic_documented_fault",
+        "summary": "Falha sintética com documentação aprovada."
+      },
+      "support": {
+        "level": "sufficient",
+        "support_score": 0.92
+      },
+      "abstention": null,
+      "model_id": "model_synthetic_v1",
+      "neighbors": [
+        {
+          "neighbor_ref": "neighbor_synthetic_01",
+          "rank": 1,
+          "fault_code": "synthetic_documented_fault",
+          "distance": 0.4
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_02",
+          "rank": 2,
+          "fault_code": "synthetic_documented_fault",
+          "distance": 1.3
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_03",
+          "rank": 3,
+          "fault_code": "synthetic_documented_fault",
+          "distance": 2.2
+        }
+      ],
+      "prescription": {
+        "summary": "Programar inspeção sintética controlada.",
+        "priority": "scheduled",
+        "actions": [
+          "Confirmar a condição em uma nova leitura sintética.",
+          "Revisar o manual sintético citado."
+        ]
+      },
+      "citations": [
+        {
+          "document_id": "doc_synthetic_manual",
+          "document_version": "docver_synthetic_manual_v1",
+          "chunk": "chunk_synthetic_manual_01",
+          "page_number": 1
+        },
+        {
+          "document_id": "doc_synthetic_manual",
+          "document_version": "docver_synthetic_manual_v1",
+          "chunk": "chunk_synthetic_manual_02",
+          "page_number": 2
+        },
+        {
+          "document_id": "doc_synthetic_manual",
+          "document_version": "docver_synthetic_manual_v1",
+          "chunk": "chunk_synthetic_manual_03",
+          "page_number": 3
+        }
+      ],
+      "warnings": []
     },
   }),
   Object.freeze({
@@ -719,6 +819,51 @@ export const SYNTHETIC_ANALYSIS_EXAMPLES = Object.freeze([
       },
       "top_k": 3
     },
+    response: {
+      "analysis_id": "ana_synthetic_undocumented_fault",
+      "outcome": "undocumented_fault",
+      "diagnosis": {
+        "code": "synthetic_undocumented_fault",
+        "summary": "Falha sintética sem documentação aprovada."
+      },
+      "support": {
+        "level": "sufficient",
+        "support_score": 0.79
+      },
+      "abstention": {
+        "reason": "undocumented_fault",
+        "message": "Não há documentação suficiente para prescrever uma ação."
+      },
+      "model_id": "model_synthetic_v1",
+      "neighbors": [
+        {
+          "neighbor_ref": "neighbor_synthetic_01",
+          "rank": 1,
+          "fault_code": "synthetic_undocumented_fault",
+          "distance": 0.4
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_02",
+          "rank": 2,
+          "fault_code": "synthetic_undocumented_fault",
+          "distance": 1.3
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_03",
+          "rank": 3,
+          "fault_code": "synthetic_undocumented_fault",
+          "distance": 2.2
+        }
+      ],
+      "prescription": null,
+      "citations": [],
+      "warnings": [
+        {
+          "code": "documentation_not_found",
+          "message": "O diagnóstico não possui suporte documental aprovado."
+        }
+      ]
+    },
   }),
   Object.freeze({
     name: "out_of_distribution",
@@ -746,6 +891,48 @@ export const SYNTHETIC_ANALYSIS_EXAMPLES = Object.freeze([
       },
       "top_k": 3
     },
+    response: {
+      "analysis_id": "ana_synthetic_out_of_distribution",
+      "outcome": "out_of_distribution",
+      "diagnosis": null,
+      "support": {
+        "level": "insufficient",
+        "support_score": 0.05
+      },
+      "abstention": {
+        "reason": "out_of_distribution",
+        "message": "A entrada sintética está fora da distribuição suportada."
+      },
+      "model_id": "model_synthetic_v1",
+      "neighbors": [
+        {
+          "neighbor_ref": "neighbor_synthetic_01",
+          "rank": 1,
+          "fault_code": "synthetic_reference_fault",
+          "distance": 1.4
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_02",
+          "rank": 2,
+          "fault_code": "synthetic_reference_fault",
+          "distance": 2.3
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_03",
+          "rank": 3,
+          "fault_code": "synthetic_reference_fault",
+          "distance": 3.2
+        }
+      ],
+      "prescription": null,
+      "citations": [],
+      "warnings": [
+        {
+          "code": "out_of_distribution",
+          "message": "Nenhuma prescrição foi produzida."
+        }
+      ]
+    },
   }),
   Object.freeze({
     name: "degraded",
@@ -772,6 +959,70 @@ export const SYNTHETIC_ANALYSIS_EXAMPLES = Object.freeze([
         "rpm": 1400.0
       },
       "top_k": 3
+    },
+    response: {
+      "analysis_id": "ana_synthetic_degraded",
+      "outcome": "degraded",
+      "diagnosis": {
+        "code": "synthetic_degraded",
+        "summary": "Condição sintética com dependência indisponível."
+      },
+      "support": {
+        "level": "sufficient",
+        "support_score": 0.72
+      },
+      "abstention": {
+        "reason": "dependency_unavailable",
+        "message": "A análise parcial não permite uma prescrição segura."
+      },
+      "model_id": "model_synthetic_v1",
+      "neighbors": [
+        {
+          "neighbor_ref": "neighbor_synthetic_01",
+          "rank": 1,
+          "fault_code": "synthetic_degraded",
+          "distance": 0.4
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_02",
+          "rank": 2,
+          "fault_code": "synthetic_degraded",
+          "distance": 1.3
+        },
+        {
+          "neighbor_ref": "neighbor_synthetic_03",
+          "rank": 3,
+          "fault_code": "synthetic_degraded",
+          "distance": 2.2
+        }
+      ],
+      "prescription": null,
+      "citations": [
+        {
+          "document_id": "doc_synthetic_manual",
+          "document_version": "docver_synthetic_manual_v1",
+          "chunk": "chunk_synthetic_manual_01",
+          "page_number": 1
+        },
+        {
+          "document_id": "doc_synthetic_manual",
+          "document_version": "docver_synthetic_manual_v1",
+          "chunk": "chunk_synthetic_manual_02",
+          "page_number": 2
+        },
+        {
+          "document_id": "doc_synthetic_manual",
+          "document_version": "docver_synthetic_manual_v1",
+          "chunk": "chunk_synthetic_manual_03",
+          "page_number": 3
+        }
+      ],
+      "warnings": [
+        {
+          "code": "dependency_unavailable",
+          "message": "Recuperação ou geração está temporariamente indisponível."
+        }
+      ]
     },
   }),
 ]);

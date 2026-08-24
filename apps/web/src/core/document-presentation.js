@@ -126,8 +126,10 @@ const FAILURE_COPY = Object.freeze({
   },
   timeout: {
     title: "O ciclo documental excedeu o tempo limite",
-    statement: "A API não respondeu dentro do tempo aceito pelo painel.",
-    nextStep: "Atualize a lista; se repetir, verifique a saúde da API.",
+    statement:
+      "O painel encerrou a espera local. Isso não confirma que o comando remoto foi cancelado.",
+    nextStep:
+      "Atualize a lista antes de repetir qualquer comando e confirme o estado registrado pela API.",
   },
   refused: {
     title: "O painel não enviou a requisição",

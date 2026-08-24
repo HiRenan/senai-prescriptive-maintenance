@@ -14,7 +14,7 @@ import { createSchemaMatcher, isRecord, readErrorEnvelope } from "../core/contra
 /**
  * @typedef {object} AnalysisFailure
  * @property {"network" | "timeout" | "validation" | "unavailable" | "unexpected"
- *   | "malformed"} kind
+ *   | "malformed" | "offline" | "input"} kind
  * @property {number | null} status
  * @property {string | null} detail
  * @property {readonly ValidationIssue[]} issues
@@ -105,6 +105,9 @@ export function createAnalysisClient(options = {}) {
           ? failure("timeout", null, null)
           : failure("network", null, null);
       }
+      if (controller.signal.aborted) {
+        return failure("timeout", null, null);
+      }
 
       /** @type {unknown} */
       let body = null;
@@ -116,6 +119,9 @@ export function createAnalysisClient(options = {}) {
           return failure("timeout", null, null);
         }
         parsed = false;
+      }
+      if (controller.signal.aborted) {
+        return failure("timeout", null, null);
       }
 
       if (httpResponse.status === ANALYSIS_SUCCESS_STATUS) {

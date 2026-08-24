@@ -113,10 +113,12 @@ function definition(label, value, note) {
  * @param {HTMLElement} host
  * @param {object} [options]
  * @param {DocumentClient} [options.client]
+ * @param {boolean} [options.offline]
  * @returns {{ start: () => Promise<void>, refresh: () => Promise<void> }}
  */
 export function createDocumentsPanel(host, options = {}) {
   const client = options.client ?? createDocumentClient();
+  const offline = options.offline ?? false;
 
   /** @type {Map<string, HTMLInputElement>} */
   const registerInputs = new Map();
@@ -174,7 +176,7 @@ export function createDocumentsPanel(host, options = {}) {
   function setBusy(value) {
     busy = value;
     host.setAttribute("aria-busy", value ? "true" : "false");
-    setInteractiveDisabled(host, value);
+    setInteractiveDisabled(host, value || offline);
   }
 
   /**
@@ -285,6 +287,10 @@ export function createDocumentsPanel(host, options = {}) {
    * @returns {Promise<void>}
    */
   async function commit(view, action, reasonInput, reasonError) {
+    if (offline) {
+      announce("Modo offline: nenhum comando foi enviado à API documental.");
+      return;
+    }
     let reason = "";
     if (action.needsReason) {
       const parsed = buildRejectReason(reasonInput?.value ?? "");
@@ -343,6 +349,10 @@ export function createDocumentsPanel(host, options = {}) {
    * @returns {Promise<void>}
    */
   async function readOne(view) {
+    if (offline) {
+      announce("Modo offline: nenhum documento foi consultado na API.");
+      return;
+    }
     setBusy(true);
     announce(`Consultando o estado atual de ${view.filename}.`);
     try {
@@ -408,12 +418,12 @@ export function createDocumentsPanel(host, options = {}) {
     );
 
     confirmButton.addEventListener("click", () => {
-      if (!busy) {
+      if (!busy && !offline) {
         void commit(view, action, action.needsReason ? reason : null, reasonError);
       }
     });
     cancelButton.addEventListener("click", () => {
-      if (!busy) {
+      if (!busy && !offline) {
         cancelPending(view.documentId);
       }
     });
@@ -483,7 +493,7 @@ export function createDocumentsPanel(host, options = {}) {
           [action.label],
         );
         button.addEventListener("click", () => {
-          if (busy) {
+          if (busy || offline) {
             return;
           }
           pending = { documentId: view.documentId, action };
@@ -513,7 +523,7 @@ export function createDocumentsPanel(host, options = {}) {
       ["Ver estado atual"],
     );
     readButton.addEventListener("click", () => {
-      if (!busy && !confirming) {
+      if (!busy && !offline && !confirming) {
         void readOne(view);
       }
     });
@@ -574,10 +584,24 @@ export function createDocumentsPanel(host, options = {}) {
   function renderList() {
     clear(listHost);
     listHost.setAttribute("aria-busy", listLoading ? "true" : "false");
-    if (listLoading && documents.length === 0) {
+    if (offline) {
+      countLabel.textContent = "Modo offline: ciclo documental não consultado.";
+      listHost.setAttribute("aria-busy", "false");
+      listHost.append(
+        el("div", { class: "documents-empty" }, [
+          el("p", { class: "loading-title" }, ["Gestão documental indisponível offline"]),
+          el("p", {}, [
+            "O modo offline demonstra somente os cinco outcomes de análise e não simula decisões documentais.",
+          ]),
+          el("p", { class: "documents-empty-next" }, [
+            "Próximo passo: volte ao modo API local para consultar ou alterar o ciclo documental.",
+          ]),
+        ]),
+      );
+    } else if (listLoading && documents.length === 0) {
       countLabel.textContent = "Carregando documentos.";
       listHost.append(
-        el("div", { class: "documents-loading", role: "status" }, [
+        el("div", { class: "documents-loading" }, [
           el("p", { class: "loading-kicker" }, ["Consultando a API"]),
           el("p", { class: "loading-title" }, ["Lendo o ciclo documental"]),
           el("div", { class: "skeleton" }, [
@@ -587,27 +611,41 @@ export function createDocumentsPanel(host, options = {}) {
           ]),
         ]),
       );
-    } else if (listFailure !== null) {
+    } else if (listFailure !== null && documents.length === 0) {
       countLabel.textContent = "A lista não pôde ser lida.";
       listHost.append(
-        el("p", { class: "documents-empty" }, [
-          "Nenhum documento é exibido enquanto a leitura da lista falhar.",
+        el("div", { class: "documents-empty" }, [
+          el("p", {}, ["A API não forneceu uma lista válida nesta tentativa."]),
+          el("p", { class: "documents-empty-next" }, [
+            "Próximo passo: use Atualizar lista depois de conferir a saúde da API.",
+          ]),
         ]),
       );
     } else {
       const list = presentDocumentList(documents);
       countLabel.textContent = listLoading
         ? `Atualizando ${String(list.total)} documento(s).`
-        : list.empty
-          ? "Nenhum documento registrado."
-          : `${String(list.total)} documento(s) no ciclo.`;
+        : listFailure !== null
+          ? `Falha ao atualizar; ${String(list.total)} documento(s) anterior(es) preservado(s).`
+          : list.empty
+            ? "Nenhum documento registrado."
+            : `${String(list.total)} documento(s) no ciclo.`;
+      if ((listLoading || listFailure !== null) && !list.empty) {
+        listHost.append(
+          el("p", { class: "documents-stale" }, [
+            listLoading
+              ? "Os documentos abaixo vêm da última leitura concluída enquanto a atualização está em andamento."
+              : "Os documentos abaixo vêm da última leitura concluída e podem estar desatualizados.",
+          ]),
+        );
+      }
       if (list.empty) {
         listHost.append(el("p", { class: "documents-empty" }, [list.emptyMessage]));
       } else {
         listHost.append(...list.items.map(card));
       }
     }
-    setInteractiveDisabled(host, busy);
+    setInteractiveDisabled(host, busy || offline);
   }
 
   /**
@@ -625,7 +663,6 @@ export function createDocumentsPanel(host, options = {}) {
     listLoading = false;
     if (!output.ok) {
       listFailure = presentDocumentFailure(output.failure);
-      documents = Object.freeze([]);
       renderList();
       return { ok: false, failure: listFailure };
     }
@@ -646,7 +683,10 @@ export function createDocumentsPanel(host, options = {}) {
    * @returns {Promise<void>}
    */
   async function refresh() {
-    if (busy) {
+    if (busy || offline) {
+      if (offline) {
+        announce("Modo offline: a lista documental não foi consultada.");
+      }
       return;
     }
     if (pending !== null) {
@@ -692,6 +732,10 @@ export function createDocumentsPanel(host, options = {}) {
    * @returns {Promise<void>}
    */
   async function register() {
+    if (offline) {
+      announce("Modo offline: nenhum metadado foi enviado à API documental.");
+      return;
+    }
     /** @type {Record<string, string>} */
     const values = {};
     for (const [name, input] of registerInputs) {
@@ -839,7 +883,7 @@ export function createDocumentsPanel(host, options = {}) {
   return {
     async start() {
       refreshButton.addEventListener("click", () => {
-        if (!busy) {
+        if (!busy && !offline) {
           void refresh();
         }
       });
@@ -852,6 +896,14 @@ export function createDocumentsPanel(host, options = {}) {
         statusRegion,
       );
       renderFeedback(null, null);
+      if (offline) {
+        listLoading = false;
+        renderList();
+        announce(
+          "Modo offline ativo. Nenhuma chamada foi feita à API documental.",
+        );
+        return;
+      }
       await refresh();
     },
     refresh,

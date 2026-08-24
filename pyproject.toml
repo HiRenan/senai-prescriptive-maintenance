@@ -87,6 +87,11 @@ help = "Executa os testes essenciais do fluxo web com o runner do Node."
 cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web test"
 executor = { type = "simple" }
 
+[tool.poe.tasks.web-browser-test]
+help = "Executa os fluxos reais de acessibilidade e reflow no Chromium."
+cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web test:browser"
+executor = { type = "simple" }
+
 [tool.poe.tasks.check]
 help = "Executa todos os checks; não aceita argumentos adicionais."
 sequence = [

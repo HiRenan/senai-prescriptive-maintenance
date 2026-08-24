@@ -8,6 +8,7 @@
   },
   "packageManager": "pnpm@10.15.1",
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "typescript": "5.9.3"
   }
 }
