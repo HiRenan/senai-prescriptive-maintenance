@@ -17,6 +17,7 @@ sem repetir extensamente a mesma orientação.
 | [`architecture/diagrams.md`](architecture/diagrams.md) | Diagramas lógico, local e AWS com estado e limites explícitos. |
 | [`../apps/api/README.md`](../apps/api/README.md) | API v1, ciclo documental, perfis, persistência e contratos internos. |
 | [`../scripts/README.md`](../scripts/README.md) | Smoke, auditoria pública, OpenAPI e benchmark offline. |
+| [`delivery/demo-script-base.md`](delivery/demo-script-base.md) | Roteiro final pré-release da SEN-70: três jornadas, login PKCE validado localmente, contingência offline e aceite temporal técnico cronometrado. |
 | [`data/banner-quality-policy.md`](data/banner-quality-policy.md) | Visão derivada da política de qualidade e comparação agregada com a baseline rastreada. |
 | [`data/banner-data-card.md`](data/banner-data-card.md) | Proveniência, composição, uso, privacidade e limitações do dataset canônico. |
 | [`validation/foundation-clean-room.md`](validation/foundation-clean-room.md) | Evidências históricas da validação da Foundation em clone público limpo e adendo sobre o fluxo de promoção. |
