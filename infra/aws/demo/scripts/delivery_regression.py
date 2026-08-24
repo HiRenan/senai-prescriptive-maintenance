@@ -141,6 +141,16 @@ def permission_statement(
     return matches[0]
 
 
+def remove_permission_statement(
+    contract: dict[str, Any], role_name: str, sid: str
+) -> None:
+    policy = cast(dict[str, Any], role(contract, role_name)["permission_policy"])
+    statements = cast(list[dict[str, Any]], policy["Statement"])
+    policy["Statement"] = [
+        statement for statement in statements if statement.get("Sid") != sid
+    ]
+
+
 def prove_contract_mutations_rejected() -> int:
     mutations: list[Callable[[dict[str, Any]], None]] = []
 
@@ -363,6 +373,92 @@ def prove_contract_mutations_rejected() -> int:
 
     mutations.append(invalid_tag_condition)
 
+    def conditioned_deploy_task_deregister(contract: dict[str, Any]) -> None:
+        remove_permission_statement(contract, "deploy", "TaskDeregister")
+        statement = permission_statement(contract, "deploy", "TaggedRW")
+        actions = cast(list[str], statement["Action"])
+        actions.append("ecs:DeregisterTaskDefinition")
+        actions.sort()
+
+    mutations.append(conditioned_deploy_task_deregister)
+
+    def conditioned_teardown_task_deregister(contract: dict[str, Any]) -> None:
+        remove_permission_statement(contract, "teardown", "DestroyTaskDefinitions")
+        statement = permission_statement(
+            contract, "teardown", "DestroyTaggedDemoResources"
+        )
+        actions = cast(list[str], statement["Action"])
+        actions.append("ecs:DeregisterTaskDefinition")
+        actions.sort()
+
+    mutations.append(conditioned_teardown_task_deregister)
+
+    def unsupported_cloud_map_resource_tag(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "CloudMapTag")
+        statement["Condition"] = {
+            "StringEquals": {"aws:ResourceTag/Profile": "aws-demo"}
+        }
+
+    mutations.append(unsupported_cloud_map_resource_tag)
+
+    def unsupported_cloud_map_resource_arn(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "CloudMapTag")
+        statement["Resource"] = [
+            "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:namespace/*",
+            "arn:aws:servicediscovery:${AWS_REGION}:${AWS_ACCOUNT_ID}:service/*",
+        ]
+
+    mutations.append(unsupported_cloud_map_resource_arn)
+
+    def string_task_dimensions(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "TaskNew")
+        statement["Condition"] = {
+            "StringEquals": {
+                "aws:RequestTag/Profile": "aws-demo",
+                "ecs:task-cpu": "256",
+                "ecs:task-memory": "512",
+            }
+        }
+
+    mutations.append(string_task_dimensions)
+
+    def invalid_tag_inventory_prefix(contract: dict[str, Any]) -> None:
+        statement = permission_statement(
+            contract, "teardown", "InventoryDemoResourcesGlobal"
+        )
+        actions = cast(list[str], statement["Action"])
+        actions.remove("tag:GetResources")
+        actions.append("resourcegroupstaggingapi:GetResources")
+        actions.sort()
+
+    mutations.append(invalid_tag_inventory_prefix)
+
+    def inline_deploy_publication(contract: dict[str, Any]) -> None:
+        publication = cast(
+            dict[str, Any], role(contract, "deploy")["permission_policy_publication"]
+        )
+        publication["mode"] = "inline"
+
+    mutations.append(inline_deploy_publication)
+
+    def unversioned_managed_policy(contract: dict[str, Any]) -> None:
+        publication = cast(
+            dict[str, Any], role(contract, "deploy")["permission_policy_publication"]
+        )
+        documents = cast(list[dict[str, Any]], publication["documents"])
+        documents[0]["name"] = "${NAME_PREFIX}-demo-deploy-core"
+
+    mutations.append(unversioned_managed_policy)
+
+    def incomplete_policy_publication(contract: dict[str, Any]) -> None:
+        publication = cast(
+            dict[str, Any], role(contract, "teardown")["permission_policy_publication"]
+        )
+        documents = cast(list[dict[str, Any]], publication["documents"])
+        cast(list[str], documents[0]["sids"]).remove("DestroyTaskDefinitions")
+
+    mutations.append(incomplete_policy_publication)
+
     def untagged_ecr_creation(contract: dict[str, Any]) -> None:
         permission_statement(contract, "deploy", "EcrCreate").pop("Condition")
 
@@ -575,6 +671,7 @@ def prove_workflow_mutations_rejected(action_pins: Mapping[str, str]) -> int:
 
 def prove_github_environment_gate() -> int:
     environment = {
+        "can_admins_bypass": False,
         "deployment_branch_policy": {
             "custom_branch_policies": True,
             "protected_branches": False,
@@ -582,8 +679,13 @@ def prove_github_environment_gate() -> int:
         "name": "aws-demo-deploy",
         "protection_rules": [
             {
-                "prevent_self_review": True,
-                "reviewers": [{"reviewer": {"id": 107653306}, "type": "User"}],
+                "prevent_self_review": False,
+                "reviewers": [
+                    {
+                        "reviewer": {"id": 107653306, "login": "HiRenan"},
+                        "type": "User",
+                    }
+                ],
                 "type": "required_reviewers",
             },
             {"type": "branch_policy"},
@@ -602,18 +704,52 @@ def prove_github_environment_gate() -> int:
     missing_reviewers = copy.deepcopy(environment)
     cast(list[object], missing_reviewers["protection_rules"]).clear()
     mutations.append((missing_reviewers, policies))
-    self_review = copy.deepcopy(environment)
+    blocked_self_review = copy.deepcopy(environment)
     reviewer_rule = cast(
-        dict[str, Any], cast(list[object], self_review["protection_rules"])[0]
+        dict[str, Any], cast(list[object], blocked_self_review["protection_rules"])[0]
     )
-    reviewer_rule["prevent_self_review"] = False
-    mutations.append((self_review, policies))
+    reviewer_rule["prevent_self_review"] = True
+    mutations.append((blocked_self_review, policies))
+    admin_bypass = copy.deepcopy(environment)
+    admin_bypass["can_admins_bypass"] = True
+    mutations.append((admin_bypass, policies))
+    missing_admin_bypass = copy.deepcopy(environment)
+    missing_admin_bypass.pop("can_admins_bypass")
+    mutations.append((missing_admin_bypass, policies))
     no_reviewer = copy.deepcopy(environment)
     no_reviewer_rule = cast(
         dict[str, Any], cast(list[object], no_reviewer["protection_rules"])[0]
     )
     no_reviewer_rule["reviewers"] = []
     mutations.append((no_reviewer, policies))
+    wrong_reviewer_login = copy.deepcopy(environment)
+    login_rule = cast(
+        dict[str, Any],
+        cast(list[object], wrong_reviewer_login["protection_rules"])[0],
+    )
+    login_reviewer = cast(list[dict[str, Any]], login_rule["reviewers"])[0]
+    cast(dict[str, Any], login_reviewer["reviewer"])["login"] = "Other"
+    mutations.append((wrong_reviewer_login, policies))
+    wrong_reviewer_id = copy.deepcopy(environment)
+    id_rule = cast(
+        dict[str, Any], cast(list[object], wrong_reviewer_id["protection_rules"])[0]
+    )
+    id_reviewer = cast(list[dict[str, Any]], id_rule["reviewers"])[0]
+    cast(dict[str, Any], id_reviewer["reviewer"])["id"] = 1
+    mutations.append((wrong_reviewer_id, policies))
+    extra_reviewer = copy.deepcopy(environment)
+    extra_rule = cast(
+        dict[str, Any], cast(list[object], extra_reviewer["protection_rules"])[0]
+    )
+    cast(list[object], extra_rule["reviewers"]).append(
+        {"reviewer": {"id": 1, "login": "Other"}, "type": "User"}
+    )
+    mutations.append((extra_reviewer, policies))
+    extra_protection_rule = copy.deepcopy(environment)
+    cast(list[object], extra_protection_rule["protection_rules"]).append(
+        {"type": "wait_timer", "wait_timer": 1}
+    )
+    mutations.append((extra_protection_rule, policies))
     protected_branches = copy.deepcopy(environment)
     protected_branches["deployment_branch_policy"] = {
         "custom_branch_policies": False,

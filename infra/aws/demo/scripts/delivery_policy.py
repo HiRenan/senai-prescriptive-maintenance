@@ -86,9 +86,9 @@ BUILDX_NAME_EXPRESSION = "sen68-${{ github.run_id }}-${{ github.run_attempt }}"
 BUILDX_OUTPUT_EXPRESSION = "${{ steps.buildx.outputs.name }}"
 PROTECTED_MAIN_REVALIDATION = "Revalidate the current main revision after approval"
 EXPECTED_PERMISSION_POLICY_SHA256 = {
-    "deploy": "c64facd3774a48fc1fb5260c1ca5a64baed92887ec92e5c0b14857da14d39738",
+    "deploy": "98ac8bc5b2ae866feecd22cf0ced69a52758ae4b719c6c61c23301af7dd7b77a",
     "plan": "7c1c66b51df21c1ca326c6ca750c4dff3d11e7165f9efc4d727215e4c4d552b8",
-    "teardown": "830a12da473e08ace8f70224c7988a97bbec3fd57a57eb9259468137d23d56c7",
+    "teardown": "c151c210df64eac31fca8c8875f90d908880c509ded000ad299ceb5a5cf7871a",
 }
 EXPECTED_PERMISSION_SIDS = {
     "deploy": (
@@ -101,6 +101,7 @@ EXPECTED_PERMISSION_SIDS = {
         "CfPolicyNew",
         "CfTagCreate",
         "CloudMapNew",
+        "CloudMapTag",
         "CognitoRW",
         "CognitoTag",
         "Ec2Create",
@@ -123,6 +124,7 @@ EXPECTED_PERMISSION_SIDS = {
         "ReadStateBucket",
         "S3Locs",
         "TaggedRW",
+        "TaskDeregister",
         "TaskNew",
     ),
     "plan": (
@@ -144,6 +146,7 @@ EXPECTED_PERMISSION_SIDS = {
         "DestroyDemoEcrRepository",
         "DestroyDemoIamRoles",
         "DestroyTaggedDemoResources",
+        "DestroyTaskDefinitions",
         "DestroyUntaggableCloudFrontPolicies",
         "InventoryDemoResourcesGlobal",
         "ManageStateLockOnly",
@@ -156,12 +159,95 @@ EXPECTED_PERMISSION_SIDS = {
 EXPECTED_WILDCARD_SIDS = {
     "deploy": {
         "CfPolicyNew",
+        "CloudMapTag",
         "EcrAuth",
         "GlobalNew",
         "GlobalReads",
+        "TaskDeregister",
     },
     "plan": {"ReadDemoResources"},
-    "teardown": {"InventoryDemoResourcesGlobal"},
+    "teardown": {"DestroyTaskDefinitions", "InventoryDemoResourcesGlobal"},
+}
+INLINE_POLICY_MAX_CHARS = 10_240
+INLINE_POLICY_MIN_HEADROOM = 1_024
+MANAGED_POLICY_MAX_CHARS = 6_144
+MANAGED_POLICY_MIN_HEADROOM = 900
+MAX_MANAGED_POLICIES_PER_ROLE = 10
+SAFE_POLICY_PLACEHOLDERS = {
+    "${AWS_ACCOUNT_ID}": "000000000000",
+    "${AWS_REGION}": "us-east-1",
+    "${NAME_PREFIX}": "senai-pm",
+    "${TF_STATE_BUCKET}": "senai-pm-demo-state-000000000000-us-east-1",
+    "${TF_STATE_KEY}": "demo/sen-67/terraform.tfstate",
+}
+EXPECTED_POLICY_PUBLICATION = {
+    "plan": (
+        "inline",
+        (
+            (
+                "${NAME_PREFIX}-demo-plan-v1",
+                EXPECTED_PERMISSION_SIDS["plan"],
+            ),
+        ),
+    ),
+    "deploy": (
+        "customer-managed",
+        (
+            (
+                "${NAME_PREFIX}-demo-deploy-core-v1",
+                (
+                    "ApiSlr",
+                    "Buckets",
+                    "EcrAuth",
+                    "EcrCreate",
+                    "EcrReads",
+                    "EcsSlr",
+                    "GlobalReads",
+                    "IamCreate",
+                    "IamWrites",
+                    "ManageStateLockOnly",
+                    "ManageStateObject",
+                    "PassEcs",
+                    "ReadDemoIamRoles",
+                    "ReadStateBucket",
+                    "S3Locs",
+                ),
+            ),
+            (
+                "${NAME_PREFIX}-demo-deploy-runtime-v1",
+                (
+                    "AlarmCreate",
+                    "ApiCreate",
+                    "ApiWrites",
+                    "BudgetRW",
+                    "CfPolicyNew",
+                    "CfTagCreate",
+                    "CloudMapNew",
+                    "CloudMapTag",
+                    "CognitoRW",
+                    "CognitoTag",
+                    "Ec2Create",
+                    "EcrWrites",
+                    "EcsCreate",
+                    "GlobalNew",
+                    "LogCreate",
+                    "QueueCreate",
+                    "TaggedRW",
+                    "TaskDeregister",
+                    "TaskNew",
+                ),
+            ),
+        ),
+    ),
+    "teardown": (
+        "inline",
+        (
+            (
+                "${NAME_PREFIX}-demo-teardown-v1",
+                EXPECTED_PERMISSION_SIDS["teardown"],
+            ),
+        ),
+    ),
 }
 REQUIRED_PROVIDER_ACTIONS = {
     "deploy": {
@@ -318,6 +404,37 @@ def normalized_resources(value: object, *, context: str) -> list[str]:
     return resources
 
 
+def canonical_json(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def render_policy_template(policy: Mapping[str, Any]) -> Mapping[str, Any]:
+    rendered = canonical_json(policy)
+    for placeholder, replacement in SAFE_POLICY_PLACEHOLDERS.items():
+        rendered = rendered.replace(placeholder, replacement)
+    if "${" in rendered:
+        fail("Policy renderizada manteve placeholder fora da allowlist.")
+    return mapping(json.loads(rendered), context="policy renderizada")
+
+
+def render_policy_name(name: str) -> str:
+    rendered = name
+    for placeholder, replacement in SAFE_POLICY_PLACEHOLDERS.items():
+        rendered = rendered.replace(placeholder, replacement)
+    if (
+        "${" in rendered
+        or len(rendered) > 128
+        or re.fullmatch(r"[A-Za-z0-9+=,.@_-]+", rendered) is None
+    ):
+        fail("Nome renderizado da policy é inválido.")
+    return rendered
+
+
 def expected_subject(environment: str) -> str:
     return (
         "repo:HiRenan@107653306/"
@@ -395,6 +512,8 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
         fail(f"Policy {role_name} não pode ser vazia.")
     seen_sids: set[str] = set()
     all_actions: set[str] = set()
+    action_sids: dict[str, set[str]] = {}
+    statements_by_sid: dict[str, Mapping[str, Any]] = {}
     for raw_statement in statements:
         statement = mapping(raw_statement, context=f"policy {role_name}.statement")
         sid = statement.get("Sid")
@@ -418,6 +537,7 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
             context=f"policy {role_name}.effect",
         )
         seen_sids.add(sid)
+        statements_by_sid[sid] = statement
         actions = normalized_actions(
             statement.get("Action"), context=f"policy {role_name}.{sid}.actions"
         )
@@ -425,6 +545,8 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
             statement.get("Resource"), context=f"policy {role_name}.{sid}.resources"
         )
         all_actions.update(actions)
+        for action in actions:
+            action_sids.setdefault(action, set()).add(sid)
         if any("?" in resource for resource in resources):
             fail(f"Policy {role_name} possui wildcard ambíguo em Resource.")
         if (resources == ["*"]) != (sid in EXPECTED_WILDCARD_SIDS[role_name]):
@@ -436,29 +558,47 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
                 statement.get("Condition"),
                 context=f"policy {role_name}.{sid}.condition",
             )
-            exact_keys(
-                condition,
-                ("StringEquals",),
-                context=f"policy {role_name}.{sid}.condition",
-            )
-            equals = mapping(
-                condition.get("StringEquals"),
-                context=f"policy {role_name}.{sid}.condition.equals",
-            )
-            allowed_condition_keys = {
-                "aws:RequestTag/Profile",
-                "aws:ResourceTag/Profile",
-                "ecs:task-cpu",
-                "ecs:task-memory",
-                "iam:AWSServiceName",
-                "iam:PassedToService",
-            }
-            if (
-                not equals
-                or not set(equals) <= allowed_condition_keys
-                or any(type(value) is not str or not value for value in equals.values())
-            ):
-                fail(f"Policy {role_name} usa condição fora da matriz oficial.")
+            if not condition or not set(condition) <= {
+                "ForAllValues:StringEquals",
+                "NumericEquals",
+                "StringEquals",
+            }:
+                fail(f"Policy {role_name} usa operador fora da matriz oficial.")
+            for operator, raw_values in condition.items():
+                values = mapping(
+                    raw_values,
+                    context=f"policy {role_name}.{sid}.condition.{operator}",
+                )
+                if not values:
+                    fail(f"Policy {role_name} possui condição vazia.")
+                if operator == "StringEquals":
+                    allowed_keys = {
+                        "aws:RequestTag/Profile",
+                        "aws:ResourceTag/Profile",
+                        "iam:AWSServiceName",
+                        "iam:PassedToService",
+                    }
+                    if not set(values) <= allowed_keys or any(
+                        type(value) is not str or not value for value in values.values()
+                    ):
+                        fail(f"Policy {role_name} usa StringEquals fora da matriz.")
+                elif operator == "NumericEquals":
+                    if not set(values) <= {"ecs:task-cpu", "ecs:task-memory"} or any(
+                        type(value) is not str
+                        or re.fullmatch(r"[1-9][0-9]*", value) is None
+                        for value in values.values()
+                    ):
+                        fail(f"Policy {role_name} usa NumericEquals fora da matriz.")
+                else:
+                    exact_keys(
+                        values,
+                        ("aws:TagKeys",),
+                        context=f"policy {role_name}.{sid}.condition.{operator}",
+                    )
+                    text_list(
+                        values.get("aws:TagKeys"),
+                        context=f"policy {role_name}.{sid}.condition.tag-keys",
+                    )
         if service_linked_role is not None:
             if role_name != "deploy":
                 fail("Criação de service-linked role pertence somente ao deploy.")
@@ -484,16 +624,55 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
                 context=f"policy {role_name}.{sid}.service",
             )
 
+    deregister_sid = {
+        "deploy": "TaskDeregister",
+        "teardown": "DestroyTaskDefinitions",
+    }.get(role_name)
+    if deregister_sid is not None:
+        expected_deregister = {
+            "Action": "ecs:DeregisterTaskDefinition",
+            "Effect": "Allow",
+            "Resource": "*",
+            "Sid": deregister_sid,
+        }
+        if statements_by_sid.get(
+            deregister_sid
+        ) != expected_deregister or action_sids.get("ecs:DeregisterTaskDefinition") != {
+            deregister_sid
+        }:
+            fail(f"Policy {role_name} deve isolar o deregistro ECS sem condição.")
+    if role_name == "deploy":
+        expected_cloud_map_tag = {
+            "Action": "servicediscovery:TagResource",
+            "Condition": {
+                "ForAllValues:StringEquals": {"aws:TagKeys": ["Profile"]},
+                "StringEquals": {"aws:RequestTag/Profile": "aws-demo"},
+            },
+            "Effect": "Allow",
+            "Resource": "*",
+            "Sid": "CloudMapTag",
+        }
+        task_new = statements_by_sid.get("TaskNew")
+        if (
+            statements_by_sid.get("CloudMapTag") != expected_cloud_map_tag
+            or action_sids.get("servicediscovery:TagResource") != {"CloudMapTag"}
+            or task_new is None
+            or task_new.get("Condition")
+            != {
+                "NumericEquals": {
+                    "ecs:task-cpu": "256",
+                    "ecs:task-memory": "512",
+                },
+                "StringEquals": {"aws:RequestTag/Profile": "aws-demo"},
+            }
+        ):
+            fail("Policy deploy diverge das condições AWS suportadas.")
+    if "resourcegroupstaggingapi:GetResources" in all_actions:
+        fail("Policy usa prefixo IAM inválido para o inventário por tags.")
+
     if tuple(sorted(seen_sids)) != EXPECTED_PERMISSION_SIDS[role_name]:
         fail(f"Policy {role_name} diverge dos Sids exatos aprovados.")
-    canonical = json.dumps(
-        policy,
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    if len(canonical) > 10_240:
-        fail(f"Policy {role_name} excede o limite agregado de inline policies da role.")
+    canonical = canonical_json(policy).encode("utf-8")
     fingerprint = hashlib.sha256(canonical).hexdigest()
     if fingerprint != EXPECTED_PERMISSION_POLICY_SHA256[role_name]:
         fail(f"Policy {role_name} diverge dos pares exatos de Sid, ações e recursos.")
@@ -564,8 +743,187 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
         }
         if forbidden:
             fail("Role de teardown possui criação ou publicação.")
-        if "resourcegroupstaggingapi:GetResources" not in all_actions:
+        if "tag:GetResources" not in all_actions:
             fail("Role de teardown não cobre o inventário por tags.")
+
+
+def audit_policy_publication(
+    raw_publication: object,
+    *,
+    role_name: str,
+    raw_policy: object,
+) -> list[dict[str, Any]]:
+    policy = mapping(raw_policy, context=f"policy {role_name}")
+    statements = sequence(policy.get("Statement"), context=f"policy {role_name}")
+    statements_by_sid: dict[str, Mapping[str, Any]] = {}
+    for raw_statement in statements:
+        statement = mapping(raw_statement, context=f"policy {role_name}.statement")
+        sid = statement.get("Sid")
+        if type(sid) is not str or not sid:
+            fail(f"Policy {role_name} possui Sid inválido na publicação.")
+        statements_by_sid[sid] = statement
+
+    publication = mapping(
+        raw_publication,
+        context=f"publicação da policy {role_name}",
+    )
+    exact_keys(
+        publication,
+        ("documents", "mode"),
+        context=f"publicação da policy {role_name}",
+    )
+    expected_mode, expected_documents = EXPECTED_POLICY_PUBLICATION[role_name]
+    exact_text(
+        publication.get("mode"),
+        expected_mode,
+        context=f"modo de publicação {role_name}",
+    )
+    documents = sequence(
+        publication.get("documents"),
+        context=f"documentos publicados {role_name}",
+    )
+    if len(documents) != len(expected_documents):
+        fail(f"Policy {role_name} diverge do número de documentos versionados.")
+    if expected_mode == "inline" and len(documents) != 1:
+        fail("Policy inline deve possuir um único documento.")
+    if (
+        expected_mode == "customer-managed"
+        and len(documents) > MAX_MANAGED_POLICIES_PER_ROLE
+    ):
+        fail("Publicação excede o limite padrão de policies por role.")
+
+    covered_sids: set[str] = set()
+    reports: list[dict[str, Any]] = []
+    for raw_document, (expected_name, expected_sids) in zip(
+        documents,
+        expected_documents,
+        strict=True,
+    ):
+        document = mapping(
+            raw_document,
+            context=f"documento publicado {role_name}",
+        )
+        exact_keys(
+            document,
+            ("name", "sids"),
+            context=f"documento publicado {role_name}",
+        )
+        exact_text(
+            document.get("name"),
+            expected_name,
+            context=f"nome da policy {role_name}",
+        )
+        sids = text_list(
+            document.get("sids"),
+            context=f"Sids publicados {role_name}",
+        )
+        if tuple(sids) != expected_sids or covered_sids & set(sids):
+            fail(f"Policy {role_name} diverge do particionamento fechado.")
+        covered_sids.update(sids)
+        selected_sids = set(sids)
+        selected_statements = [
+            statement
+            for statement in statements_by_sid.values()
+            if statement.get("Sid") in selected_sids
+        ]
+        if len(selected_statements) != len(sids):
+            fail(f"Policy {role_name} referencia Sid ausente na publicação.")
+        template = {
+            "Statement": selected_statements,
+            "Version": "2012-10-17",
+        }
+        rendered_policy = render_policy_template(template)
+        rendered_name = render_policy_name(expected_name)
+        size = len(canonical_json(rendered_policy))
+        if expected_mode == "inline":
+            limit = INLINE_POLICY_MAX_CHARS
+            minimum_headroom = INLINE_POLICY_MIN_HEADROOM
+        else:
+            limit = MANAGED_POLICY_MAX_CHARS
+            minimum_headroom = MANAGED_POLICY_MIN_HEADROOM
+        headroom = limit - size
+        if headroom < minimum_headroom:
+            fail(f"Policy {role_name} não preserva a margem de publicação aprovada.")
+        reports.append(
+            {
+                "headroom": headroom,
+                "limit": limit,
+                "mode": expected_mode,
+                "name": rendered_name,
+                "policy": rendered_policy,
+                "role": role_name,
+                "size": size,
+            }
+        )
+
+    if covered_sids != set(statements_by_sid):
+        fail(f"Policy {role_name} não publica todos os Sids exatamente uma vez.")
+    return reports
+
+
+def rendered_permission_documents(
+    contract: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    roles = mapping(contract.get("roles"), context="roles")
+    reports: list[dict[str, Any]] = []
+    for role_name in EXPECTED_ROLE_NAMES:
+        role = mapping(roles.get(role_name), context=f"role {role_name}")
+        reports.extend(
+            audit_policy_publication(
+                role.get("permission_policy_publication"),
+                role_name=role_name,
+                raw_policy=role.get("permission_policy"),
+            )
+        )
+    return reports
+
+
+def write_rendered_policies(
+    reports: list[dict[str, Any]],
+    directory: Path,
+) -> None:
+    manifest_documents: list[dict[str, object]] = []
+    try:
+        directory.mkdir(parents=True, exist_ok=False)
+        for report in reports:
+            role_name = cast(str, report["role"])
+            policy_name = cast(str, report["name"])
+            policy = mapping(
+                report["policy"],
+                context=f"policy renderizada {role_name}",
+            )
+            canonical = canonical_json(policy)
+            filename = f"{role_name}-{policy_name}.json"
+            (directory / filename).write_text(
+                json.dumps(policy, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            manifest_documents.append(
+                {
+                    "file": filename,
+                    "headroom": cast(int, report["headroom"]),
+                    "limit": cast(int, report["limit"]),
+                    "mode": cast(str, report["mode"]),
+                    "name": policy_name,
+                    "role": role_name,
+                    "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                    "size": cast(int, report["size"]),
+                }
+            )
+        manifest = {
+            "documents": manifest_documents,
+            "schema_version": "aws-demo-policy-publication.v1",
+        }
+        (directory / "manifest.v1.json").write_text(
+            json.dumps(manifest, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    except OSError:
+        raise DeliveryPolicyError(
+            "Diretório de policies renderizadas não pôde ser criado."
+        ) from None
 
 
 def audit_contract(contract: Mapping[str, Any]) -> dict[str, str]:
@@ -673,6 +1031,7 @@ def audit_contract(contract: Mapping[str, Any]) -> dict[str, str]:
             (
                 "environment",
                 "permission_policy",
+                "permission_policy_publication",
                 "role_variable",
                 "subject",
                 "trust_policy",
@@ -698,6 +1057,11 @@ def audit_contract(contract: Mapping[str, Any]) -> dict[str, str]:
             expected_environment=environment,
         )
         audit_permission_policy(role.get("permission_policy"), role_name=role_name)
+        audit_policy_publication(
+            role.get("permission_policy_publication"),
+            role_name=role_name,
+            raw_policy=role.get("permission_policy"),
+        )
     return action_pins
 
 
@@ -1046,6 +1410,11 @@ def parse_args() -> argparse.Namespace:
         description="Audita o contrato OIDC/IAM e os workflows AWS da demo."
     )
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument(
+        "--render-directory",
+        type=Path,
+        help="Gera documentos IAM sanitizados em um diretório novo.",
+    )
     parser.add_argument("--repository-root", type=Path, default=REPOSITORY_ROOT)
     return parser.parse_args()
 
@@ -1055,10 +1424,18 @@ def main() -> int:
     contract = load_json(args.contract.resolve(strict=True))
     action_pins = audit_contract(contract)
     audit_workflows(action_pins, args.repository_root.resolve(strict=True))
+    reports = rendered_permission_documents(contract)
+    if args.render_directory is not None:
+        write_rendered_policies(reports, args.render_directory.resolve())
+    sizes = "; ".join(
+        f"{report['role']}/{report['name']}={report['size']}/{report['limit']}"
+        for report in reports
+    )
     print(
         "Política de entrega aprovada: três subjects imutáveis, permissions "
         "fechadas, actions por SHA e operações AWS exclusivamente manuais."
     )
+    print(f"Policies renderizadas e dimensionadas: {sizes}.")
     return 0
 
 

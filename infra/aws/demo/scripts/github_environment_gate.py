@@ -13,6 +13,8 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 EXPECTED_REPOSITORY = "HiRenan/senai-prescriptive-maintenance"
+EXPECTED_REVIEWER_ID = 107653306
+EXPECTED_REVIEWER_LOGIN = "HiRenan"
 EXPECTED_ENVIRONMENTS = {
     "aws-demo-deploy",
     "aws-demo-plan",
@@ -80,36 +82,38 @@ def audit_environment(
     document = mapping(environment, context="environment GitHub")
     if document.get("name") != expected_environment:
         fail("API GitHub devolveu environment diferente do solicitado.")
+    if document.get("can_admins_bypass") is not False:
+        fail("Environment deve desabilitar o bypass administrativo.")
 
     rules = sequence(document.get("protection_rules"), context="protection_rules")
+    normalized_rules = [mapping(rule, context="regra de proteção") for rule in rules]
+    rule_types = [rule.get("type") for rule in normalized_rules]
+    if any(type(rule_type) is not str for rule_type in rule_types) or sorted(
+        cast(list[str], rule_types)
+    ) != [
+        "branch_policy",
+        "required_reviewers",
+    ]:
+        fail("Environment deve possuir somente reviewer e branch policy exatos.")
     reviewer_rules = [
-        mapping(rule, context="regra de proteção")
-        for rule in rules
-        if mapping(rule, context="regra de proteção").get("type")
-        == "required_reviewers"
+        rule for rule in normalized_rules if rule.get("type") == "required_reviewers"
     ]
     if len(reviewer_rules) != 1:
         fail("Environment exige exatamente uma regra de reviewers.")
     reviewer_rule = reviewer_rules[0]
-    if reviewer_rule.get("prevent_self_review") is not True:
-        fail("Environment deve impedir autoaprovação do dispatch.")
+    if reviewer_rule.get("prevent_self_review") is not False:
+        fail("Environment de operador único deve permitir a segunda aprovação.")
     reviewers = sequence(reviewer_rule.get("reviewers"), context="reviewers")
-    if not reviewers or len(reviewers) > 6:
-        fail("Environment deve possuir entre um e seis reviewers.")
-    reviewer_ids: set[tuple[str, int]] = set()
-    for raw_reviewer in reviewers:
-        reviewer = mapping(raw_reviewer, context="reviewer")
-        reviewer_type = reviewer.get("type")
-        identity = mapping(reviewer.get("reviewer"), context="identidade do reviewer")
-        reviewer_id = identity.get("id")
-        if (
-            reviewer_type not in {"User", "Team"}
-            or type(reviewer_id) is not int
-            or reviewer_id <= 0
-            or (cast(str, reviewer_type), reviewer_id) in reviewer_ids
-        ):
-            fail("Environment possui reviewer inválido ou duplicado.")
-        reviewer_ids.add((cast(str, reviewer_type), reviewer_id))
+    if len(reviewers) != 1:
+        fail("Environment deve possuir somente o operador aprovado.")
+    reviewer = mapping(reviewers[0], context="reviewer")
+    identity = mapping(reviewer.get("reviewer"), context="identidade do reviewer")
+    if (
+        reviewer.get("type") != "User"
+        or identity.get("id") != EXPECTED_REVIEWER_ID
+        or identity.get("login") != EXPECTED_REVIEWER_LOGIN
+    ):
+        fail("Environment possui reviewer diferente do operador aprovado.")
 
     branch_policy = mapping(
         document.get("deployment_branch_policy"),
@@ -199,7 +203,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     run_preflight(args.environment, os.environ)
-    print("Environment GitHub aprovado por reviewers e branch main exatos.")
+    print(
+        "Environment GitHub aprovado para operador único, sem bypass e com main exata."
+    )
     return 0
 
 
