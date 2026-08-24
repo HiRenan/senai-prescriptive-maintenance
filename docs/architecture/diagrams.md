@@ -1,9 +1,9 @@
 # Diagramas da arquitetura atual
 
-- Baseline documental: `origin/develop` em `00af0e3`
+- Baseline documental: `origin/develop` em `7a05487`
 - Data de referência: 2026-08-23
-- Escopo: componentes versionados; nenhuma capacidade da interface web em
-  desenvolvimento concorrente está representada
+- Escopo: componentes versionados, incluindo o painel de análise servido por
+  `apps/web`; capacidades ainda não integradas não estão representadas
 
 As setas contínuas representam o caminho executável no contexto indicado.
 Setas tracejadas representam uma composição disponível somente por injeção ou
@@ -68,9 +68,9 @@ flowchart TB
   subgraph Compose[Perfil local em Docker Compose]
     LocalAPI[API em 127.0.0.1:8000]
     Database[(PostgreSQL 17 e pgvector 0.8.6)]
-    Web[Node em 127.0.0.1:3000; somente liveness]
+    Web[Node em 127.0.0.1:3000; painel de análise e proxy]
     LocalAPI -->|conexão interna e readiness| Database
-    Web -. depende da API saudável .-> LocalAPI
+    Web -->|POST /api/analysis encaminhado| LocalAPI
   end
 
   Developer -->|poe smoke| Uvicorn
@@ -83,8 +83,10 @@ flowchart TB
 No perfil offline, a readiness não consulta dependências externas. No Compose,
 as três portas host ficam presas a loopback; API e web usam filesystem raiz
 read-only, `/tmp` efêmero, nenhuma capability Linux e
-`no-new-privileges`. O serviço web responde somente à liveness e não contém UI.
-O smoke não inicia nem encerra contêineres.
+`no-new-privileges`. O serviço web responde à liveness, serve o painel e
+encaminha somente `POST /api/analysis` para a API, de modo que o navegador
+permanece na mesma origem da página. O smoke não inicia nem encerra
+contêineres.
 
 ## Diagrama AWS
 
@@ -144,7 +146,7 @@ inventário, estimativa e pendências live estão na
 - aprovação automática de manutenção;
 - upload e armazenamento de bytes pela API;
 - autenticação no runtime local;
-- uma interface web;
+- gestão documental, histórico de análises ou autenticação no painel web;
 - deploy ou operação AWS;
 - equivalência entre fakes de CI e um provider real.
 

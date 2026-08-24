@@ -55,6 +55,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
+      API_BASE_URL: http://api:8000
       HOST: 0.0.0.0
       NODE_ENV: production
       PORT: 3000

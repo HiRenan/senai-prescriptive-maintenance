@@ -65,6 +65,8 @@ CONTEXT_SPECS: Final = (
                 "pnpm-workspace.yaml",
             }
         ),
+        source_root=Path("apps/web/src"),
+        source_suffixes=frozenset({".css", ".html", ".js"}),
     ),
 )
 

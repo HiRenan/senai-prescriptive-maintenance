@@ -1,9 +1,9 @@
 # Infraestrutura local
 
 O ambiente local usa uma única topologia Compose com PostgreSQL 17/pgvector,
-API e a fronteira web sem interface. Ele não representa credenciais nem dados
-de produção e não inicia filas, armazenamento de objetos ou recursos de nuvem.
-O perfil AWS declarativo e não aplicado vive separadamente em `aws/demo`.
+API e o painel de análise. Ele não representa credenciais nem dados de produção
+e não inicia filas, armazenamento de objetos ou recursos de nuvem. O perfil AWS
+declarativo e não aplicado vive separadamente em `aws/demo`.
 
 ## Pré-requisitos
 
@@ -100,8 +100,9 @@ export PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT=53000
 As portas internas permanecem `5432`, `8000` e `3000`. A API recebe uma URL
 PostgreSQL exclusivamente local e fictícia apontada ao serviço `postgres`; a
 readiness abre uma conexão curta e executa `SELECT 1`, sem reter a conexão. A
-liveness da API continua restrita ao processo. A web expõe somente sua liveness
-e continua sem UI.
+liveness da API continua restrita ao processo. A web expõe sua liveness, serve
+o painel de análise e encaminha `POST /api/analysis` para `POST /analysis` da
+API, indicada por `API_BASE_URL`.
 
 API e web usam raiz somente leitura, `/tmp` efêmero, todas as capabilities
 removidas e `no-new-privileges`. O healthcheck da API usa readiness e, no perfil
@@ -126,8 +127,9 @@ node:22-alpine3.22@sha256:cd7807368cf24826297cbad5dca1a44972ccfd770647db52a8c758
 
 A API instala somente o grupo de produção por `uv sync --frozen --no-dev`; a
 web confirma o workspace por `pnpm install --frozen-lockfile --prod` e não tem
-dependências de aplicação. Cada Dockerfile possui uma allowlist específica; a
-API inclui também o README exigido pelos metadados do pacote. A tarefa
+dependências de aplicação; sua imagem carrega apenas o processo HTTP e os
+módulos, o estilo e o documento do painel. Cada Dockerfile possui uma allowlist
+específica; a API inclui também o README exigido pelos metadados do pacote. A tarefa
 `applications-audit` exporta o contexto filtrado que o BuildKit recebeu e
 executa auditorias dentro dos builders. `.env`, Git, dados, materiais originais,
 caches, testes, snapshots OpenAPI, READMEs desnecessários e ferramentas de

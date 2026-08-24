@@ -69,6 +69,24 @@ cmd = "pyright"
 help = "Executa os testes Pytest com cobertura."
 cmd = "pytest"
 
+[tool.poe.tasks.web-contract]
+help = "Gera o contrato web a partir do snapshot OpenAPI v1."
+cmd = "python scripts/generate_web_contract.py"
+
+[tool.poe.tasks.web-contract-check]
+help = "Verifica se o contrato web rastreado corresponde ao OpenAPI v1."
+cmd = "python scripts/generate_web_contract.py --check"
+
+[tool.poe.tasks.web-typecheck]
+help = "Executa a verificação de tipos TypeScript sobre as fontes da web."
+cmd = "corepack pnpm exec tsc --noEmit"
+executor = { type = "simple" }
+
+[tool.poe.tasks.web-test]
+help = "Executa os testes essenciais do fluxo web com o runner do Node."
+cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web test"
+executor = { type = "simple" }
+
 [tool.poe.tasks.check]
 help = "Executa todos os checks; não aceita argumentos adicionais."
 sequence = [
@@ -76,6 +94,9 @@ sequence = [
   "lint",
   "typecheck",
   "test",
+  "web-contract-check",
+  "web-typecheck",
+  "web-test",
 ]
 
 [tool.poe.tasks.golden-e2e]
