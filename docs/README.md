@@ -21,6 +21,7 @@ sem repetir extensamente a mesma orientação.
 | [`data/banner-quality-policy.md`](data/banner-quality-policy.md) | Visão derivada da política de qualidade e comparação agregada com a baseline rastreada. |
 | [`data/banner-data-card.md`](data/banner-data-card.md) | Proveniência, composição, uso, privacidade e limitações do dataset canônico. |
 | [`validation/foundation-clean-room.md`](validation/foundation-clean-room.md) | Evidências históricas da validação da Foundation em clone público limpo e adendo sobre o fluxo de promoção. |
+| [`validation/public-repository-clean-room.md`](validation/public-repository-clean-room.md) | Auditoria final SEN-71 da entrega pública em clone HTTPS anônimo, completo e isolado. |
 | [`validation/data-pipeline.md`](validation/data-pipeline.md) | Encerramento da EPIC 2: decisões, gates e evidências sanitizadas do pipeline canônico SEN-41. |
 | [`validation/document-pipeline.md`](validation/document-pipeline.md) | Encerramento do recorte MVP da SEN-4: extração, indexação, ciclo de vida e recuperação documental governada. |
 | [`validation/dynamic-rag-e2e.md`](validation/dynamic-rag-e2e.md) | Roteiro e evidência sintética da jornada dinâmica de chunk, aprovação, ranking e citação SEN-77. |
