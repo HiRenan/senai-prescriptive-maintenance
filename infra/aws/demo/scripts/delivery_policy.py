@@ -109,7 +109,7 @@ BUILDX_NAME_EXPRESSION = "sen68-${{ github.run_id }}-${{ github.run_attempt }}"
 BUILDX_OUTPUT_EXPRESSION = "${{ steps.buildx.outputs.name }}"
 PROTECTED_MAIN_REVALIDATION = "Revalidate the current main revision after approval"
 EXPECTED_PERMISSION_POLICY_SHA256 = {
-    "deploy": "61ec9c25ce30ef744039408575f6053a41e79a54cf8d9b5a206bb7a53a429d27",
+    "deploy": "1865a2fb9af0fa45b62034c91807a241850231bcf434c5aaa29067164a7f5d3d",
     "plan": "5668b6259afb11b266bd82ea3ad10015f1b0bb70ec42f34d525ff0557b7c64b5",
     "teardown": "b790abe34cb3349db1b3962e4329b2e49abb81379cbebbdde94d0958d3c4c92b",
 }
@@ -129,7 +129,9 @@ EXPECTED_PERMISSION_SIDS = {
         "CognitoDomainRW",
         "CognitoRW",
         "CognitoTag",
-        "Ec2Create",
+        "Ec2CreateInTaggedVpc",
+        "Ec2CreateTagged",
+        "Ec2EndpointInTaggedNetwork",
         "EcrAuth",
         "EcrCreate",
         "EcrReads",
@@ -249,6 +251,14 @@ EXPECTED_POLICY_PUBLICATION = {
                 ),
             ),
             (
+                "${NAME_PREFIX}-demo-deploy-network-v1",
+                (
+                    "Ec2CreateInTaggedVpc",
+                    "Ec2CreateTagged",
+                    "Ec2EndpointInTaggedNetwork",
+                ),
+            ),
+            (
                 "${NAME_PREFIX}-demo-deploy-runtime-v1",
                 (
                     "AlarmCreate",
@@ -262,7 +272,6 @@ EXPECTED_POLICY_PUBLICATION = {
                     "CloudMapTag",
                     "CognitoRW",
                     "CognitoTag",
-                    "Ec2Create",
                     "EcrWrites",
                     "EcsCreate",
                     "GlobalNew",
@@ -700,6 +709,56 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
         }:
             fail(f"Policy {role_name} deve isolar o deregistro ECS sem condição.")
     if role_name == "deploy":
+        expected_ec2_statements = {
+            "Ec2CreateInTaggedVpc": {
+                "Action": [
+                    "ec2:CreateRouteTable",
+                    "ec2:CreateSecurityGroup",
+                    "ec2:CreateSubnet",
+                    "ec2:CreateVpcEndpoint",
+                ],
+                "Condition": {"StringEquals": {"aws:ResourceTag/Profile": "aws-demo"}},
+                "Effect": "Allow",
+                "Resource": "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:vpc/*",
+                "Sid": "Ec2CreateInTaggedVpc",
+            },
+            "Ec2CreateTagged": {
+                "Action": [
+                    "ec2:CreateRouteTable",
+                    "ec2:CreateSecurityGroup",
+                    "ec2:CreateSubnet",
+                    "ec2:CreateTags",
+                    "ec2:CreateVpc",
+                    "ec2:CreateVpcEndpoint",
+                ],
+                "Condition": {"StringEquals": {"aws:RequestTag/Profile": "aws-demo"}},
+                "Effect": "Allow",
+                "Resource": [
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:route-table/*",
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:security-group/*",
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:subnet/*",
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:vpc-endpoint/*",
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:vpc/*",
+                ],
+                "Sid": "Ec2CreateTagged",
+            },
+            "Ec2EndpointInTaggedNetwork": {
+                "Action": "ec2:CreateVpcEndpoint",
+                "Condition": {"StringEquals": {"aws:ResourceTag/Profile": "aws-demo"}},
+                "Effect": "Allow",
+                "Resource": [
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:route-table/*",
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:security-group/*",
+                    "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:subnet/*",
+                ],
+                "Sid": "Ec2EndpointInTaggedNetwork",
+            },
+        }
+        if any(
+            statements_by_sid.get(sid) != statement
+            for sid, statement in expected_ec2_statements.items()
+        ):
+            fail("Policy deploy diverge da autorização EC2 por ciclo de tags.")
         expected_cloud_map_tag = {
             "Action": "servicediscovery:TagResource",
             "Condition": {
