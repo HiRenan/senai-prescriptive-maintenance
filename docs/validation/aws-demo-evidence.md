@@ -5,8 +5,8 @@
 - Base avaliada:
   `3bf3a78126047d9eceff7692b942ff0406c50651` em `origin/develop`
 - Terraform: `1.15.9` para `windows_amd64`
-- Resultado: arquitetura e gates aprovados offline; nenhuma evidência live foi
-  produzida
+- Resultado do snapshot SEN-69: arquitetura e gates aprovados offline; nenhuma
+  evidência live havia sido produzida
 
 Este relatório confronta o Terraform da SEN-67, a automação protegida da SEN-68,
 o diagrama e a documentação. Ele separa configuração versionada, prova executada
@@ -18,6 +18,14 @@ localmente e capacidade ainda dependente de autorização.
 > validado apenas offline; apply, publicação, login humano e teardown live
 > continuam como evidência pendente da SEN-74.
 
+> **Nota operacional (SEN-82, 2026-08-24):** o run `32725423445` confirmou o
+> preflight protegido e a assunção OIDC da role de plan. A action fixada por SHA
+> entregou `aws-expiration` como JSON-string, e o controlador recusou o valor
+> antes do Terraform. State e Budget permaneceram ausentes; não houve plan,
+> `apply` ou deploy. Os logs foram removidos depois de exporem account ID e role
+> ARN nos inputs da action, sem que esses valores fossem preservados neste
+> relatório.
+
 Nenhuma das variáveis usuais de credencial AWS estava definida. Não foram
 executados `apply`, deploy, smoke remoto, teardown, consulta de billing ou
 alteração de GitHub environment. Os materiais originais não foram acessados.
@@ -27,6 +35,7 @@ alteração de GitHub environment. Os materiais originais não foram acessados.
 | Estado | Evidência | Conclusão permitida |
 | --- | --- | --- |
 | **Validado offline** | `fmt`, `init -backend=false`, `validate`, plano sintético isolado, auditoria do plano e regressões de segurança e entrega | O código versionado produz um plano fechado, privado e removível sob placeholders; os casos adversariais cobertos são recusados. |
+| **Validado live parcialmente** | preflight e OIDC do run `32725423445` | O environment e a trust da role de plan permitiram credencial temporária; a execução parou antes do Terraform e não comprova state, Budget, plan ou deploy. |
 | **Planejado e versionado** | Workflows de plan, fundação/runtime e teardown; contrato OIDC/IAM; smoke e inventário pós-destroy | Os gates existem, mas não comprovam configuração efetiva no GitHub nem aceitação pela AWS. |
 | **Dependente do responsável** | Conta exclusiva, state S3, OIDC, três roles, três environments com reviewers, domínio, certificado, identidade de smoke e autorização financeira | Somente depois desse bootstrap podem existir plan remoto, recursos, medição, smoke autenticado e prova live de teardown. |
 
@@ -36,6 +45,17 @@ executa validações locais. Os workflows capazes de consultar ou alterar a AWS
 usam `workflow_dispatch`, exigem o HEAD atual de `main`, SHA completo,
 confirmação literal, environment separado e role temporária própria. As
 operações mutáveis compartilham `concurrency: aws-demo-state`.
+
+A SEN-82 move account ID, bucket de state, certificado ARN e a role ARN exclusiva
+de cada operação para segredos (`secrets`) do respectivo environment. Região, AZ
+e domínio permanecem variáveis (`vars`); e-mail do Budget e token de smoke
+continuam secrets. Essa distinção aciona a máscara de valores do GitHub para
+identificadores que não podem aparecer no log, sem tratá-los como credenciais AWS.
+Nenhum secret é
+referenciado por checkout, preflight ou preparação anterior à action OIDC; a
+action recebe somente account ID e sua role, e os steps operacionais recebem
+somente o subconjunto necessário. Esta mudança é contrato versionado e não alterou
+os environments do GitHub.
 
 ## Topologia confrontada
 
@@ -79,7 +99,7 @@ com contagem `1`, não à validação offline ou à fundação vazia.
 | Controle | Resultado offline |
 | --- | --- |
 | IAM da aplicação | A role de execução limita-se a pull do ECR e logs; a role da API limita-se a SQS, objetos dos buckets exatos e Bedrock opt-in; a role de worker é apenas um contrato sem compute. |
-| OIDC da entrega | Três subjects imutáveis e exclusivos para plan, deploy e teardown; trust exige o provider GitHub e `aud = sts.amazonaws.com`. Assunção real não foi validada. |
+| OIDC da entrega | Três subjects imutáveis e exclusivos para plan, deploy e teardown; trust exige o provider GitHub e `aud = sts.amazonaws.com`. A role de plan foi assumida no run `32725423445`; deploy e teardown não foram exercitados live. |
 | Buckets e frontend | Três buckets com Public Access Block, Object Ownership, SSE-S3, versionamento e lifecycle; frontend lido somente pelo CloudFront/OAC. |
 | Cognito e CORS | Usuário apenas administrativo, client público sem secret, rota `$default` com JWT e uma origem CORS HTTPS exata. Nenhum usuário foi criado. |
 | Rede e criptografia | Task sem IP público; regras por security group; ECR AES-256, SQS SSE gerenciada e S3 SSE-S3. O perfil efêmero não cria chaves KMS. |
@@ -204,9 +224,10 @@ uv run --frozen python infra/aws/demo/scripts/delivery_regression.py
 ## Limites e decisão
 
 A validação offline encerra os critérios reproduzíveis da SEN-69, mas não
-autoriza implantação. A execução live permanece bloqueada até o responsável
-fornecer conta exclusiva, bootstrap, reviewers, credenciais temporárias,
-aprovação de custo e autorização explícita. Depois disso, a evidência final
-precisa registrar plan remoto, inventário sanitizado pós-apply, smoke
-autenticado, teardown pelo mesmo state e inventário negativo; uma falha não pode
-ser convertida em alegação de sucesso.
+autoriza implantação. A evidência parcial do run `32725423445` também não
+autoriza nova tentativa: antes de outro dispatch, o responsável precisa confirmar
+novamente conta exclusiva, ausência de state e inventário, secrets e vars dos
+environments, aprovação de custo e autorização explícita. Depois disso, a
+evidência final precisa registrar plan remoto, inventário sanitizado pós-apply,
+smoke autenticado, teardown pelo mesmo state e inventário negativo; uma falha
+não pode ser convertida em alegação de sucesso.

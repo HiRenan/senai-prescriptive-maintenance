@@ -1,12 +1,14 @@
 # Entrega protegida do perfil AWS demo
 
-Este diretório registra o contrato de segurança e a operação automatizada da
-SEN-68. O código prepara validação, plano, deploy e teardown, mas **nenhuma dessas
-operações foi executada na AWS nesta tarefa**. Roles, provedor OIDC, backend S3,
-domínio, certificado, usuário de smoke e valores reais continuam sendo bootstrap
-externo autorizado; o contrato não cria nem altera esses controles. Os três
-environments e o reviewer também são externos, embora sua configuração efetiva
-tenha sido validada somente para leitura em 23/08/2026.
+Este diretório registra o contrato de segurança e a operação automatizada das
+SEN-68 e SEN-82. No run `32725423445`, o preflight protegido e a assunção OIDC
+passaram, mas o controlador recusou a expiração serializada como JSON-string
+antes de iniciar o Terraform. State e Budget permaneceram ausentes; não houve
+plan remoto, `apply`, deploy ou teardown. Os logs foram removidos depois que os
+inputs da action expuseram identificadores, e esta correção não realizou nova
+tentativa live. Roles, provedor OIDC, backend S3, domínio, certificado, usuário de
+smoke e valores reais continuam sendo bootstrap externo autorizado; o contrato
+não cria nem altera esses controles.
 
 O contrato público [`delivery-contract.v1.json`](delivery-contract.v1.json) usa
 somente placeholders e fixa repositório, ref, subjects OIDC, referências completas
@@ -74,10 +76,15 @@ Somente foundation e teardown tratam essa ausência como estado operacional
 válido; deploy e plan fecham o gate. Em especial, plan não possui um branch
 `fresh` e não serve para inicializar o backend.
 
-Variáveis operacionais e segredos existem somente nos dois steps finais e
-mutuamente exclusivos. O step de fundação não recebe baseline SEN-46 nem token
-de smoke; o step de runtime recebe ambos. Checkout, setups, Buildx e a própria
-assunção OIDC não recebem o token nem o e-mail do Budget.
+Os identificadores que não podem aparecer no log são segredos (`secrets`) do
+environment. A primeira referência a secret ocorre na action OIDC e entrega
+somente account ID e a role exclusiva da operação. State bucket, certificado,
+account ID e e-mail do Budget chegam depois apenas aos steps operacionais; o token
+de smoke chega apenas ao runtime. Checkout, preflight, revalidação de `main`,
+setups e Buildx não referenciam secret algum. Região, AZ e domínio permanecem
+variáveis (`vars`) porque não identificam conta, role, backend ou certificado. O
+step de fundação não recebe baseline SEN-46 nem token de smoke; o step de runtime
+recebe ambos.
 
 Buildx existe somente no modo runtime. O workflow cria um `DOCKER_CONFIG`
 dedicado em `runner.temp`, identificado por `run_id` e `run_attempt`, entrega o
@@ -127,8 +134,12 @@ Plan usa sessão STS de 3.600 segundos para um job limitado a 45 minutos. Deploy
 e teardown usam 7.200 segundos para jobs limitados a 90 minutos; suas roles
 externas precisam ter `MaxSessionDuration` de pelo menos 7.200 segundos, enquanto
 a role de plan precisa aceitar pelo menos 3.600. O workflow captura o
-`aws-expiration` emitido pela action OIDC, o controlador recusa uma duração maior
-que 7.300 segundos e exige margem de cinco minutos mais a janela inteira da
+`aws-expiration` emitido pela action OIDC. O controlador aceita o ISO UTC bruto
+já suportado e também exatamente uma JSON-string canônica com esse mesmo valor,
+forma observada na action fixada por SHA. Whitespace, escapes, JSON de outro tipo,
+dupla serialização e formatos não UTC são recusados antes do Terraform, sem ecoar
+a entrada. Depois da normalização, o controlador preserva a recusa de duração
+maior que 7.300 segundos e exige margem de cinco minutos mais a janela inteira da
 próxima mutação. Assim, nenhum `apply` começa quando a sessão poderia terminar
 antes do timeout restante do job. O cliente Cognito emite access e ID tokens por
 duas horas; o controlador só aceita access token com `iat`/`exp` canônicos,
@@ -464,20 +475,26 @@ repositório:
    `prevent_self_review = false`, `can_admins_bypass = false` e uma única custom
    deployment branch literal `main`;
 4. domínio DNS e certificado ACM válido de `us-east-1`, já exigidos pela SEN-67;
-5. variáveis comuns abaixo e o secret de e-mail do Budget em cada environment
-   aplicável.
+5. variáveis (`vars`) e segredos (`secrets`) abaixo em cada environment aplicável.
 
 | Tipo | Nome | Uso |
 | --- | --- | --- |
-| variável | `AWS_DEMO_ACCOUNT_ID` | conta de destino com 12 dígitos |
+| secret | `AWS_DEMO_ACCOUNT_ID` | conta de destino com 12 dígitos |
 | variável | `AWS_DEMO_REGION` | região da demo |
 | variável | `AWS_DEMO_AVAILABILITY_ZONE` | AZ única aprovada |
-| variável | `AWS_DEMO_STATE_BUCKET` | bucket externo de state |
+| secret | `AWS_DEMO_STATE_BUCKET` | bucket externo de state |
 | variável | `AWS_DEMO_FRONTEND_DOMAIN_NAME` | domínio HTTPS real |
-| variável | `AWS_DEMO_FRONTEND_CERTIFICATE_ARN` | certificado ACM aprovado |
-| variável por environment | `AWS_DEMO_PLAN_ROLE_ARN`, `AWS_DEMO_DEPLOY_ROLE_ARN` ou `AWS_DEMO_TEARDOWN_ROLE_ARN` | role exclusiva da operação |
+| secret | `AWS_DEMO_FRONTEND_CERTIFICATE_ARN` | certificado ACM aprovado |
+| secret por environment | `AWS_DEMO_PLAN_ROLE_ARN`, `AWS_DEMO_DEPLOY_ROLE_ARN` ou `AWS_DEMO_TEARDOWN_ROLE_ARN` | role exclusiva da operação |
 | secret | `AWS_DEMO_BUDGET_ALERT_EMAIL` | destinatário real do Budget |
 | secret de runtime | `AWS_DEMO_SMOKE_BEARER_TOKEN` | configurado depois da fundação; JWT efêmero emitido imediatamente antes do runtime |
+
+Configurar esses quatro identificadores como secrets não os transforma em
+credenciais; faz o GitHub mascarar valores que a action e o Terraform precisam
+receber. As referências continuam mínimas e exatas: account ID e role chegam à
+action OIDC; somente os identificadores necessários chegam a cada step
+operacional. Copiar qualquer um deles de volta para `vars`, usar secret de outra
+operação ou antecipar um secret para checkout/preflight reprova a policy offline.
 
 Reviewers, branch policy, secrets e variables são controles externos do GitHub;
 YAML não consegue criá-los. O preflight consegue comprovar via API somente a
@@ -526,8 +543,9 @@ o mesmo endpoint, exigir `use_default: true` e comparar o
 `sub_claim_prefix` byte a byte com o contrato. Qualquer divergência interrompe o
 bootstrap e exige nova revisão. Com a evidência vigente, não há motivo para
 alterar a configuração OIDC nem manter trust nominal ou dual; as três roles devem
-aceitar somente os subjects imutáveis exatos, e o primeiro plan protegido deve
-confirmar a assunção real.
+aceitar somente os subjects imutáveis exatos. O run `32725423445` confirmou a
+assunção real da role de plan, mas parou no controlador antes de qualquer acesso
+ao backend ou ao Terraform; isso não comprova plan, state, Budget ou deploy.
 
 Referências primárias:
 
@@ -684,7 +702,7 @@ fundação e, portanto, um JWT com issuer e audience válidos não pode ser emit
 antecipadamente:
 
 1. concluir o bootstrap externo de state, OIDC, roles, environments, domínio,
-   certificado, variáveis comuns e e-mail do Budget;
+   certificado, variáveis (`vars`) e segredos (`secrets`) do environment;
 2. executar o workflow protegido com `FOUNDATION-AWS-DEMO` e o HEAD exato de
    `main`; esse dispatch não recebe baseline SEN-46 nem token de smoke, cria todos
    os recursos com ECR vazio e ECS em escala zero e termina verde somente após um
@@ -802,7 +820,8 @@ uv run --frozen poe smoke
 local para atacar trust/policies, workflows, plano/state, parser, limites de
 stdout/stderr, ambientes herdados, smoke e inventário. A validação real de OIDC,
 IAM, backend, build/push, apply, smoke remoto e teardown permanece pendência
-externa explícita.
+externa explícita, exceto pela assunção OIDC parcial registrada no run
+`32725423445`.
 
 ## Limites e riscos residuais
 
