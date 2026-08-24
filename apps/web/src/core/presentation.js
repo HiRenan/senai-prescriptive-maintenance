@@ -82,6 +82,11 @@ const SUPPORT_LABELS = Object.freeze({
 });
 
 const FAILURE_COPY = Object.freeze({
+  input: {
+    title: "A análise não foi enviada",
+    statement: "A entrada não passou pela validação local do contrato v1.",
+    nextStep: "Corrija os campos indicados e execute a análise de novo.",
+  },
   network: {
     title: "A API não respondeu",
     statement: "O navegador não conseguiu falar com a API de análise.",
@@ -89,8 +94,10 @@ const FAILURE_COPY = Object.freeze({
   },
   timeout: {
     title: "A análise excedeu o tempo limite",
-    statement: "A API não respondeu dentro do tempo aceito pelo painel.",
-    nextStep: "Execute a análise de novo; se repetir, verifique a saúde da API.",
+    statement:
+      "O painel encerrou a espera local. Isso não confirma que o processamento remoto foi cancelado.",
+    nextStep:
+      "Confira a saúde da API antes de tentar novamente e descarte qualquer resposta tardia desta execução.",
   },
   validation: {
     title: "A API recusou a requisição",
@@ -111,6 +118,13 @@ const FAILURE_COPY = Object.freeze({
     title: "Resposta fora do contrato",
     statement: "O corpo devolvido pela API não corresponde ao contrato v1.",
     nextStep: "Verifique se a API publicada é a v1 e execute a análise de novo.",
+  },
+  offline: {
+    title: "A entrada não corresponde a uma fixture offline",
+    statement:
+      "O modo offline não inferiu nem inventou um desfecho para a leitura alterada.",
+    nextStep:
+      "Carregue um dos cinco exemplos sintéticos do contrato e execute a análise de novo.",
   },
 });
 

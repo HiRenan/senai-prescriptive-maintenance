@@ -38,6 +38,31 @@
             <dd class="mono">GET · POST /documents</dd>
           </div>
         </dl>
+        <nav class="mode-nav" aria-label="Modo da demonstração">
+          <p class="mode-label">Modo da demonstração</p>
+          <div class="mode-links">
+            <a
+              class="mode-link"
+              id="online-mode"
+              href="./#analysis"
+              aria-current="page"
+              aria-describedby="mode-description"
+            >
+              API local
+            </a>
+            <a
+              class="mode-link"
+              id="offline-mode"
+              href="?mode=offline#analysis"
+              aria-describedby="mode-description"
+            >
+              Offline sintético
+            </a>
+          </div>
+          <p class="mode-description" id="mode-description">
+            A API local processa a leitura pela mesma origem do painel.
+          </p>
+        </nav>
         <nav class="workspace-nav" aria-label="Áreas da demonstração">
           <a
             class="workspace-link"
@@ -94,6 +119,7 @@
                     class="field-input import-text"
                     rows="4"
                     spellcheck="false"
+                    aria-describedby="import-issues"
                     placeholder='{"features": {"rpm": 1000, ...}, "top_k": 3}'
                   ></textarea>
                 </div>
@@ -104,6 +130,7 @@
                     class="field-file"
                     type="file"
                     accept="application/json,.json"
+                    aria-describedby="import-issues"
                   />
                   <button type="button" id="import-apply" class="button button-quiet">
                     Importar JSON

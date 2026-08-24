@@ -30,7 +30,8 @@ arquivos `.d.ts` irmãos são gerados a partir de
 [`apps/api/openapi/v1.json`](../api/openapi/v1.json). Nenhum tipo de request ou
 response é escrito à mão. Os módulos publicam as 18 features, os cinco
 desfechos, os sete estados documentais, as seis operações documentais, limites,
-esquemas e exemplos sintéticos na forma declarada pelo contrato.
+esquemas e os pares sintéticos de request/response na forma declarada pelo
+contrato.
 
 O gerador recusa um padrão de texto que não esteja ancorado ou que use
 construção fora do subconjunto lido igual por Python e pelo navegador. Os
@@ -57,11 +58,24 @@ imagem.
    64 KiB pelo tamanho declarado, antes de lê-lo.
 3. O envio valida campo a campo antes de qualquer requisição e mostra o motivo
    junto do campo.
-4. Durante a execução o laudo mostra um esqueleto e a região viva anuncia o
-   estado.
+4. Durante a primeira execução o laudo mostra um esqueleto. Nas seguintes, o
+   último resultado válido permanece visível e rotulado como anterior enquanto
+   a região viva anuncia o estado.
 5. O resultado é apresentado como um laudo: desfecho, próximo passo, prescrição,
    diagnóstico, suporte, abstenção, citações, vizinhos opacos, avisos e a
    comparação das features enviadas.
+
+## Modo offline
+
+O seletor no cabeçalho alterna por URL entre a API local e o modo offline
+sintético. Em `?mode=offline`, a análise usa exclusivamente os cinco pares de
+request/response gerados dos exemplos do OpenAPI v1 e a área documental não
+consulta nem altera a API. Uma entrada modificada é recusada em vez de receber
+um outcome inferido pelo painel.
+
+O laudo identifica a fixture como origem e os cinco outcomes preservam as
+mesmas regras de diagnóstico, abstenção, prescrição, citações e avisos do
+contrato. Voltar a `./` reativa a API local.
 
 ## Decodificação da resposta
 
@@ -181,6 +195,8 @@ O painel fica em `127.0.0.1:3000`.
 uv run --frozen poe web-contract-check
 uv run --frozen poe web-typecheck
 uv run --frozen poe web-test
+corepack pnpm exec playwright install chromium
+uv run --frozen poe web-browser-test
 ```
 
 A verificação de tipos usa TypeScript sobre JavaScript anotado com JSDoc, sem
@@ -191,3 +207,8 @@ operações do proxy e do cliente, os sete estados, teclado, bloqueio de duplo
 envio, sucesso com falha da atualização, rejeição inválida com foco e a
 distinção entre carregamento e lista vazia. As três tarefas também fazem parte
 de `uv run --frozen poe check`.
+
+`web-browser-test` é uma tarefa separada: usa somente Playwright/Chromium para
+provar zero chamadas à API no modo offline, cinco outcomes, retry, resposta
+fora de ordem, preservação do último resultado, teclado, foco, navegação,
+reduced motion, alvos de 44 px e reflow nos viewports da demonstração.

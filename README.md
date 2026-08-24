@@ -31,7 +31,7 @@ local integralmente identificado e autorizado.
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
-| Web | Painel de análise e gestão documental em módulos ESM, contratos derivados do OpenAPI v1 e processo Node com liveness, ativos e proxy de mesma origem. | O cadastro documental registra somente metadados; acabamento final de responsividade e teste automatizado de ponta a ponta em navegador não existem. |
+| Web | Painel responsivo de análise e gestão documental em módulos ESM, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Node/Chromium. | O cadastro documental registra somente metadados; o modo offline não simula decisões documentais e o runtime não possui autenticação. |
 | AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline. | Nenhum recurso, identidade, deploy, smoke ou teardown foi executado na AWS. |
 
 As afirmações públicas usam quatro rótulos:
@@ -98,6 +98,7 @@ Todos os comandos partem da raiz. Somente `format` reescreve código.
 | `uv run --frozen poe hooks` | Executa todos os hooks em todos os arquivos. |
 | `uv run --frozen poe web-contract` | Gera o contrato web a partir do snapshot OpenAPI v1. |
 | `uv run --frozen poe web-test` | Executa os testes essenciais do fluxo do painel. |
+| `uv run --frozen poe web-browser-test` | Valida offline, teclado, foco e reflow em Chromium. |
 | `uv run --frozen poe failure-matrix` | Exercita falhas P0/P1 e audita o histórico público. |
 | `uv run --frozen poe smoke` | Valida a aplicação offline e o Compose, sem iniciar serviços. |
 | `uv run --frozen poe smoke --with-artifacts` | Compõe somente derivados locais já aprovados; ausência é reportada como indisponível/skip. |
@@ -230,8 +231,6 @@ Não estão implementados:
 - artefatos operacionais distribuíveis, embedding semântico aprovado, pgvector
   preenchido e provider de geração real habilitado;
 - autenticação, autorização, rate limiting e operação de produção;
-- acabamento final de responsividade e teste automatizado de ponta a ponta em
-  navegador;
 - infraestrutura AWS aplicada, bootstrap OIDC/IAM, deploy ou evidência live.
 
 Esses itens são futuro, não compromisso desta versão.

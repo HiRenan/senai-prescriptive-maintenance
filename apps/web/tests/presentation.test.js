@@ -10,12 +10,14 @@ import {
 import { outcomeNames, responseExample } from "./helpers/contract-fixtures.js";
 
 const FAILURE_KINDS = [
+  "input",
   "network",
   "timeout",
   "validation",
   "unavailable",
   "unexpected",
   "malformed",
+  "offline",
 ];
 
 /**
@@ -183,6 +185,16 @@ test("toda falha explica o próximo passo e nunca sugere prescrição", () => {
     assert.equal(report.prescription.summary, null);
     assert.equal(report.prescription.actions.length, 0);
   }
+});
+
+test("timeout não promete cancelamento remoto e offline não inventa outcome", () => {
+  const timeout = presentFailure(failure("timeout"));
+  const offline = presentFailure(failure("offline"));
+
+  assert.match(timeout.statement, /não confirma/i);
+  assert.match(timeout.statement, /cancelado/i);
+  assert.match(offline.statement, /não inferiu nem inventou/i);
+  assert.match(offline.nextStep, /cinco exemplos sintéticos/i);
 });
 
 test("a falha de validação lista os campos recusados com rótulo legível", () => {

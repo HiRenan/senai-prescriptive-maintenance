@@ -195,6 +195,7 @@ export interface SyntheticAnalysisExample {
   readonly name: string;
   readonly summary: string;
   readonly request: AnalysisRequest;
+  readonly response: AnalysisResponse;
 }
 
 export declare const API_CONTRACT_VERSION: string;

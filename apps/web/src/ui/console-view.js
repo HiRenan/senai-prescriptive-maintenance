@@ -4,6 +4,7 @@ import {
   FEATURE_PAIRS,
   SINGLE_FEATURES,
   axisLabel,
+  normalizeAnalysisField,
 } from "../core/features.js";
 import { clear, el } from "./dom.js";
 
@@ -20,6 +21,7 @@ import { clear, el } from "./dom.js";
  * @property {() => void} reset
  * @property {(issues: readonly ValidationIssue[]) => void} showIssues
  * @property {() => void} clearIssues
+ * @property {(field: string) => boolean} focusField
  * @property {(busy: boolean) => void} setBusy
  */
 
@@ -186,21 +188,21 @@ export function createConsoleView(root) {
     showIssues(issues) {
       this.clearIssues();
       for (const issue of issues) {
-        const slot = errorSlot(issue.field);
+        const field = normalizeAnalysisField(issue.field);
+        const slot = errorSlot(field);
         if (slot !== null) {
           slot.textContent = issue.message;
         }
-        const input = inputs.get(issue.field);
+        const input = inputs.get(field);
         if (input !== undefined) {
           input.setAttribute("aria-invalid", "true");
-        } else if (issue.field === "top_k") {
+        } else if (field === "top_k") {
           topKInput.setAttribute("aria-invalid", "true");
         }
       }
       const first = issues[0];
       if (first !== undefined) {
-        const target = first.field === "top_k" ? topKInput : inputs.get(first.field);
-        target?.focus();
+        this.focusField(first.field);
       }
     },
     clearIssues() {
@@ -211,6 +213,12 @@ export function createConsoleView(root) {
         input.removeAttribute("aria-invalid");
       }
       topKInput.removeAttribute("aria-invalid");
+    },
+    focusField(field) {
+      const normalized = normalizeAnalysisField(field);
+      const target = normalized === "top_k" ? topKInput : inputs.get(normalized);
+      target?.focus();
+      return target !== undefined;
     },
     setBusy(busy) {
       for (const control of root.querySelectorAll("input, button, select, textarea")) {

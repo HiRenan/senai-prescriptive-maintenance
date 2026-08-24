@@ -197,10 +197,11 @@ export function axisLabel(axis) {
  * @returns {string}
  */
 export function fieldLabel(name) {
-  if (name === "top_k") {
+  const normalized = normalizeAnalysisField(name);
+  if (normalized === "top_k") {
     return "Vizinhos solicitados";
   }
-  const descriptor = FEATURE_DESCRIPTORS.find((entry) => entry.name === name);
+  const descriptor = FEATURE_DESCRIPTORS.find((entry) => entry.name === normalized);
   if (descriptor === undefined) {
     return name;
   }
@@ -208,6 +209,17 @@ export function fieldLabel(name) {
     return descriptor.label;
   }
   return `${descriptor.label} (${axisLabel(descriptor.axis)})`;
+}
+
+/**
+ * The API may identify a feature as `features.rpm`, while the local form owns
+ * the control as `rpm`. Normalize only that published container prefix.
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+export function normalizeAnalysisField(name) {
+  return name.startsWith("features.") ? name.slice("features.".length) : name;
 }
 
 /**

@@ -67,6 +67,68 @@ test("loading é explícito e nunca afirma o vazio antes da resposta", async () 
   }
 });
 
+test("uma falha de refresh preserva e rotula a última lista válida", async () => {
+  const restore = installFakeDom();
+  try {
+    const approved = documentExample("approved");
+    let calls = 0;
+    const host = document.createElement("div");
+    const panel = createDocumentsPanel(host, {
+      client: clientWith({
+        listDocuments: async () => {
+          calls += 1;
+          return calls === 1 ? success([approved]) : failed();
+        },
+      }),
+    });
+    await panel.start();
+
+    await panel.refresh();
+
+    assert.equal(calls, 2);
+    assert.match(host.textContent, new RegExp(approved.filename));
+    assert.match(host.textContent, /anterior\(es\) preservado\(s\)/);
+    assert.match(host.textContent, /podem estar desatualizados/);
+  } finally {
+    restore();
+  }
+});
+
+test("o modo offline documental faz zero chamadas e explica o próximo passo", async () => {
+  const restore = installFakeDom();
+  try {
+    let calls = 0;
+    const noNetwork = async () => {
+      calls += 1;
+      return failed();
+    };
+    const host = document.createElement("div");
+    const panel = createDocumentsPanel(host, {
+      offline: true,
+      client: clientWith({
+        listDocuments: noNetwork,
+        getDocument: noNetwork,
+        registerDocument: noNetwork,
+        approveDocument: noNetwork,
+        rejectDocument: noNetwork,
+        reprocessDocument: noNetwork,
+      }),
+    });
+
+    await panel.start();
+    await panel.refresh();
+
+    assert.equal(calls, 0);
+    assert.match(host.textContent, /Gestão documental indisponível offline/);
+    assert.match(host.textContent, /Próximo passo/);
+    assert.ok(
+      interactiveControls(host).every((control) => control.hasAttribute("disabled")),
+    );
+  } finally {
+    restore();
+  }
+});
+
 test("a tela distingue os sete estados e expõe atualização, vigência e falha", async () => {
   const restore = installFakeDom();
   try {

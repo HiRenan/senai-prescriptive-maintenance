@@ -187,6 +187,44 @@ def _request_examples(contract: Contract) -> tuple[tuple[str, str, object], ...]
     return _named_examples(_json_media(body, "requestBody"), "requestBody media")
 
 
+def _response_examples(contract: Contract) -> tuple[tuple[str, str, object], ...]:
+    status = str(_success_status(contract))
+    responses = _mapping(
+        _entry(contract.operation, "responses", f"{ANALYSIS_PATH}.post"),
+        f"{ANALYSIS_PATH}.post.responses",
+    )
+    response = _mapping(
+        _entry(responses, status, f"{ANALYSIS_PATH}.post.responses"),
+        f"responses.{status}",
+    )
+    return _named_examples(
+        _json_media(response, f"responses.{status}"),
+        f"responses.{status} media",
+    )
+
+
+def _analysis_examples(
+    contract: Contract,
+) -> tuple[tuple[str, str, object, object], ...]:
+    requests = _request_examples(contract)
+    responses = _response_examples(contract)
+    request_names = tuple(name for name, _, _ in requests)
+    response_names = tuple(name for name, _, _ in responses)
+    if request_names != response_names:
+        raise ContractGenerationError(
+            "Os exemplos sintéticos de request e response devem ter os mesmos nomes "
+            "e a mesma ordem."
+        )
+    return tuple(
+        (name, summary, request, response)
+        for (name, summary, request), (_, _, response) in zip(
+            requests,
+            responses,
+            strict=True,
+        )
+    )
+
+
 def _feature_fields(contract: Contract) -> tuple[Mapping[str, object], ...]:
     request = _request_schema_name(contract)
     features_name = contract.resolve(
@@ -717,11 +755,12 @@ def _render_runtime(contract: Contract) -> str:
     lines.append("]);")
     lines.append("")
     lines.append("export const SYNTHETIC_ANALYSIS_EXAMPLES = Object.freeze([")
-    for name, summary, value in _request_examples(contract):
+    for name, summary, request, response in _analysis_examples(contract):
         lines.append("  Object.freeze({")
         lines.append(f"    name: {_literal(name)},")
         lines.append(f"    summary: {_literal(summary)},")
-        lines.append(f"    request: {_block_literal(value, '    ')},")
+        lines.append(f"    request: {_block_literal(request, '    ')},")
+        lines.append(f"    response: {_block_literal(response, '    ')},")
         lines.append("  }),")
     lines.append("]);")
     lines.append("")
@@ -857,6 +896,7 @@ def _render_types(contract: Contract) -> str:
         "  readonly name: string;\n"
         "  readonly summary: string;\n"
         "  readonly request: AnalysisRequest;\n"
+        "  readonly response: AnalysisResponse;\n"
         "}\n"
     )
     blocks.append("export declare const API_CONTRACT_VERSION: string;\n")

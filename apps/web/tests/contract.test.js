@@ -12,7 +12,11 @@ import {
   SYNTHETIC_ANALYSIS_EXAMPLES,
   TOP_K,
 } from "../src/generated/analysis-contract.js";
-import { requestExamples, snapshot } from "./helpers/contract-fixtures.js";
+import {
+  requestExamples,
+  responseExamples,
+  snapshot,
+} from "./helpers/contract-fixtures.js";
 
 const schemas = snapshot.components.schemas;
 
@@ -112,5 +116,6 @@ test("os exemplos de importação são exatamente os exemplos sintéticos do con
     const declared = requestExamples[example.name];
     assert.equal(example.summary, declared.summary);
     assert.deepEqual(example.request, declared.value);
+    assert.deepEqual(example.response, responseExamples[example.name].value);
   }
 });
