@@ -763,16 +763,16 @@ No dispatch de runtime, o runner:
    apontar para a nova revisão da task;
 8. aplica o plano salvo e relê o state privado, comprovando novamente imagem por
    digest e service ligado ao ARN exato da task revision;
-9. monta a allowlist de `apps/web/src`, gera o runtime config somente com outputs
-   públicos do mesmo state, envia assets imutáveis, runtime config e `index.html`
-   nessa ordem, limpa somente assets residuais validados, invalida o CloudFront e
-   espera `Completed`;
+9. valida `apps/web/dist` contra a gramática publicável, gera o runtime config
+   somente com outputs públicos do mesmo state, envia assets imutáveis, arquivos
+   de raiz, runtime config e `index.html` nessa ordem, limpa somente assets
+   residuais validados, invalida o CloudFront e espera `Completed`;
 10. chama anonimamente `GET /health/ready` e um `POST /analysis` sintético e exige
    `401` ou `403` nos dois, sem ler ou imprimir seus corpos;
 11. executa readiness e cenários autenticados na API e, pela URL publicada,
-    verifica index, todos os módulos, MIME/cache, runtime config, headers, o GET
-    sintético de `/oauth2/authorize`, preflight sem JWT, POST anônimo recusado e
-    POST autenticado com um dos cinco outcomes.
+    verifica index, todos os arquivos do bundle, MIME/cache, runtime config,
+    headers, o GET sintético de `/oauth2/authorize`, preflight sem JWT, POST
+    anônimo recusado e POST autenticado com um dos cinco outcomes.
 
 A tag deriva do HEAD exato e protegido de `main`, e o repositório ECR rejeita
 sobrescrita. Assim, repetir o mesmo deploy depois de uma falha tardia de runtime

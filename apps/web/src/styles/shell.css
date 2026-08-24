@@ -1,0 +1,382 @@
+/* Application chrome: top bar, workspace navigation, mode switch, overflow
+   panel, main container, and colophon. */
+
+:root {
+  --shell-max: 84rem;
+  --shell-gutter: clamp(1rem, 3vw, 2rem);
+  /* Centers content at --shell-max while keeping the gutter on small screens. */
+  --shell-inline: max(
+    var(--shell-gutter),
+    calc((100% - var(--shell-max)) / 2)
+  );
+}
+
+/* The sticky bar must never cover what the browser scrolls to, whether the
+   target is a fragment, a focused section, or a control being activated. */
+:where([id], [tabindex="-1"]) {
+  scroll-margin-top: calc(3.5rem + var(--space-sm));
+}
+
+/* Top bar ---------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar);
+  background: var(--surface-page);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.topbar-inner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "brand nav mode tools";
+  align-items: center;
+  column-gap: var(--space-md);
+  min-height: 3.5rem;
+  padding-inline: var(--shell-inline);
+}
+
+.topbar-brand {
+  grid-area: brand;
+  min-width: 0;
+}
+
+.topbar-tools {
+  grid-area: tools;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3xs);
+}
+
+/* Wordmark */
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.wordmark-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.wordmark-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-heading);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Workspace navigation */
+
+.workspace-nav {
+  grid-area: nav;
+  display: flex;
+  align-self: stretch;
+  gap: var(--space-2xs);
+}
+
+.workspace-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit);
+  padding-inline: var(--space-2xs);
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-label);
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color var(--motion-1) var(--ease-out);
+}
+
+.workspace-link:hover {
+  color: var(--text-primary);
+}
+
+.workspace-link[aria-current="page"] {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+/* Mode switch */
+
+.mode-switch {
+  grid-area: mode;
+}
+
+.mode-links {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+}
+
+.mode-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit);
+  padding-inline: var(--space-xs);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-label);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-1) var(--ease-out),
+    color var(--motion-1) var(--ease-out);
+}
+
+.mode-link:hover {
+  color: var(--text-primary);
+}
+
+.mode-link[aria-current="page"] {
+  background: var(--surface-raised);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-1);
+}
+
+/* Overflow panel */
+
+.overflow {
+  position: relative;
+}
+
+.overflow-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  gap: var(--space-2xs);
+  width: min(22rem, calc(100vw - 2 * var(--space-sm)));
+  padding: var(--space-sm);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+}
+
+.overflow-heading {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-heading);
+}
+
+.overflow-meta {
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.overflow-meta > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.overflow-meta dt {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.overflow-meta dd {
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.overflow-description,
+.overflow-note {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--text-tertiary);
+}
+
+.overflow-divider {
+  height: 1px;
+  margin-block: var(--space-3xs);
+  background: var(--border-subtle);
+}
+
+.overflow-action {
+  width: 100%;
+}
+
+/* Main ------------------------------------------------------------------- */
+
+main#workspace-content {
+  flex: 1;
+  width: 100%;
+  padding: var(--space-md) var(--shell-inline) var(--space-2xl);
+}
+
+.workspace-page:focus-visible {
+  outline: none;
+}
+
+.noscript {
+  max-width: 60ch;
+  margin: var(--space-lg) auto;
+  padding-inline: var(--shell-gutter);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+/* Authentication panel (published profile) -------------------------------- */
+
+.auth-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2xs) var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--tone-bg);
+  border: 1px solid var(--tone-border);
+  border-radius: var(--radius-md);
+}
+
+.auth-copy {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.auth-status {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-heading);
+  color: var(--tone-fg);
+}
+
+.auth-detail {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  max-width: 75ch;
+}
+
+.auth-actions {
+  display: flex;
+  gap: var(--space-2xs);
+  flex: none;
+}
+
+/* Documents workspace intro ----------------------------------------------- */
+
+.documents-intro {
+  display: grid;
+  gap: var(--space-3xs);
+  margin-bottom: var(--space-md);
+}
+
+.documents-kicker {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-label);
+  color: var(--accent);
+}
+
+.documents-heading {
+  font-size: var(--text-xl);
+  letter-spacing: -0.01em;
+}
+
+.documents-intro-text {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 70ch;
+}
+
+.documents-empty {
+  padding: var(--space-lg) var(--space-sm);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/* Colophon --------------------------------------------------------------- */
+
+.app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3xs) var(--space-md);
+  padding: var(--space-sm) var(--shell-inline);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.app-footer-note {
+  max-width: 75ch;
+}
+
+.app-footer-credit {
+  white-space: nowrap;
+}
+
+/* Stacked chrome below 64rem -------------------------------------------- */
+
+@media (max-width: 63.99rem) {
+  .topbar {
+    position: static;
+  }
+
+  .topbar-inner {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand tools"
+      "nav nav"
+      "mode mode";
+    row-gap: var(--space-3xs);
+    padding-block: var(--space-2xs);
+  }
+
+  .workspace-nav {
+    align-self: auto;
+  }
+
+  .workspace-link {
+    flex: 1;
+  }
+
+  .mode-switch {
+    padding-bottom: var(--space-2xs);
+  }
+
+  .mode-links {
+    display: flex;
+  }
+
+  .mode-link {
+    flex: 1;
+  }
+}
+
+@media (max-width: 25rem) {
+  .wordmark-title {
+    font-size: var(--text-sm);
+  }
+}

@@ -36,6 +36,7 @@ class ContextSpec:
     static_files: frozenset[str]
     source_root: Path | None = None
     source_suffixes: frozenset[str] = frozenset()
+    source_excluded_endings: frozenset[str] = frozenset()
 
 
 CONTEXT_SPECS: Final = (
@@ -58,15 +59,22 @@ CONTEXT_SPECS: Final = (
         dockerfile=Path("apps/web/Dockerfile"),
         static_files=frozenset(
             {
+                "apps/web/index.html",
                 "apps/web/package.json",
+                "apps/web/public/favicon.svg",
+                "apps/web/public/theme-init.js",
                 "apps/web/server.mjs",
+                "apps/web/vite.config.ts",
                 "package.json",
                 "pnpm-lock.yaml",
                 "pnpm-workspace.yaml",
             }
         ),
         source_root=Path("apps/web/src"),
-        source_suffixes=frozenset({".css", ".html", ".js"}),
+        source_suffixes=frozenset({".css", ".js", ".svg", ".ts", ".tsx"}),
+        # The generated contract ships its declarations beside the module the
+        # bundle imports; only the module is an input to the build.
+        source_excluded_endings=frozenset({".d.ts"}),
     ),
 )
 
@@ -115,6 +123,10 @@ def _expected_files(spec: ContextSpec) -> frozenset[str]:
             and not path.name.lower().startswith("test_")
             and not path.stem.lower().endswith("_test")
             and path.suffix.lower() in spec.source_suffixes
+            and not any(
+                path.name.lower().endswith(ending)
+                for ending in spec.source_excluded_endings
+            )
         ):
             expected.add(path.relative_to(REPOSITORY_ROOT).as_posix())
     return frozenset(expected)

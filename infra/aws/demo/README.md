@@ -100,8 +100,9 @@ versionamento. `force_destroy` e a expiração de versões não correntes existe
 somente porque este perfil é removível.
 
 A fundação nasce sem objetos no bucket frontend. O dispatch protegido de runtime
-faz staging pela allowlist exata de `apps/web/src`, publica módulos ESM imutáveis,
-gera o `runtime-config.v1.json` público a partir dos outputs do mesmo state e envia
+faz staging do bundle construído em `apps/web/dist` por uma gramática fechada,
+publica os arquivos de `assets/` com cache imutável, gera o
+`runtime-config.v1.json` público a partir dos outputs do mesmo state e envia
 o `index.html` por último. Depois remove apenas assets residuais já validados,
 invalida a distribuição, espera `Completed` e executa o smoke pela URL final.
 

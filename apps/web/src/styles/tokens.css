@@ -1,0 +1,261 @@
+/* Design tokens. Light is the default; :root[data-theme="dark"] overrides.
+   Every color is OKLCH; neutrals are tinted toward the accent hue (262). */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --surface-page: oklch(97.5% 0.004 262);
+  --surface-raised: oklch(99.3% 0.002 262);
+  --surface-sunken: oklch(95.2% 0.006 262);
+  --surface-overlay: oklch(99.5% 0.002 262);
+
+  /* Text */
+  --text-primary: oklch(21% 0.012 262);
+  --text-secondary: oklch(41% 0.014 262);
+  --text-tertiary: oklch(50% 0.012 262);
+
+  /* Borders */
+  --border-subtle: oklch(91% 0.006 262);
+  --border-strong: oklch(83% 0.01 262);
+
+  /* Accent (indigo 262) */
+  --accent: oklch(50% 0.19 262);
+  --accent-hover: oklch(45% 0.19 262);
+  --accent-active: oklch(41% 0.18 262);
+  --accent-subtle: oklch(95.2% 0.025 262);
+  --on-accent: oklch(98.5% 0.008 262);
+  --focus-ring: oklch(50% 0.19 262);
+
+  /* Outcome tones — settled 162 · prescribed 292 · withheld 82 · outside 45 ·
+     degraded 250 (desaturated) · failed 25. Each exposes fg/bg/border. */
+  --tone-settled-fg: oklch(46% 0.1 162);
+  --tone-settled-bg: oklch(95.6% 0.03 162);
+  --tone-settled-border: oklch(80% 0.07 162);
+  --tone-prescribed-fg: oklch(46% 0.15 292);
+  --tone-prescribed-bg: oklch(95.6% 0.03 292);
+  --tone-prescribed-border: oklch(80% 0.08 292);
+  --tone-withheld-fg: oklch(45% 0.1 82);
+  --tone-withheld-bg: oklch(96% 0.045 82);
+  --tone-withheld-border: oklch(81% 0.09 82);
+  --tone-outside-fg: oklch(47% 0.13 45);
+  --tone-outside-bg: oklch(95.8% 0.035 45);
+  --tone-outside-border: oklch(80% 0.08 45);
+  --tone-degraded-fg: oklch(45% 0.03 250);
+  --tone-degraded-bg: oklch(95.5% 0.012 250);
+  --tone-degraded-border: oklch(80% 0.02 250);
+  --tone-failed-fg: oklch(46% 0.15 25);
+  --tone-failed-bg: oklch(95.6% 0.032 25);
+  --tone-failed-border: oklch(80% 0.08 25);
+  --tone-info-fg: oklch(46% 0.11 235);
+  --tone-info-bg: oklch(95.6% 0.03 235);
+  --tone-info-border: oklch(80% 0.07 235);
+  --tone-neutral-fg: oklch(41% 0.014 262);
+  --tone-neutral-bg: oklch(95.2% 0.006 262);
+  --tone-neutral-border: oklch(87% 0.008 262);
+
+  /* Shadows — tinted ink, never pure black. */
+  --shadow-1:
+    0 1px 2px oklch(20% 0.02 262 / 0.06), 0 1px 1px oklch(20% 0.02 262 / 0.04);
+  --shadow-2:
+    0 2px 4px oklch(20% 0.02 262 / 0.05), 0 6px 16px oklch(20% 0.02 262 / 0.07);
+  --shadow-3:
+    0 4px 8px oklch(20% 0.02 262 / 0.07), 0 16px 40px oklch(20% 0.02 262 / 0.14);
+
+  /* Typography — system stacks, rem scale (ratio ~1.2). */
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, "Cascadia Mono", "SFMono-Regular", "Segoe UI Mono", Consolas,
+    "Liberation Mono", monospace;
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.1875rem;
+  --text-lg: 1.4375rem;
+  --text-xl: 1.75rem;
+  /* Reserved for the verdict title; nothing else may use it. */
+  --text-2xl: clamp(1.625rem, 1.25rem + 1.6vw, 2.25rem);
+  --weight-body: 400;
+  --weight-label: 500;
+  --weight-heading: 600;
+  --weight-verdict: 650;
+  --leading-tight: 1.25;
+  --leading-normal: 1.55;
+
+  /* Spacing — 4px grid. */
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 4rem;
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Motion — state-conveying only. */
+  --motion-1: 120ms;
+  --motion-2: 180ms;
+  --motion-3: 240ms;
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+
+  /* Layers */
+  --z-topbar: 10;
+  --z-sticky-run: 20;
+  --z-popover: 30;
+  --z-toast: 40;
+  --z-skip: 50;
+
+  /* Minimum touch target (44px). */
+  --hit: 2.75rem;
+
+  /* Active tone — remapped by [data-tone]; neutral by default. */
+  --tone-fg: var(--tone-neutral-fg);
+  --tone-bg: var(--tone-neutral-bg);
+  --tone-border: var(--tone-neutral-border);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-page: oklch(16% 0.01 262);
+  --surface-raised: oklch(19.5% 0.012 262);
+  --surface-sunken: oklch(13.5% 0.01 262);
+  --surface-overlay: oklch(23.5% 0.014 262);
+
+  --text-primary: oklch(93% 0.006 262);
+  --text-secondary: oklch(72% 0.012 262);
+  --text-tertiary: oklch(60% 0.012 262);
+
+  --border-subtle: oklch(28% 0.012 262);
+  --border-strong: oklch(37% 0.014 262);
+
+  --accent: oklch(60% 0.18 262);
+  --accent-hover: oklch(65% 0.17 262);
+  --accent-active: oklch(56% 0.18 262);
+  --accent-subtle: oklch(25% 0.05 262);
+  --on-accent: oklch(98.5% 0.008 262);
+  --focus-ring: oklch(72% 0.14 262);
+
+  --tone-settled-fg: oklch(78% 0.11 162);
+  --tone-settled-bg: oklch(24% 0.04 162);
+  --tone-settled-border: oklch(43% 0.08 162);
+  --tone-prescribed-fg: oklch(79% 0.12 292);
+  --tone-prescribed-bg: oklch(25% 0.05 292);
+  --tone-prescribed-border: oklch(46% 0.1 292);
+  --tone-withheld-fg: oklch(82% 0.11 82);
+  --tone-withheld-bg: oklch(25.5% 0.045 82);
+  --tone-withheld-border: oklch(48% 0.09 82);
+  --tone-outside-fg: oklch(78% 0.12 45);
+  --tone-outside-bg: oklch(25% 0.05 45);
+  --tone-outside-border: oklch(46% 0.1 45);
+  --tone-degraded-fg: oklch(76% 0.03 250);
+  --tone-degraded-bg: oklch(24.5% 0.015 250);
+  --tone-degraded-border: oklch(44% 0.025 250);
+  --tone-failed-fg: oklch(78% 0.13 25);
+  --tone-failed-bg: oklch(25% 0.05 25);
+  --tone-failed-border: oklch(48% 0.1 25);
+  --tone-info-fg: oklch(78% 0.11 235);
+  --tone-info-bg: oklch(24.5% 0.04 235);
+  --tone-info-border: oklch(45% 0.08 235);
+  --tone-neutral-fg: oklch(72% 0.012 262);
+  --tone-neutral-bg: oklch(23% 0.012 262);
+  --tone-neutral-border: oklch(34% 0.014 262);
+
+  /* Dark elevation comes from surface steps + borders; only overlays keep a
+     real ambient shadow. */
+  --shadow-1: 0 1px 2px oklch(5% 0.005 262 / 0.5);
+  --shadow-2: 0 1px 2px oklch(5% 0.005 262 / 0.5);
+  --shadow-3:
+    0 4px 10px oklch(5% 0.01 262 / 0.5), 0 16px 40px oklch(5% 0.01 262 / 0.55);
+}
+
+/* Outcome tones activate the shared --tone-* slots (both themes). */
+[data-tone="settled"] {
+  --tone-fg: var(--tone-settled-fg);
+  --tone-bg: var(--tone-settled-bg);
+  --tone-border: var(--tone-settled-border);
+}
+[data-tone="prescribed"] {
+  --tone-fg: var(--tone-prescribed-fg);
+  --tone-bg: var(--tone-prescribed-bg);
+  --tone-border: var(--tone-prescribed-border);
+}
+[data-tone="withheld"] {
+  --tone-fg: var(--tone-withheld-fg);
+  --tone-bg: var(--tone-withheld-bg);
+  --tone-border: var(--tone-withheld-border);
+}
+[data-tone="outside"] {
+  --tone-fg: var(--tone-outside-fg);
+  --tone-bg: var(--tone-outside-bg);
+  --tone-border: var(--tone-outside-border);
+}
+[data-tone="degraded"] {
+  --tone-fg: var(--tone-degraded-fg);
+  --tone-bg: var(--tone-degraded-bg);
+  --tone-border: var(--tone-degraded-border);
+}
+[data-tone="failed"] {
+  --tone-fg: var(--tone-failed-fg);
+  --tone-bg: var(--tone-failed-bg);
+  --tone-border: var(--tone-failed-border);
+}
+[data-tone="info"] {
+  --tone-fg: var(--tone-info-fg);
+  --tone-bg: var(--tone-info-bg);
+  --tone-border: var(--tone-info-border);
+}
+[data-tone="neutral"] {
+  --tone-fg: var(--tone-neutral-fg);
+  --tone-bg: var(--tone-neutral-bg);
+  --tone-border: var(--tone-neutral-border);
+}
+
+/* Document statuses map onto the same ramps; the paired glyph keeps color from
+   ever being the only signal. */
+[data-status="received"] {
+  --tone-fg: var(--tone-degraded-fg);
+  --tone-bg: var(--tone-degraded-bg);
+  --tone-border: var(--tone-degraded-border);
+}
+[data-status="processing"] {
+  --tone-fg: var(--tone-info-fg);
+  --tone-bg: var(--tone-info-bg);
+  --tone-border: var(--tone-info-border);
+}
+[data-status="pending_approval"] {
+  --tone-fg: var(--tone-withheld-fg);
+  --tone-bg: var(--tone-withheld-bg);
+  --tone-border: var(--tone-withheld-border);
+}
+[data-status="approved"] {
+  --tone-fg: var(--tone-settled-fg);
+  --tone-bg: var(--tone-settled-bg);
+  --tone-border: var(--tone-settled-border);
+}
+[data-status="rejected"] {
+  --tone-fg: var(--tone-outside-fg);
+  --tone-bg: var(--tone-outside-bg);
+  --tone-border: var(--tone-outside-border);
+}
+[data-status="failed"] {
+  --tone-fg: var(--tone-failed-fg);
+  --tone-bg: var(--tone-failed-bg);
+  --tone-border: var(--tone-failed-border);
+}
+[data-status="superseded"] {
+  --tone-fg: var(--tone-neutral-fg);
+  --tone-bg: var(--tone-neutral-bg);
+  --tone-border: var(--tone-neutral-border);
+}

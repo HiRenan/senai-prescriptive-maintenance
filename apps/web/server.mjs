@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join, normalize, resolve, sep } from "node:path";
@@ -60,6 +60,7 @@ const CONTENT_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
+  [".svg", "image/svg+xml; charset=utf-8"],
 ]);
 
 const SECURITY_HEADERS = {
@@ -90,7 +91,12 @@ if (apiOrigin.protocol !== "http:" && apiOrigin.protocol !== "https:") {
   throw new Error("API_BASE_URL must be an absolute http or https URL.");
 }
 
-const staticRoot = resolve(import.meta.dirname, "src");
+// The production bundle. Tests point WEB_STATIC_DIR at a hermetic fixture so
+// they never depend on a build having run.
+const staticRoot = resolve(
+  import.meta.dirname,
+  process.env.WEB_STATIC_DIR ?? "dist",
+);
 const documentIdExpression = new RegExp(DOCUMENT_ID_PATTERN);
 
 /**
@@ -497,9 +503,14 @@ async function serveStatic(request, response, pathname) {
   }
 
   const extension = filePath.slice(filePath.lastIndexOf("."));
+  // Bundled assets carry a content hash in the name, so they may be cached
+  // forever; the entry document and root assets must always revalidate.
+  const cacheControl = pathname.startsWith("/assets/")
+    ? "public, max-age=31536000, immutable"
+    : "no-store";
   response.writeHead(200, {
     ...SECURITY_HEADERS,
-    "cache-control": "no-store",
+    "cache-control": cacheControl,
     "content-length": info.size,
     "content-type": CONTENT_TYPES.get(extension),
   });
@@ -573,5 +584,11 @@ const server = createServer((request, response) => {
 export { parseTimeout, server };
 
 if (process.env.WEB_SERVER_AUTOSTART !== "off") {
+  if (!existsSync(join(staticRoot, "index.html"))) {
+    throw new Error(
+      "Bundle de produção ausente: execute `corepack pnpm --filter " +
+        "@senai-prescriptive-maintenance/web build` antes de iniciar o servidor.",
+    );
+  }
   server.listen(port, HOST);
 }

@@ -128,10 +128,12 @@ node:22-alpine3.22@sha256:cd7807368cf24826297cbad5dca1a44972ccfd770647db52a8c758
 ```
 
 A API instala somente o grupo de produção por `uv sync --frozen --no-dev`; a
-web confirma o workspace por `pnpm install --frozen-lockfile --prod` e não tem
-dependências de aplicação; sua imagem carrega apenas o processo HTTP e os
-módulos, o estilo e o documento do painel. Cada Dockerfile possui uma allowlist
-específica; a API inclui também o README exigido pelos metadados do pacote. A tarefa
+web instala o workspace congelado apenas para construir o bundle, em um estágio
+que não chega à imagem final. Como o React é empacotado e `server.mjs` usa só
+builtins, a imagem de execução não carrega `node_modules`: apenas o processo
+HTTP, o bundle de produção e o contrato gerado que o servidor importa no boot.
+Cada Dockerfile possui uma allowlist específica; a API inclui também o README
+exigido pelos metadados do pacote. A tarefa
 `applications-audit` exporta o contexto filtrado que o BuildKit recebeu e
 executa auditorias dentro dos builders. `.env`, Git, dados, materiais originais,
 caches, testes, snapshots OpenAPI, READMEs desnecessários e ferramentas de

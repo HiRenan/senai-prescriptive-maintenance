@@ -40,11 +40,24 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
       - name: Set up Terraform 1.15.9
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.15.9"
           terraform_wrapper: false
+
+      - name: Build the frontend bundle audited by the delivery grammar
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm --filter @senai-prescriptive-maintenance/web build
 
       - name: Validate Terraform and delivery policies offline
         shell: bash

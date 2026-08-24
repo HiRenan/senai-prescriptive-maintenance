@@ -1,0 +1,234 @@
+/* The input console: example picker, JSON import, the 18 contract features
+   grouped by metric, and the sticky run bar. */
+
+.console {
+  overflow: clip;
+}
+
+.console-body {
+  display: grid;
+  gap: var(--space-sm);
+  padding: clamp(1rem, 0.5rem + 2vw, 1.5rem);
+}
+
+.console-heading {
+  font-size: var(--text-md);
+}
+
+.console-example {
+  padding: var(--space-xs);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* Import ------------------------------------------------------------------ */
+
+.import {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-xs);
+}
+
+.import > .disclosure-summary {
+  min-height: var(--hit);
+}
+
+.import-rows {
+  display: grid;
+  gap: var(--space-xs);
+  padding-bottom: var(--space-2xs);
+}
+
+.import-text {
+  min-height: 6rem;
+  font-size: var(--text-xs);
+}
+
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-2xs);
+}
+
+.import-actions .field {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.input.file {
+  padding: var(--space-2xs) var(--space-xs);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.input.file::file-selector-button {
+  min-height: 1.75rem;
+  margin-right: var(--space-2xs);
+  padding: 0 var(--space-2xs);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.import-issues {
+  display: grid;
+  gap: var(--space-3xs);
+  padding: var(--space-2xs) var(--space-xs);
+  background: var(--tone-failed-bg);
+  border: 1px solid var(--tone-failed-border);
+  border-radius: var(--radius-sm);
+}
+
+.import-issues-heading {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-heading);
+  color: var(--tone-failed-fg);
+}
+
+.import-issues-list {
+  display: grid;
+  gap: var(--space-3xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+}
+
+.import-issues-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs) var(--space-2xs);
+  color: var(--text-secondary);
+}
+
+/* Feature grid ------------------------------------------------------------ */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-sm);
+}
+
+.metric {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-xs);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
+}
+
+.metric-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2xs);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-heading);
+  color: var(--text-primary);
+}
+
+.metric-unit {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-body);
+  color: var(--text-tertiary);
+}
+
+.metric-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2xs);
+}
+
+.metric-singles .metric-fields {
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+}
+
+.metric .field-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-body);
+  color: var(--text-secondary);
+}
+
+.metric .input {
+  padding-inline: var(--space-2xs);
+  font-size: var(--text-sm);
+}
+
+.metric .input-affix > .input {
+  padding-right: calc(var(--space-2xs) + var(--affix-width, 3rem));
+}
+
+.metric .input-affix-unit {
+  right: var(--space-2xs);
+}
+
+.metric .field-error {
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+}
+
+/* Run bar ----------------------------------------------------------------- */
+
+.run {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky-run);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-2xs) var(--space-sm);
+  padding: var(--space-2xs) clamp(1rem, 0.5rem + 2vw, 1.5rem);
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border-subtle);
+  box-shadow: 0 -1px 2px oklch(20% 0.02 262 / 0.05);
+}
+
+:root[data-theme="dark"] .run {
+  box-shadow: none;
+}
+
+.field-topk {
+  flex: 0 1 9rem;
+}
+
+.field-topk .field-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.field-topk .input {
+  padding-inline: var(--space-2xs);
+}
+
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
+@media (max-width: 33.99rem) {
+  .run {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .field-topk {
+    flex: none;
+  }
+
+  .run-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
