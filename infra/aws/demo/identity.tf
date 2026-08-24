@@ -206,22 +206,34 @@ resource "aws_cognito_user_pool_client" "demo" {
   user_pool_id = aws_cognito_user_pool.demo.id
 
   access_token_validity                         = 2
+  allowed_oauth_flows                           = ["code"]
+  allowed_oauth_flows_user_pool_client          = true
+  allowed_oauth_scopes                          = ["openid"]
   auth_session_validity                         = 3
+  callback_urls                                 = ["${local.frontend_origin}/"]
+  default_redirect_uri                          = "${local.frontend_origin}/"
   enable_propagate_additional_user_context_data = false
   enable_token_revocation                       = true
   explicit_auth_flows = [
     "ALLOW_ADMIN_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_SRP_AUTH",
   ]
   generate_secret               = false
   id_token_validity             = 2
+  logout_urls                   = ["${local.frontend_origin}/"]
   prevent_user_existence_errors = "ENABLED"
   refresh_token_validity        = 1
+  supported_identity_providers  = ["COGNITO"]
 
   token_validity_units {
     access_token  = "hours"
     id_token      = "hours"
     refresh_token = "days"
   }
+}
+
+resource "aws_cognito_user_pool_domain" "demo" {
+  domain                = local.cognito_domain_prefix
+  managed_login_version = 1
+  user_pool_id          = aws_cognito_user_pool.demo.id
 }

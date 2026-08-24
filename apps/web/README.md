@@ -77,6 +77,26 @@ O laudo identifica a fixture como origem e os cinco outcomes preservam as
 mesmas regras de diagnóstico, abstenção, prescrição, citações e avisos do
 contrato. Voltar a `./` reativa a API local.
 
+## Perfil AWS autenticado
+
+Somente a origem exata `https://senai.maib.com.br` ativa o perfil publicado.
+Loopback, nomes locais e endereços de uma LAN controlada preservam o servidor e o
+proxy locais. Na origem publicada, `runtime-config.v1.json` é obrigatório, público,
+sem segredos e fechado ao endpoint regional de `us-east-1`, ao client público e ao
+Hosted UI Cognito aprovados; ausência, timeout ou campo extra mantém análise e
+documentos inertes.
+
+O login usa Authorization Code com PKCE S256. Verifier, state e timestamp existem
+somente em `sessionStorage` durante o redirect e são consumidos antes da troca do
+code. Access e refresh tokens ficam apenas na memória da página, sem renovação
+automática. O transporte adiciona Bearer somente à origem, paths e métodos reais
+do contrato, sempre sem credenciais, sem cache e sem seguir redirect. Expiração,
+`401` ou `403` limpam a sessão, pedem novo login e não repetem uma operação.
+
+Ao sair, o painel limpa a memória, tenta revogar o refresh token e segue para o
+endpoint Cognito mesmo se a revogação for recusada. Um access token já emitido
+pode continuar válido até expirar. O modo local/offline não promete revogação.
+
 ## Decodificação da resposta
 
 O contrato gerado publica a tabela de esquemas das cinco variantes de resposta.

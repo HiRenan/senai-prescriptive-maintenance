@@ -79,6 +79,13 @@ resource "aws_apigatewayv2_route" "default" {
   target             = "integrations/${aws_apigatewayv2_integration.api.id}"
 }
 
+resource "aws_apigatewayv2_route" "cors_preflight" {
+  api_id             = aws_apigatewayv2_api.demo.id
+  route_key          = "OPTIONS /{proxy+}"
+  authorization_type = "NONE"
+  target             = "integrations/${aws_apigatewayv2_integration.api.id}"
+}
+
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.demo.id
   name        = "$default"
@@ -108,5 +115,8 @@ resource "aws_apigatewayv2_stage" "default" {
     Purpose = "authenticated-api"
   }
 
-  depends_on = [aws_apigatewayv2_route.default]
+  depends_on = [
+    aws_apigatewayv2_route.cors_preflight,
+    aws_apigatewayv2_route.default,
+  ]
 }

@@ -86,9 +86,9 @@ BUILDX_NAME_EXPRESSION = "sen68-${{ github.run_id }}-${{ github.run_attempt }}"
 BUILDX_OUTPUT_EXPRESSION = "${{ steps.buildx.outputs.name }}"
 PROTECTED_MAIN_REVALIDATION = "Revalidate the current main revision after approval"
 EXPECTED_PERMISSION_POLICY_SHA256 = {
-    "deploy": "98ac8bc5b2ae866feecd22cf0ced69a52758ae4b719c6c61c23301af7dd7b77a",
-    "plan": "7c1c66b51df21c1ca326c6ca750c4dff3d11e7165f9efc4d727215e4c4d552b8",
-    "teardown": "c151c210df64eac31fca8c8875f90d908880c509ded000ad299ceb5a5cf7871a",
+    "deploy": "f5667616a0b5d91f9d39feaa0c79b19e4bc159cca4ad04fcad9fa545e303c309",
+    "plan": "86eb1b1f5a4966ab6e1adf6de4c07e6ee01753e895b22151232d7c2197e5b8ce",
+    "teardown": "f7fd9eb08901edc9cccba5ea6e58fbe93731efd2e8bc47193a8ca3e26db6a74a",
 }
 EXPECTED_PERMISSION_SIDS = {
     "deploy": (
@@ -102,6 +102,7 @@ EXPECTED_PERMISSION_SIDS = {
         "CfTagCreate",
         "CloudMapNew",
         "CloudMapTag",
+        "CognitoDomainRW",
         "CognitoRW",
         "CognitoTag",
         "Ec2Create",
@@ -111,6 +112,10 @@ EXPECTED_PERMISSION_SIDS = {
         "EcrWrites",
         "EcsCreate",
         "EcsSlr",
+        "FrontendBucketList",
+        "FrontendInvalidation",
+        "FrontendObjectDelete",
+        "FrontendObjectPut",
         "GlobalNew",
         "GlobalReads",
         "IamCreate",
@@ -237,6 +242,16 @@ EXPECTED_POLICY_PUBLICATION = {
                     "TaskNew",
                 ),
             ),
+            (
+                "${NAME_PREFIX}-demo-deploy-frontend-v1",
+                (
+                    "CognitoDomainRW",
+                    "FrontendBucketList",
+                    "FrontendInvalidation",
+                    "FrontendObjectDelete",
+                    "FrontendObjectPut",
+                ),
+            ),
         ),
     ),
     "teardown": (
@@ -251,16 +266,19 @@ EXPECTED_POLICY_PUBLICATION = {
 }
 REQUIRED_PROVIDER_ACTIONS = {
     "deploy": {
+        "cognito-idp:DescribeUserPoolDomain",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
     },
     "plan": {
+        "cognito-idp:DescribeUserPoolDomain",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
     },
     "teardown": {
+        "cognito-idp:DescribeUserPoolDomain",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
@@ -577,6 +595,7 @@ def audit_permission_policy(raw_policy: object, *, role_name: str) -> None:
                         "aws:ResourceTag/Profile",
                         "iam:AWSServiceName",
                         "iam:PassedToService",
+                        "s3:x-amz-server-side-encryption",
                     }
                     if not set(values) <= allowed_keys or any(
                         type(value) is not str or not value for value in values.values()
@@ -1160,6 +1179,20 @@ def audit_workflow(
             fail("Validação offline não usa environment protegido.")
         if "offline" not in workflow.lower():
             fail("Validação deve tornar a fronteira offline explícita.")
+        required_offline_fragments = (
+            '- "apps/api/openapi/v1.json"',
+            '- "apps/web/**"',
+            '- "docs/**"',
+            '- "infra/aws/demo/**"',
+            '- "package.json"',
+            '- "pnpm-lock.yaml"',
+            '- "pyproject.toml"',
+            '- "scripts/generate_web_contract.py"',
+            '- "uv.lock"',
+            "python infra/aws/demo/scripts/frontend_delivery_regression.py",
+        )
+        if any(fragment not in workflow for fragment in required_offline_fragments):
+            fail("Validação offline omite trigger ou regressão da publicação frontend.")
         return
 
     if (

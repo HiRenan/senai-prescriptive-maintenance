@@ -2,6 +2,10 @@ locals {
   environment = "demo"
   name        = "${var.name_prefix}-${local.environment}"
 
+  frontend_origin       = "https://${var.frontend_domain_name}"
+  cognito_domain_prefix = "spm-${substr(sha256("${var.name_prefix}:${var.frontend_domain_name}:${var.aws_region}"), 0, 20)}"
+  cognito_hosted_ui     = "https://${local.cognito_domain_prefix}.auth.${var.aws_region}.amazoncognito.com"
+
   placeholder_account_id   = "000000000000"
   placeholder_image_digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 

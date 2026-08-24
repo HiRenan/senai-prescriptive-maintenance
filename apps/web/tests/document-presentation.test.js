@@ -79,3 +79,15 @@ test("a falha sanitizada preserva só detalhe e campos publicados", () => {
     { label: "Nome do arquivo PDF", code: "string_pattern_mismatch" },
   ]);
 });
+
+test("falha de autenticação documental exige login e releitura antes de repetir", () => {
+  const view = presentDocumentFailure({
+    kind: "authentication",
+    status: 401,
+    detail: null,
+    issues: [],
+  });
+  assert.equal(view.title, "Autenticação necessária");
+  assert.match(view.nextStep, /Entre novamente/);
+  assert.match(view.nextStep, /consulte o estado atual/);
+});

@@ -248,6 +248,162 @@ def default_cloudfront_certificate(plan: Plan) -> None:
     ]
 
 
+def remove_frontend_response_policy_attachment(plan: Plan) -> None:
+    address = "aws_cloudfront_distribution.frontend"
+    expressions = object_dict(
+        configured_by_address(plan, address).get("expressions"),
+        context=f"{address}.expressions",
+    )
+    behavior = object_dict(
+        object_list(
+            expressions.get("default_cache_behavior"),
+            context="default_cache_behavior",
+        )[0],
+        context="default_cache_behavior[0]",
+    )
+    behavior.pop("response_headers_policy_id")
+
+
+def expand_frontend_methods(plan: Plan) -> None:
+    address = "aws_cloudfront_distribution.frontend"
+    change = object_dict(
+        change_by_address(plan, address).get("change"), context=f"{address}.change"
+    )
+    after = object_dict(change.get("after"), context=f"{address}.after")
+    behavior = object_dict(
+        object_list(after.get("default_cache_behavior"), context="default behavior")[0],
+        context="default behavior[0]",
+    )
+    behavior["allowed_methods"] = ["GET", "HEAD", "POST"]
+
+
+def response_policy_parts(plan: Plan) -> tuple[dict[str, Any], dict[str, Any]]:
+    address = "aws_cloudfront_response_headers_policy.frontend"
+    change = object_dict(
+        change_by_address(plan, address).get("change"), context=f"{address}.change"
+    )
+    after = object_dict(change.get("after"), context=f"{address}.after")
+    expressions = object_dict(
+        configured_by_address(plan, address).get("expressions"),
+        context=f"{address}.expressions",
+    )
+    return after, expressions
+
+
+def unsafe_frontend_csp(plan: Plan) -> None:
+    after, _ = response_policy_parts(plan)
+    security = object_dict(
+        object_list(after.get("security_headers_config"), context="security headers")[
+            0
+        ],
+        context="security headers[0]",
+    )
+    csp = object_dict(
+        object_list(security.get("content_security_policy"), context="CSP")[0],
+        context="CSP[0]",
+    )
+    csp["content_security_policy"] = "default-src *; script-src 'unsafe-inline'"
+
+
+def foreign_permissions_policy(plan: Plan) -> None:
+    after, _ = response_policy_parts(plan)
+    custom = object_dict(
+        object_list(
+            object_dict(
+                object_list(
+                    after.get("custom_headers_config"), context="custom headers"
+                )[0],
+                context="custom headers[0]",
+            ).get("items"),
+            context="custom header items",
+        )[0],
+        context="custom header item",
+    )
+    custom["value"] = "camera=*"
+
+
+def relaxed_referrer_policy(plan: Plan) -> None:
+    after, _ = response_policy_parts(plan)
+    security = object_dict(
+        object_list(after.get("security_headers_config"), context="security headers")[
+            0
+        ],
+        context="security headers[0]",
+    )
+    referrer = object_dict(
+        object_list(security.get("referrer_policy"), context="referrer policy")[0],
+        context="referrer policy[0]",
+    )
+    referrer["referrer_policy"] = "origin"
+
+
+def weaken_hsts(plan: Plan) -> None:
+    after, _ = response_policy_parts(plan)
+    security = object_dict(
+        object_list(after.get("security_headers_config"), context="security headers")[
+            0
+        ],
+        context="security headers[0]",
+    )
+    hsts = object_dict(
+        object_list(
+            security.get("strict_transport_security"), context="strict transport"
+        )[0],
+        context="strict transport[0]",
+    )
+    hsts["access_control_max_age_sec"] = 60
+    hsts["include_subdomains"] = False
+
+
+def wrong_cognito_managed_login_version(plan: Plan) -> None:
+    address = "aws_cognito_user_pool_domain.demo"
+    change = object_dict(
+        change_by_address(plan, address).get("change"), context=f"{address}.change"
+    )
+    object_dict(change.get("after"), context=f"{address}.after")[
+        "managed_login_version"
+    ] = 2
+
+
+def wrong_cognito_domain(plan: Plan) -> None:
+    address = "aws_cognito_user_pool_domain.demo"
+    change = object_dict(
+        change_by_address(plan, address).get("change"), context=f"{address}.change"
+    )
+    object_dict(change.get("after"), context=f"{address}.after")["domain"] = (
+        "spm-00000000000000000000"
+    )
+
+
+def frontend_cache_min_ttl(plan: Plan) -> None:
+    address = "aws_cloudfront_cache_policy.frontend"
+    change = object_dict(
+        change_by_address(plan, address).get("change"), context=f"{address}.change"
+    )
+    object_dict(change.get("after"), context=f"{address}.after")["min_ttl"] = 60
+
+
+def frontend_cache_forwards_headers(plan: Plan) -> None:
+    address = "aws_cloudfront_cache_policy.frontend"
+    change = object_dict(
+        change_by_address(plan, address).get("change"), context=f"{address}.change"
+    )
+    after = object_dict(change.get("after"), context=f"{address}.after")
+    parameters = object_dict(
+        object_list(
+            after.get("parameters_in_cache_key_and_forwarded_to_origin"),
+            context="cache parameters",
+        )[0],
+        context="cache parameters[0]",
+    )
+    headers = object_dict(
+        object_list(parameters.get("headers_config"), context="headers config")[0],
+        context="headers config[0]",
+    )
+    headers["header_behavior"] = "whitelist"
+    headers["headers"] = ["authorization"]
+
+
 def missing_security_group_description(plan: Plan) -> None:
     address = "aws_vpc_security_group_ingress_rule.api_from_vpc_link"
     resource = change_by_address(plan, address)
@@ -440,6 +596,46 @@ MUTATIONS: dict[str, tuple[Mutation, str]] = {
     "default_cloudfront_certificate": (
         default_cloudfront_certificate,
         "CloudFront não publica exclusivamente o domínio próprio esperado",
+    ),
+    "missing_frontend_response_policy": (
+        remove_frontend_response_policy_attachment,
+        "default_cache_behavior possui campos fora do contrato exato",
+    ),
+    "expanded_frontend_methods": (
+        expand_frontend_methods,
+        "CloudFront permite métodos além de GET e HEAD",
+    ),
+    "unsafe_frontend_csp": (
+        unsafe_frontend_csp,
+        "Headers de segurança do frontend divergem do contrato exato",
+    ),
+    "foreign_permissions_policy": (
+        foreign_permissions_policy,
+        "Permissions-Policy do frontend diverge do valor exato aprovado",
+    ),
+    "relaxed_referrer_policy": (
+        relaxed_referrer_policy,
+        "Headers de segurança do frontend divergem do contrato exato",
+    ),
+    "weakened_hsts": (
+        weaken_hsts,
+        "Headers de segurança do frontend divergem do contrato exato",
+    ),
+    "wrong_cognito_managed_login_version": (
+        wrong_cognito_managed_login_version,
+        "Domínio Cognito não é determinístico",
+    ),
+    "wrong_cognito_domain": (
+        wrong_cognito_domain,
+        "Domínio Cognito não é determinístico",
+    ),
+    "frontend_cache_min_ttl": (
+        frontend_cache_min_ttl,
+        "Cache policy do frontend diverge dos TTLs e forwarding exatos",
+    ),
+    "frontend_cache_forwards_headers": (
+        frontend_cache_forwards_headers,
+        "Cache policy do frontend diverge dos TTLs e forwarding exatos",
     ),
     "missing_security_group_description": (
         missing_security_group_description,

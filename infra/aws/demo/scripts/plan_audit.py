@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -17,6 +19,21 @@ REQUIRED_TAGS = {
     "Ticket": "SEN-67",
 }
 
+EXPECTED_FRONTEND_PERMISSIONS_POLICY = "camera=(), geolocation=(), microphone=()"
+EXPECTED_FRONTEND_CSP_DIRECTIVES = (
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self'",
+    "connect-src 'self' ${aws_apigatewayv2_api.demo.api_endpoint} "
+    "${local.cognito_hosted_ui}",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+)
+TERRAFORM_STORAGE_SOURCE = Path(__file__).resolve().parents[1] / "storage.tf"
+
 EXPECTED_RESOURCE_CHANGES = {
     "aws_apigatewayv2_api.demo": ("aws_apigatewayv2_api", ("create",)),
     "aws_apigatewayv2_authorizer.cognito": (
@@ -28,6 +45,10 @@ EXPECTED_RESOURCE_CHANGES = {
         ("create",),
     ),
     "aws_apigatewayv2_route.default": ("aws_apigatewayv2_route", ("create",)),
+    "aws_apigatewayv2_route.cors_preflight": (
+        "aws_apigatewayv2_route",
+        ("create",),
+    ),
     "aws_apigatewayv2_stage.default": ("aws_apigatewayv2_stage", ("create",)),
     "aws_apigatewayv2_vpc_link.api": (
         "aws_apigatewayv2_vpc_link",
@@ -74,6 +95,10 @@ EXPECTED_RESOURCE_CHANGES = {
     "aws_cognito_user_pool.demo": ("aws_cognito_user_pool", ("create",)),
     "aws_cognito_user_pool_client.demo": (
         "aws_cognito_user_pool_client",
+        ("create",),
+    ),
+    "aws_cognito_user_pool_domain.demo": (
+        "aws_cognito_user_pool_domain",
         ("create",),
     ),
     "aws_ecr_lifecycle_policy.api": ("aws_ecr_lifecycle_policy", ("create",)),
@@ -349,6 +374,7 @@ EXPECTED_OUTPUT_REFERENCES = {
         "aws_cognito_user_pool_client.demo.id",
         "aws_cognito_user_pool_client.demo",
     ),
+    "cognito_hosted_ui_origin": ("local.cognito_hosted_ui",),
     "cognito_user_pool_id": (
         "aws_cognito_user_pool.demo.id",
         "aws_cognito_user_pool.demo",
@@ -366,6 +392,15 @@ EXPECTED_OUTPUT_REFERENCES = {
     "frontend_url": ("var.frontend_domain_name",),
     "frontend_distribution_domain_name": (
         "aws_cloudfront_distribution.frontend.domain_name",
+        "aws_cloudfront_distribution.frontend",
+    ),
+    "frontend_bucket_name": (
+        'aws_s3_bucket.storage["frontend"].id',
+        'aws_s3_bucket.storage["frontend"]',
+        "aws_s3_bucket.storage",
+    ),
+    "frontend_distribution_id": (
+        "aws_cloudfront_distribution.frontend.id",
         "aws_cloudfront_distribution.frontend",
     ),
     "ingestion_dead_letter_queue_url": (
@@ -589,6 +624,321 @@ def audit_resource_scope(resources: list[Mapping[str, Any]]) -> None:
         fail(f"Plano possui {len(resources)} criações; esperado {expected_creates}.")
 
 
+def audit_frontend_csp_source() -> None:
+    try:
+        source = TERRAFORM_STORAGE_SOURCE.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise AuditError(
+            "Não foi possível auditar o CSP versionado do frontend."
+        ) from error
+    marker = 'resource "aws_cloudfront_response_headers_policy" "frontend" {'
+    start = source.find(marker)
+    end = source.find('\nresource "', start + len(marker))
+    if start < 0 or end < 0:
+        fail("Policy de headers do frontend não possui bloco Terraform canônico.")
+    block = source[start:end]
+    match = re.search(
+        r'content_security_policy\s*=\s*join\("; ",\s*\[(.*?)\]\)',
+        block,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        fail("CSP do frontend não usa a composição canônica auditável.")
+    directives = tuple(
+        item.group(1)
+        for line in match.group(1).splitlines()
+        if (item := re.fullmatch(r'\s*"([^"]+)",?\s*', line)) is not None
+    )
+    if directives != EXPECTED_FRONTEND_CSP_DIRECTIVES:
+        fail("CSP do frontend diverge das origens e diretivas exatas aprovadas.")
+
+
+def audit_frontend_response_headers(
+    resources: list[Mapping[str, Any]], plan: Mapping[str, Any]
+) -> None:
+    address = "aws_cloudfront_response_headers_policy.frontend"
+    policy_change = resource_by_address(resources, address=address)
+    policy = after(policy_change)
+    if (
+        policy.get("cors_config") != []
+        or policy.get("remove_headers_config") != []
+        or policy.get("server_timing_headers_config") != []
+    ):
+        fail(
+            "Policy de headers do frontend possui comportamento adicional não aprovado."
+        )
+    custom = sequence(
+        policy.get("custom_headers_config"), context="frontend custom headers"
+    )
+    expected_custom = [
+        {
+            "items": [
+                {
+                    "header": "Permissions-Policy",
+                    "override": True,
+                    "value": EXPECTED_FRONTEND_PERMISSIONS_POLICY,
+                }
+            ]
+        }
+    ]
+    if custom != expected_custom:
+        fail("Permissions-Policy do frontend diverge do valor exato aprovado.")
+
+    security = sequence(
+        policy.get("security_headers_config"), context="frontend security headers"
+    )
+    expected_security = [
+        {
+            "content_security_policy": [{"override": True}],
+            "content_type_options": [{"override": True}],
+            "frame_options": [{"frame_option": "DENY", "override": True}],
+            "referrer_policy": [{"override": True, "referrer_policy": "no-referrer"}],
+            "strict_transport_security": [
+                {
+                    "access_control_max_age_sec": 31536000,
+                    "include_subdomains": True,
+                    "override": True,
+                    "preload": False,
+                }
+            ],
+            "xss_protection": [
+                {
+                    "mode_block": True,
+                    "override": True,
+                    "protection": True,
+                    "report_uri": None,
+                }
+            ],
+        }
+    ]
+    if security != expected_security:
+        fail("Headers de segurança do frontend divergem do contrato exato.")
+    unknown = mapping(
+        mapping(policy_change.get("change"), context=f"{address}.change").get(
+            "after_unknown"
+        ),
+        context=f"{address}.after_unknown",
+    )
+    expected_unknown_security = [
+        {
+            "content_security_policy": [{"content_security_policy": True}],
+            "content_type_options": [{}],
+            "frame_options": [{}],
+            "referrer_policy": [{}],
+            "strict_transport_security": [{}],
+            "xss_protection": [{}],
+        }
+    ]
+    if unknown.get("security_headers_config") != expected_unknown_security:
+        fail("Plano não preserva o CSP calculado somente pelas origens exatas.")
+
+    expressions = mapping(
+        configured_resource(plan, address=address).get("expressions"),
+        context="frontend response headers expressions",
+    )
+    if set(expressions) != {
+        "comment",
+        "custom_headers_config",
+        "name",
+        "security_headers_config",
+    }:
+        fail("Policy de headers do frontend possui configuração fora do contrato.")
+    configured_custom = sequence(
+        expressions.get("custom_headers_config"), context="configured custom headers"
+    )
+    configured_security = sequence(
+        expressions.get("security_headers_config"),
+        context="configured security headers",
+    )
+    if len(configured_custom) != 1 or len(configured_security) != 1:
+        fail("Policy de headers do frontend não possui blocos únicos.")
+    custom_items = sequence(
+        mapping(configured_custom[0], context="configured custom headers[0]").get(
+            "items"
+        ),
+        context="configured custom header items",
+    )
+    if len(custom_items) != 1:
+        fail("Permissions-Policy deve ser o único custom header do frontend.")
+    custom_item = mapping(custom_items[0], context="configured custom header")
+    for key, expected in (
+        ("header", "Permissions-Policy"),
+        ("override", True),
+        ("value", EXPECTED_FRONTEND_PERMISSIONS_POLICY),
+    ):
+        exact_constant(
+            mapping(custom_item.get(key), context=f"frontend custom header {key}"),
+            expected=expected,
+            context=f"frontend custom header {key}",
+        )
+    security_item = mapping(
+        configured_security[0], context="configured security headers[0]"
+    )
+    if set(security_item) != {
+        "content_security_policy",
+        "content_type_options",
+        "frame_options",
+        "referrer_policy",
+        "strict_transport_security",
+        "xss_protection",
+    }:
+        fail("Bloco de security headers do frontend diverge da allowlist exata.")
+    csp_items = sequence(
+        security_item.get("content_security_policy"), context="configured CSP"
+    )
+    if len(csp_items) != 1:
+        fail("Frontend deve possuir exatamente um CSP.")
+    csp = mapping(csp_items[0], context="configured CSP[0]")
+    if set(csp) != {"content_security_policy", "override"}:
+        fail("CSP do frontend possui campos fora do contrato.")
+    exact_references(
+        mapping(csp.get("content_security_policy"), context="configured CSP value"),
+        expected=(
+            "aws_apigatewayv2_api.demo.api_endpoint",
+            "aws_apigatewayv2_api.demo",
+            "local.cognito_hosted_ui",
+        ),
+        context="configured CSP value",
+    )
+    exact_constant(
+        mapping(csp.get("override"), context="configured CSP override"),
+        expected=True,
+        context="configured CSP override",
+    )
+    exact_security_blocks = {
+        "content_type_options": {"override": True},
+        "frame_options": {"frame_option": "DENY", "override": True},
+        "referrer_policy": {"override": True, "referrer_policy": "no-referrer"},
+        "strict_transport_security": {
+            "access_control_max_age_sec": 31536000,
+            "include_subdomains": True,
+            "override": True,
+            "preload": False,
+        },
+        "xss_protection": {
+            "mode_block": True,
+            "override": True,
+            "protection": True,
+        },
+    }
+    for block_name, expected_values in exact_security_blocks.items():
+        blocks = sequence(
+            security_item.get(block_name), context=f"configured {block_name}"
+        )
+        if len(blocks) != 1:
+            fail(f"{block_name} deve possuir exatamente um bloco.")
+        block = mapping(blocks[0], context=f"configured {block_name}[0]")
+        if set(block) != set(expected_values):
+            fail(f"{block_name} possui campos fora do contrato.")
+        for key, expected in expected_values.items():
+            exact_constant(
+                mapping(block.get(key), context=f"configured {block_name}.{key}"),
+                expected=expected,
+                context=f"configured {block_name}.{key}",
+            )
+    audit_frontend_csp_source()
+
+
+def audit_frontend_cache_policy(
+    resources: list[Mapping[str, Any]], plan: Mapping[str, Any]
+) -> None:
+    address = "aws_cloudfront_cache_policy.frontend"
+    policy = after(resource_by_address(resources, address=address))
+    expected = {
+        "comment": "Cache mínimo para assets estáticos da demo.",
+        "default_ttl": 3600,
+        "max_ttl": 86400,
+        "min_ttl": 0,
+        "name": f"{variable_string(plan, name='name_prefix')}-demo-frontend",
+        "parameters_in_cache_key_and_forwarded_to_origin": [
+            {
+                "cookies_config": [{"cookie_behavior": "none", "cookies": []}],
+                "enable_accept_encoding_brotli": True,
+                "enable_accept_encoding_gzip": True,
+                "headers_config": [{"header_behavior": "none", "headers": []}],
+                "query_strings_config": [
+                    {"query_string_behavior": "none", "query_strings": []}
+                ],
+            }
+        ],
+    }
+    if policy != expected:
+        fail("Cache policy do frontend diverge dos TTLs e forwarding exatos.")
+
+    expressions = mapping(
+        configured_resource(plan, address=address).get("expressions"),
+        context="frontend cache policy expressions",
+    )
+    if set(expressions) != {
+        "comment",
+        "default_ttl",
+        "max_ttl",
+        "min_ttl",
+        "name",
+        "parameters_in_cache_key_and_forwarded_to_origin",
+    }:
+        fail("Cache policy do frontend possui campos fora do contrato.")
+    for key, expected_value in (
+        ("comment", "Cache mínimo para assets estáticos da demo."),
+        ("default_ttl", 3600),
+        ("max_ttl", 86400),
+        ("min_ttl", 0),
+    ):
+        exact_constant(
+            mapping(expressions.get(key), context=f"frontend cache {key}"),
+            expected=expected_value,
+            context=f"frontend cache {key}",
+        )
+    exact_references(
+        mapping(expressions.get("name"), context="frontend cache name"),
+        expected=("local.name",),
+        context="frontend cache name",
+    )
+    parameter_blocks = sequence(
+        expressions.get("parameters_in_cache_key_and_forwarded_to_origin"),
+        context="configured frontend cache parameters",
+    )
+    if len(parameter_blocks) != 1:
+        fail("Cache policy deve possuir exatamente um bloco de parâmetros.")
+    parameters = mapping(
+        parameter_blocks[0], context="configured frontend cache parameters[0]"
+    )
+    if set(parameters) != {
+        "cookies_config",
+        "enable_accept_encoding_brotli",
+        "enable_accept_encoding_gzip",
+        "headers_config",
+        "query_strings_config",
+    }:
+        fail("Cache policy possui parâmetros de forwarding fora do contrato.")
+    for key in ("enable_accept_encoding_brotli", "enable_accept_encoding_gzip"):
+        exact_constant(
+            mapping(parameters.get(key), context=f"frontend cache {key}"),
+            expected=True,
+            context=f"frontend cache {key}",
+        )
+    for block_name, behavior_name in (
+        ("cookies_config", "cookie_behavior"),
+        ("headers_config", "header_behavior"),
+        ("query_strings_config", "query_string_behavior"),
+    ):
+        blocks = sequence(
+            parameters.get(block_name), context=f"frontend cache {block_name}"
+        )
+        if len(blocks) != 1:
+            fail(f"Cache policy deve possuir um único {block_name}.")
+        block = mapping(blocks[0], context=f"frontend cache {block_name}[0]")
+        if set(block) != {behavior_name}:
+            fail(f"Cache policy {block_name} possui campos fora do contrato.")
+        exact_constant(
+            mapping(
+                block.get(behavior_name), context=f"frontend cache {behavior_name}"
+            ),
+            expected="none",
+            context=f"frontend cache {behavior_name}",
+        )
+
+
 def audit_storage(resources: list[Mapping[str, Any]], plan: Mapping[str, Any]) -> None:
     for bucket in require_count(resources, "aws_s3_bucket", 3):
         if after(bucket).get("force_destroy") is not True:
@@ -663,6 +1013,19 @@ def audit_storage(resources: list[Mapping[str, Any]], plan: Mapping[str, Any]) -
     distribution = after(require_count(resources, "aws_cloudfront_distribution", 1)[0])
     if distribution.get("retain_on_delete") is not False:
         fail("CloudFront seria retido no destroy.")
+    if distribution.get("wait_for_deployment") is not True:
+        fail("CloudFront não aguarda a distribuição antes da publicação.")
+    behaviors = sequence(
+        distribution.get("default_cache_behavior"),
+        context="cloudfront.default_cache_behavior",
+    )
+    if len(behaviors) != 1:
+        fail("CloudFront deve possuir exatamente um default_cache_behavior.")
+    behavior = mapping(behaviors[0], context="cloudfront.default_cache_behavior[0]")
+    if behavior.get("allowed_methods") != ["GET", "HEAD"] or behavior.get(
+        "cached_methods"
+    ) != ["GET", "HEAD"]:
+        fail("CloudFront permite métodos além de GET e HEAD no frontend.")
     frontend_domain = variable_string(plan, name="frontend_domain_name")
     certificate_arn = variable_string(plan, name="frontend_certificate_arn")
     account_id = variable_string(plan, name="aws_account_id")
@@ -701,6 +1064,81 @@ def audit_storage(resources: list[Mapping[str, Any]], plan: Mapping[str, Any]) -
         expected=("var.frontend_domain_name",),
         context="cloudfront.aliases",
     )
+    configured_behaviors = sequence(
+        distribution_expressions.get("default_cache_behavior"),
+        context="configured cloudfront.default_cache_behavior",
+    )
+    if len(configured_behaviors) != 1:
+        fail("CloudFront deve configurar exatamente um default_cache_behavior.")
+    configured_behavior = mapping(
+        configured_behaviors[0],
+        context="configured cloudfront.default_cache_behavior[0]",
+    )
+    if set(configured_behavior) != {
+        "allowed_methods",
+        "cache_policy_id",
+        "cached_methods",
+        "compress",
+        "response_headers_policy_id",
+        "target_origin_id",
+        "viewer_protocol_policy",
+    }:
+        fail("default_cache_behavior possui campos fora do contrato exato.")
+    for key, expected in (
+        ("allowed_methods", ["GET", "HEAD"]),
+        ("cached_methods", ["GET", "HEAD"]),
+        ("compress", True),
+        ("target_origin_id", "frontend-s3"),
+        ("viewer_protocol_policy", "redirect-to-https"),
+    ):
+        exact_constant(
+            mapping(configured_behavior.get(key), context=f"cloudfront {key}"),
+            expected=expected,
+            context=f"cloudfront {key}",
+        )
+    exact_references(
+        mapping(
+            configured_behavior.get("cache_policy_id"),
+            context="cloudfront cache policy attachment",
+        ),
+        expected=(
+            "aws_cloudfront_cache_policy.frontend.id",
+            "aws_cloudfront_cache_policy.frontend",
+        ),
+        context="cloudfront cache policy attachment",
+    )
+    exact_references(
+        mapping(
+            configured_behavior.get("response_headers_policy_id"),
+            context="cloudfront response headers policy attachment",
+        ),
+        expected=(
+            "aws_cloudfront_response_headers_policy.frontend.id",
+            "aws_cloudfront_response_headers_policy.frontend",
+        ),
+        context="cloudfront response headers policy attachment",
+    )
+    distribution_unknown = mapping(
+        mapping(
+            resource_by_address(
+                resources, address="aws_cloudfront_distribution.frontend"
+            ).get("change"),
+            context="cloudfront change",
+        ).get("after_unknown"),
+        context="cloudfront after_unknown",
+    )
+    unknown_behaviors = sequence(
+        distribution_unknown.get("default_cache_behavior"),
+        context="cloudfront unknown default_cache_behavior",
+    )
+    if (
+        len(unknown_behaviors) != 1
+        or mapping(unknown_behaviors[0], context="cloudfront unknown behavior[0]").get(
+            "response_headers_policy_id"
+        )
+        is not True
+    ):
+        fail("CloudFront não mantém o vínculo calculado ao response headers policy.")
     configured_viewers = sequence(
         distribution_expressions.get("viewer_certificate"),
         context="configured cloudfront.viewer_certificate",
@@ -736,6 +1174,9 @@ def audit_storage(resources: list[Mapping[str, Any]], plan: Mapping[str, Any]) -
             expected=expected,
             context=f"cloudfront.{key}",
         )
+
+    audit_frontend_cache_policy(resources, plan)
+    audit_frontend_response_headers(resources, plan)
 
     oac = after(require_count(resources, "aws_cloudfront_origin_access_control", 1)[0])
     if (
@@ -1105,9 +1546,64 @@ def audit_network_and_auth(
             context=f"CORS {key}",
         )
 
-    route = after(require_count(resources, "aws_apigatewayv2_route", 1)[0])
-    if route.get("authorization_type") != "JWT":
-        fail("A rota default da API não exige JWT.")
+    routes = {
+        str(after(route).get("route_key")): after(route)
+        for route in require_count(resources, "aws_apigatewayv2_route", 2)
+    }
+    if set(routes) != {"$default", "OPTIONS /{proxy+}"}:
+        fail("A API diverge das duas rotas exatas de negócio e preflight.")
+    default_route = routes["$default"]
+    preflight_route = routes["OPTIONS /{proxy+}"]
+    if default_route.get("authorization_type") != "JWT":
+        fail("A rota default da API não exige o JWT Cognito explícito.")
+    if (
+        preflight_route.get("authorization_type") != "NONE"
+        or preflight_route.get("authorizer_id") is not None
+    ):
+        fail("A rota OPTIONS /{proxy+} não está explicitamente livre de JWT.")
+    configured_default = configured_resource(
+        plan, address="aws_apigatewayv2_route.default"
+    )
+    default_expressions = mapping(
+        configured_default.get("expressions"), context="default route expressions"
+    )
+    for key, expected in (("authorization_type", "JWT"), ("route_key", "$default")):
+        exact_constant(
+            mapping(default_expressions.get(key), context=f"default route {key}"),
+            expected=expected,
+            context=f"default route {key}",
+        )
+    exact_references(
+        mapping(default_expressions.get("authorizer_id"), context="default authorizer"),
+        expected=(
+            "aws_apigatewayv2_authorizer.cognito.id",
+            "aws_apigatewayv2_authorizer.cognito",
+        ),
+        context="default authorizer",
+    )
+    configured_preflight = configured_resource(
+        plan, address="aws_apigatewayv2_route.cors_preflight"
+    )
+    preflight_expressions = mapping(
+        configured_preflight.get("expressions"), context="preflight expressions"
+    )
+    for key, expected in (
+        ("authorization_type", "NONE"),
+        ("route_key", "OPTIONS /{proxy+}"),
+    ):
+        exact_constant(
+            mapping(preflight_expressions.get(key), context=f"preflight {key}"),
+            expected=expected,
+            context=f"preflight {key}",
+        )
+    exact_references(
+        mapping(preflight_expressions.get("target"), context="preflight target"),
+        expected=(
+            "aws_apigatewayv2_integration.api.id",
+            "aws_apigatewayv2_integration.api",
+        ),
+        context="preflight target",
+    )
 
     client = after(require_count(resources, "aws_cognito_user_pool_client", 1)[0])
     token_units = sequence(
@@ -1119,8 +1615,14 @@ def audit_network_and_auth(
         != [
             "ALLOW_ADMIN_USER_PASSWORD_AUTH",
             "ALLOW_REFRESH_TOKEN_AUTH",
-            "ALLOW_USER_SRP_AUTH",
         ]
+        or client.get("allowed_oauth_flows") != ["code"]
+        or client.get("allowed_oauth_flows_user_pool_client") is not True
+        or client.get("allowed_oauth_scopes") != ["openid"]
+        or client.get("callback_urls") != [f"{frontend_origin}/"]
+        or client.get("default_redirect_uri") != f"{frontend_origin}/"
+        or client.get("logout_urls") != [f"{frontend_origin}/"]
+        or client.get("supported_identity_providers") != ["COGNITO"]
         or client.get("access_token_validity") != 2
         or client.get("id_token_validity") != 2
         or client.get("refresh_token_validity") != 1
@@ -1134,6 +1636,47 @@ def audit_network_and_auth(
         ]
     ):
         fail("Cliente Cognito diverge dos fluxos mínimos ou da validade protegida.")
+
+    domain = after(require_count(resources, "aws_cognito_user_pool_domain", 1)[0])
+    domain_seed = ":".join(
+        (
+            variable_string(plan, name="name_prefix"),
+            variable_string(plan, name="frontend_domain_name"),
+            variable_string(plan, name="aws_region"),
+        )
+    )
+    expected_domain = f"spm-{hashlib.sha256(domain_seed.encode()).hexdigest()[:20]}"
+    if (
+        domain.get("domain") != expected_domain
+        or domain.get("managed_login_version") != 1
+        or re.fullmatch(r"spm-[0-9a-f]{20}", expected_domain) is None
+        or variable_string(plan, name="aws_account_id") in expected_domain
+    ):
+        fail("Domínio Cognito não é determinístico, opaco e independente da conta.")
+    configured_domain = configured_resource(
+        plan, address="aws_cognito_user_pool_domain.demo"
+    )
+    domain_expressions = mapping(
+        configured_domain.get("expressions"), context="cognito domain expressions"
+    )
+    exact_references(
+        mapping(domain_expressions.get("domain"), context="cognito domain"),
+        expected=("local.cognito_domain_prefix",),
+        context="cognito domain",
+    )
+    exact_references(
+        mapping(domain_expressions.get("user_pool_id"), context="cognito domain pool"),
+        expected=("aws_cognito_user_pool.demo.id", "aws_cognito_user_pool.demo"),
+        context="cognito domain pool",
+    )
+    exact_constant(
+        mapping(
+            domain_expressions.get("managed_login_version"),
+            context="cognito managed login version",
+        ),
+        expected=1,
+        context="cognito managed login version",
+    )
 
     user_pool = after(require_count(resources, "aws_cognito_user_pool", 1)[0])
     if user_pool.get("deletion_protection") != "INACTIVE":
@@ -1724,8 +2267,20 @@ def audit_budget_observability_and_tags(
 def audit_outputs(plan: Mapping[str, Any]) -> None:
     expected_names = set(EXPECTED_OUTPUT_REFERENCES)
     frontend_url = f"https://{variable_string(plan, name='frontend_domain_name')}"
+    domain_seed = ":".join(
+        (
+            variable_string(plan, name="name_prefix"),
+            variable_string(plan, name="frontend_domain_name"),
+            variable_string(plan, name="aws_region"),
+        )
+    )
+    cognito_prefix = f"spm-{hashlib.sha256(domain_seed.encode()).hexdigest()[:20]}"
     known_output_values: dict[str, object] = {
         "bedrock_enabled": False,
+        "cognito_hosted_ui_origin": (
+            f"https://{cognito_prefix}.auth."
+            f"{variable_string(plan, name='aws_region')}.amazoncognito.com"
+        ),
         "cors_allowed_origin": frontend_url,
         "frontend_url": frontend_url,
     }

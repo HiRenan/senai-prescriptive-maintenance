@@ -10,6 +10,7 @@ import {
 import { outcomeNames, responseExample } from "./helpers/contract-fixtures.js";
 
 const FAILURE_KINDS = [
+  "authentication",
   "input",
   "network",
   "timeout",
@@ -195,6 +196,14 @@ test("timeout não promete cancelamento remoto e offline não inventa outcome", 
   assert.match(timeout.statement, /cancelado/i);
   assert.match(offline.statement, /não inferiu nem inventou/i);
   assert.match(offline.nextStep, /cinco exemplos sintéticos/i);
+});
+
+test("falha de autenticação exige novo login e proíbe replay automático", () => {
+  const report = presentFailure(failure("authentication", { status: 403 }));
+  assert.equal(report.title, "Autenticação necessária");
+  assert.match(report.nextStep, /Entre novamente/);
+  assert.match(report.nextStep, /não repetirá/i);
+  assert.deepEqual(report.identifiers, [{ label: "Status HTTP", value: "403" }]);
 });
 
 test("a falha de validação lista os campos recusados com rótulo legível", () => {

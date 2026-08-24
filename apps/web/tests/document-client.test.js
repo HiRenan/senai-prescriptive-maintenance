@@ -150,3 +150,14 @@ test("erros publicados são distinguidos e sucesso fora da operação é recusad
   assert.equal(wrongSuccess.ok, false);
   assert.equal(wrongSuccess.failure.kind, "unexpected");
 });
+
+test("401 e 403 são classificados como autenticação nas operações documentais", async () => {
+  for (const status of [401, 403]) {
+    const output = await createDocumentClient({
+      fetchImpl: async () => response(status, {}),
+    }).listDocuments();
+    assert.equal(output.ok, false);
+    assert.equal(output.failure.kind, "authentication");
+    assert.equal(output.failure.status, status);
+  }
+});

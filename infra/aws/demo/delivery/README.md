@@ -182,7 +182,7 @@ apenas o namespace do comando AWS CLI.
 ### Publicação e margem das permission policies
 
 O contrato declara como cada policy deve ser publicada. Plan e teardown usam um
-documento inline cada; deploy usa duas customer-managed policies versionadas e
+documento inline cada; deploy usa três customer-managed policies versionadas e
 anexadas à mesma role. Essa divisão não altera ações, recursos ou condições: cada
 Sid aparece exatamente uma vez, e o auditor falha se houver omissão, duplicidade,
 mudança de modo ou nome sem versão.
@@ -193,19 +193,20 @@ caracteres livres em inline policies e 900 em cada customer-managed policy.
 
 | role/documento | modo | tamanho | limite | margem |
 | --- | --- | ---: | ---: | ---: |
-| plan / `senai-pm-demo-plan-v1` | inline | 2.853 | 10.240 | 7.387 |
-| deploy / `senai-pm-demo-deploy-core-v1` | customer-managed | 4.987 | 6.144 | 1.157 |
+| plan / `senai-pm-demo-plan-v1` | inline | 2.890 | 10.240 | 7.350 |
+| deploy / `senai-pm-demo-deploy-core-v1` | customer-managed | 5.024 | 6.144 | 1.120 |
 | deploy / `senai-pm-demo-deploy-runtime-v1` | customer-managed | 5.050 | 6.144 | 1.094 |
-| teardown / `senai-pm-demo-teardown-v1` | inline | 6.727 | 10.240 | 3.513 |
+| deploy / `senai-pm-demo-deploy-frontend-v1` | customer-managed | 1.097 | 6.144 | 5.047 |
+| teardown / `senai-pm-demo-teardown-v1` | inline | 6.801 | 10.240 | 3.439 |
 
-Sem particionamento, o deploy renderizado ocuparia 9.999 dos 10.240 caracteres
-inline e deixaria só 241 de margem. As duas policies anexadas consomem 2 das 10
-associações customer-managed padrão da role, preservando 8 para uma evolução
-deliberada. Uma policy futura, inclusive de frontend, deve ganhar nome versionado
-e só pode ser anexada depois de passar pelos mesmos limites; não se remove
-condição nem se amplia wildcard para acomodá-la.
+Sem particionamento, o deploy renderizado ocuparia 11.095 caracteres e excederia
+o limite inline de 10.240. As três policies anexadas consomem 3 das 10 associações
+customer-managed padrão da role, preservando 7. O documento `frontend-v1` cobre
+explicitamente criação do domínio, listagem do bucket, uploads AES256 nas três
+famílias de key aprovadas, limpeza somente de `assets/*` e invalidação/espera da
+distribuição; o bootstrap deve publicar e anexar os três documentos.
 
-O administrador gera os quatro documentos sanitizados e o manifesto de hashes
+O administrador gera os cinco documentos sanitizados e o manifesto de hashes
 em um diretório novo antes do bootstrap:
 
 ```powershell
@@ -232,7 +233,8 @@ state aparece nos statements globais abaixo.
   `cloudfront:GetOriginAccessControl`, `cloudfront:GetResponseHeadersPolicy`,
   `cloudfront:ListTagsForResource`, `cloudwatch:DescribeAlarms`,
   `cloudwatch:ListTagsForResource`, `cognito-idp:DescribeUserPool`,
-  `cognito-idp:DescribeUserPoolClient`, `cognito-idp:ListTagsForResource`,
+  `cognito-idp:DescribeUserPoolClient`, `cognito-idp:DescribeUserPoolDomain`,
+  `cognito-idp:ListTagsForResource`,
   `ec2:DescribeAvailabilityZones`, `ec2:DescribeRouteTables`,
   `ec2:DescribeSecurityGroupRules`, `ec2:DescribeSecurityGroups`,
   `ec2:DescribeSubnets`, `ec2:DescribeVpcAttribute`,
@@ -254,7 +256,8 @@ state aparece nos statements globais abaixo.
   `cloudfront:GetOriginAccessControl`, `cloudfront:GetResponseHeadersPolicy`,
   `cloudfront:ListTagsForResource`, `cloudwatch:DescribeAlarms`,
   `cloudwatch:ListTagsForResource`, `cognito-idp:DescribeUserPool`,
-  `cognito-idp:DescribeUserPoolClient`, `cognito-idp:ListTagsForResource`,
+  `cognito-idp:DescribeUserPoolClient`, `cognito-idp:DescribeUserPoolDomain`,
+  `cognito-idp:ListTagsForResource`,
   `ec2:DescribeAvailabilityZones`, `ec2:DescribeRouteTables`,
   `ec2:DescribeSecurityGroupRules`, `ec2:DescribeSecurityGroups`,
   `ec2:DescribeSubnets`, `ec2:DescribeVpcAttribute`,
@@ -297,7 +300,8 @@ state aparece nos statements globais abaixo.
   `cloudfront:ListOriginAccessControls`, `cloudfront:ListResponseHeadersPolicies`,
   `cloudfront:ListTagsForResource`, `cloudwatch:DescribeAlarms`,
   `cloudwatch:ListTagsForResource`, `cognito-idp:DescribeUserPool`,
-  `cognito-idp:DescribeUserPoolClient`, `cognito-idp:ListTagsForResource`,
+  `cognito-idp:DescribeUserPoolClient`, `cognito-idp:DescribeUserPoolDomain`,
+  `cognito-idp:ListTagsForResource`,
   `cognito-idp:ListUserPools`, `ec2:DescribeRouteTables`,
   `ec2:DescribeSecurityGroupRules`, `ec2:DescribeSecurityGroups`,
   `ec2:DescribeSubnets`, `ec2:DescribeVpcAttribute`,
@@ -357,6 +361,21 @@ enumerada para não esconder privilégio dentro de um ARN aparentemente restrito
 - Deploy, `CognitoTag` (ARN): `cognito-idp:TagResource`. O user pool ID é
   gerado; account/região ficam no ARN e o request deve conter
   `Profile = aws-demo`.
+- Deploy, `CognitoDomainRW` (ARN): `cognito-idp:CreateUserPoolDomain`. O pool ID
+  é gerado; account/região e o state/plano aprovado limitam o domínio
+  determinístico e opaco. A leitura `DescribeUserPoolDomain`, que exige
+  `Resource: "*"`, permanece somente em `GlobalReads`.
+- Deploy, `FrontendInvalidation` (ARN): `cloudfront:CreateInvalidation` e
+  `cloudfront:GetInvalidation`. O distribution ID é gerado, mas o ARN conserva
+  a conta e `aws:ResourceTag/Profile = aws-demo` limita o alvo; o controlador usa
+  somente o ID exato retornado pelo Terraform.
+- Deploy, `FrontendObjectDelete` (ARN): `s3:DeleteObject`. O wildcard cobre
+  somente `assets/*` no bucket frontend exato; index e runtime config nunca são
+  removidos pela limpeza residual.
+- Deploy, `FrontendObjectPut` (ARN): `s3:PutObject`. Os recursos permitem somente
+  `index.html`, `runtime-config.v1.json` e `assets/*` no bucket frontend exato,
+  com `s3:x-amz-server-side-encryption = AES256`; staging e upload continuam
+  fechados pela allowlist versionada.
 - Deploy, `AlarmCreate` (ARN): `cloudwatch:PutMetricAlarm`. Somente o
   sufixo do alarm name usa wildcard após `${NAME_PREFIX}-demo-`; account/região
   e `aws:RequestTag/Profile = aws-demo` permanecem obrigatórios.
@@ -384,8 +403,9 @@ enumerada para não esconder privilégio dentro de um ARN aparentemente restrito
   tipos não aceitam tags; account e tipo ficam no ARN e nomes/IDs precisam vir
   do state/plano aprovado.
 - Teardown, `DestroyDemoCognitoClient` (ARN):
-  `cognito-idp:DeleteUserPoolClient`. O pool ID é gerado; account/região e
-  identidade pré-destroy do state/plano limitam o alvo.
+  `cognito-idp:DeleteUserPoolClient` e `cognito-idp:DeleteUserPoolDomain`. O pool
+  ID é gerado; account/região e identidade pré-destroy do state/plano limitam o
+  alvo.
 - Teardown, `DestroyTaggedDemoResources` (ARN):
   `cloudfront:DeleteDistribution`, `cloudfront:UntagResource`,
   `cloudfront:UpdateDistribution`, `cloudwatch:DeleteAlarms`,
@@ -519,10 +539,11 @@ Referências primárias:
 
 ## Runbook sanitizado do usuário e JWT efêmeros
 
-O app client habilita exatamente `ALLOW_USER_SRP_AUTH`,
-`ALLOW_REFRESH_TOKEN_AUTH` e, como único fluxo adicional para este runbook,
-`ALLOW_ADMIN_USER_PASSWORD_AUTH`. `ALLOW_USER_PASSWORD_AUTH` e custom auth
-permanecem desabilitados. O operador autorizado usa uma identidade humana já
+O app client habilita exatamente `ALLOW_REFRESH_TOKEN_AUTH` e
+`ALLOW_ADMIN_USER_PASSWORD_AUTH` para este runbook. `ALLOW_USER_SRP_AUTH`,
+`ALLOW_USER_PASSWORD_AUTH` e custom auth permanecem desabilitados; a Hosted UI
+aceita separadamente apenas Authorization Code com PKCE. O operador autorizado
+usa uma identidade humana já
 existente e separada das três roles de entrega, com somente
 `cognito-idp:AdminCreateUser`, `cognito-idp:AdminSetUserPassword`,
 `cognito-idp:AdminInitiateAuth` e `cognito-idp:AdminDeleteUser` no ARN exato do
@@ -706,10 +727,16 @@ No dispatch de runtime, o runner:
    apontar para a nova revisão da task;
 8. aplica o plano salvo e relê o state privado, comprovando novamente imagem por
    digest e service ligado ao ARN exato da task revision;
-9. chama anonimamente `GET /health/ready` e um `POST /analysis` sintético e exige
+9. monta a allowlist de `apps/web/src`, gera o runtime config somente com outputs
+   públicos do mesmo state, envia assets imutáveis, runtime config e `index.html`
+   nessa ordem, limpa somente assets residuais validados, invalida o CloudFront e
+   espera `Completed`;
+10. chama anonimamente `GET /health/ready` e um `POST /analysis` sintético e exige
    `401` ou `403` nos dois, sem ler ou imprimir seus corpos;
-10. somente depois executa readiness autenticada e os cenários sintéticos
-    normal, falha documentada e recusa sem documentação.
+11. executa readiness e cenários autenticados na API e, pela URL publicada,
+    verifica index, todos os módulos, MIME/cache, runtime config, headers, o GET
+    sintético de `/oauth2/authorize`, preflight sem JWT, POST anônimo recusado e
+    POST autenticado com um dos cinco outcomes.
 
 A tag deriva do HEAD exato e protegido de `main`, e o repositório ECR rejeita
 sobrescrita. Assim, repetir o mesmo deploy depois de uma falha tardia de runtime
@@ -717,14 +744,15 @@ ou smoke reaproveita o digest já publicado; não tenta sobrescrever a tag
 imutável. O reuso continua fail-closed e não aceita catálogo parcial ou schema
 inesperado.
 
-O smoke aceita apenas endpoint HTTPS regional do API Gateway, JWT com estrutura
-canônica e respostas JSON fechadas. O preflight anônimo rejeita `2xx`, redirect
-ou qualquer status fora de `401`/`403` sem interpretar o corpo. O smoke não segue
-redirect, limita tamanho e tempo e não imprime endpoint, token, request ou
-resposta. Overrides de raiz TLS e `SSLKEYLOGFILE` fecham o gate antes da conexão.
-Ele prova integração
-operacional dos contratos quando SEN-46 estiver disponível; não substitui testes
-de domínio nem comprova segurança semântica universal.
+Os smokes aceitam apenas endpoints HTTPS regionais aprovados, JWT com estrutura
+canônica e respostas fechadas. Não seguem redirect, ignoram proxies do ambiente,
+limitam tamanho e tempo e não imprimem endpoint, token, request ou resposta;
+overrides de raiz TLS e `SSLKEYLOGFILE` fecham o gate antes da conexão. A prova do
+authorize usa `client_id`, callback, scope, state e desafio PKCE S256 sintéticos,
+sem senha, cookie ou bearer, e recusa erro ou destino fora da origem Cognito. Ela
+confirma a configuração pública; a jornada humana completa de login/logout e sua
+evidência live permanecem na SEN-74. O token temporário do smoke continua emitido
+pelo fluxo administrativo versionado e não substitui essa jornada humana.
 
 ## Teardown e prova negativa
 
@@ -747,9 +775,9 @@ apply e segue para a prova negativa. Ao final, `terraform state list` precisa
 estar vazio e duas provas se complementam:
 
 - busca por três tags fixas com Resource Groups Tagging API;
-- scans explícitos e limitados para S3, ECR, ECS, Logs, SQS, IAM, Cognito, API
-  Gateway, Cloud Map, Budgets, CloudFront, VPCs, subnets, route tables, security
-  groups, endpoints e alarmes.
+- scans explícitos e limitados para S3, ECR, ECS, Logs, SQS, IAM, pools e domínio
+  Cognito, API Gateway, Cloud Map, Budgets, CloudFront, VPCs, subnets, route
+  tables, security groups, endpoints e alarmes.
 
 Uma consulta que falha, muda schema, excede o limite ou encontra qualquer item
 do escopo reprova a operação. O inventário não afirma ausência de recursos fora
@@ -780,11 +808,12 @@ externa explícita.
 
 - O bootstrap e a prova real dependem de autorização e conta AWS; nenhum check
   offline substitui a avaliação das policies pelo serviço.
-- A policy lógica de deploy ocupa 9.999 dos 10.240 caracteres inline e por isso
-  é publicada em dois documentos customer-managed de 4.987 e 5.050 caracteres,
-  com margens de 1.157 e 1.094. O bootstrap precisa usar exatamente essa divisão,
-  medir de novo e validar cada documento no Access Analyzer; qualquer excesso ou
-  ação faltante bloqueia o exercício.
+- A policy lógica de deploy ocupa 11.095 caracteres e por isso é publicada em
+  três documentos customer-managed de 5.024, 5.050 e 1.097 caracteres, com
+  margens de 1.120, 1.094 e 5.047. O bootstrap precisa publicar e anexar os três,
+  incluindo `frontend-v1` para upload/invalidação, medir de novo e validar cada
+  documento no Access Analyzer; qualquer excesso ou ação faltante bloqueia o
+  exercício.
 - Os três environments/reviewer/restrições a `main` permanecem controles
   externos, embora a configuração efetiva tenha sido comprovada somente para
   leitura em 23/08/2026. A API REST e a segunda aprovação do mesmo operador

@@ -159,6 +159,7 @@
               "cloudwatch:ListTagsForResource",
               "cognito-idp:DescribeUserPool",
               "cognito-idp:DescribeUserPoolClient",
+              "cognito-idp:DescribeUserPoolDomain",
               "cognito-idp:ListTagsForResource",
               "ec2:DescribeAvailabilityZones",
               "ec2:DescribeRouteTables",
@@ -452,6 +453,7 @@
               "cloudwatch:ListTagsForResource",
               "cognito-idp:DescribeUserPool",
               "cognito-idp:DescribeUserPoolClient",
+              "cognito-idp:DescribeUserPoolDomain",
               "cognito-idp:ListTagsForResource",
               "ec2:DescribeAvailabilityZones",
               "ec2:DescribeRouteTables",
@@ -621,6 +623,53 @@
             }
           },
           {
+            "Sid": "CognitoDomainRW",
+            "Effect": "Allow",
+            "Action": "cognito-idp:CreateUserPoolDomain",
+            "Resource": "arn:aws:cognito-idp:${AWS_REGION}:${AWS_ACCOUNT_ID}:userpool/*"
+          },
+          {
+            "Sid": "FrontendBucketList",
+            "Effect": "Allow",
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+          },
+          {
+            "Sid": "FrontendObjectDelete",
+            "Effect": "Allow",
+            "Action": "s3:DeleteObject",
+            "Resource": "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}/assets/*"
+          },
+          {
+            "Sid": "FrontendObjectPut",
+            "Effect": "Allow",
+            "Action": "s3:PutObject",
+            "Resource": [
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}/assets/*",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}/index.html",
+              "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}/runtime-config.v1.json"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "s3:x-amz-server-side-encryption": "AES256"
+              }
+            }
+          },
+          {
+            "Sid": "FrontendInvalidation",
+            "Effect": "Allow",
+            "Action": [
+              "cloudfront:CreateInvalidation",
+              "cloudfront:GetInvalidation"
+            ],
+            "Resource": "arn:aws:cloudfront::${AWS_ACCOUNT_ID}:distribution/*",
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
             "Sid": "AlarmCreate",
             "Effect": "Allow",
             "Action": "cloudwatch:PutMetricAlarm",
@@ -771,6 +820,16 @@
               "TaggedRW",
               "TaskDeregister",
               "TaskNew"
+            ]
+          },
+          {
+            "name": "${NAME_PREFIX}-demo-deploy-frontend-v1",
+            "sids": [
+              "CognitoDomainRW",
+              "FrontendBucketList",
+              "FrontendInvalidation",
+              "FrontendObjectDelete",
+              "FrontendObjectPut"
             ]
           }
         ]
@@ -950,6 +1009,7 @@
               "cloudwatch:ListTagsForResource",
               "cognito-idp:DescribeUserPool",
               "cognito-idp:DescribeUserPoolClient",
+              "cognito-idp:DescribeUserPoolDomain",
               "cognito-idp:ListTagsForResource",
               "cognito-idp:ListUserPools",
               "ec2:DescribeRouteTables",
@@ -1021,7 +1081,10 @@
           {
             "Sid": "DestroyDemoCognitoClient",
             "Effect": "Allow",
-            "Action": "cognito-idp:DeleteUserPoolClient",
+            "Action": [
+              "cognito-idp:DeleteUserPoolClient",
+              "cognito-idp:DeleteUserPoolDomain"
+            ],
             "Resource": "arn:aws:cognito-idp:${AWS_REGION}:${AWS_ACCOUNT_ID}:userpool/*"
           },
           {

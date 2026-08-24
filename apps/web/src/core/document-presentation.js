@@ -119,6 +119,11 @@ const CURRENCY_COPY = Object.freeze({
 });
 
 const FAILURE_COPY = Object.freeze({
+  authentication: {
+    title: "Autenticação necessária",
+    statement: "A sessão não existe mais ou foi recusada antes de alterar documentos.",
+    nextStep: "Entre novamente e consulte o estado atual antes de repetir um comando.",
+  },
   network: {
     title: "A API não respondeu",
     statement: "O navegador não conseguiu falar com o ciclo documental.",
