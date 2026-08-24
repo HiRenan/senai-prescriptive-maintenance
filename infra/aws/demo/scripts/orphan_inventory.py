@@ -126,6 +126,7 @@ class InventoryQuery:
     single_object: bool = False
     allow_not_found: bool = False
     allow_empty_output: bool = False
+    allow_empty_parent: bool = False
 
 
 def safe_environment(host_environment: Mapping[str, str]) -> InventoryEnvironment:
@@ -234,6 +235,7 @@ def nested_collection(
     path: Sequence[str],
     *,
     allow_missing_final: bool,
+    allow_empty_parent: bool,
 ) -> list[object]:
     if not path:
         fail("Consulta de inventário não definiu uma coleção.")
@@ -241,7 +243,9 @@ def nested_collection(
     for index, key in enumerate(path):
         current = mapping(value, context="estrutura do inventário")
         if key not in current or current[key] is None:
-            if allow_missing_final and index == len(path) - 1:
+            if allow_missing_final and (
+                index == len(path) - 1 or (allow_empty_parent and not current)
+            ):
                 return []
             fail("Resposta AWS omitiu uma coleção obrigatória do inventário.")
         value = current[key]
@@ -510,6 +514,7 @@ def inventory_queries(
             distribution_matches(frontend_domain),
             allow_missing_collection=True,
             allow_empty_output=True,
+            allow_empty_parent=True,
         ),
         InventoryQuery(
             "CloudFront origin access controls",
@@ -518,6 +523,7 @@ def inventory_queries(
             exact_name("Name", {f"{name}-frontend"}),
             allow_missing_collection=True,
             allow_empty_output=True,
+            allow_empty_parent=True,
         ),
         InventoryQuery(
             "CloudFront cache policies",
@@ -638,6 +644,7 @@ def scan_inventory(queries: Sequence[InventoryQuery], runner: Runner) -> int:
             document,
             query.collection_path,
             allow_missing_final=query.allow_missing_collection,
+            allow_empty_parent=query.allow_empty_parent,
         )
         residual_count += sum(1 for item in items if query.predicate(item))
     if residual_count:

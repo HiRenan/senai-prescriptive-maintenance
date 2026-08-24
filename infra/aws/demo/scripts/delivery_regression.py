@@ -2156,6 +2156,25 @@ def prove_inventory_is_fail_closed() -> int:
         OrphanInventoryError,
     )
 
+    empty_parent_query = InventoryQuery(
+        name="synthetic optional empty parent",
+        arguments=("synthetic",),
+        collection_path=("Container", "Items"),
+        predicate=lambda item: item == "residual",
+        allow_missing_collection=True,
+        allow_empty_parent=True,
+    )
+    scan_inventory((empty_parent_query,), missing_collection_runner)
+
+    def unexpected_parent_runner(arguments: tuple[str, ...]) -> CommandResult:
+        del arguments
+        return CommandResult(0, '{"Unexpected":[]}', "")
+
+    expect_failure(
+        lambda: scan_inventory((empty_parent_query,), unexpected_parent_runner),
+        OrphanInventoryError,
+    )
+
     blank_output_query = InventoryQuery(
         name="synthetic optional blank",
         arguments=("synthetic",),
@@ -2246,6 +2265,16 @@ def prove_inventory_is_fail_closed() -> int:
     ):
         raise DeliveryRegressionError(
             "Inventário não limita respostas vazias às listas AWS aprovadas."
+        )
+    empty_parent_names = {
+        candidate.name for candidate in actual_queries if candidate.allow_empty_parent
+    }
+    if empty_parent_names != {
+        "CloudFront distributions",
+        "CloudFront origin access controls",
+    }:
+        raise DeliveryRegressionError(
+            "Inventário ampliou a exceção de contêiner vazio além do CloudFront."
         )
     origin_access_queries = tuple(
         candidate
@@ -2373,7 +2402,7 @@ def prove_inventory_is_fail_closed() -> int:
         raise DeliveryRegressionError("Inventário herdou proxy ou trust root hostil.")
     if SENSITIVE_MARKER in repr(inventory_environment):
         raise DeliveryRegressionError("Ambiente do inventário expõe credencial.")
-    return 15
+    return 18
 
 
 def prove_inventory_capture_is_bounded() -> int:
