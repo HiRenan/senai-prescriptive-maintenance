@@ -109,6 +109,11 @@ do contrato.
 
 ### Sem framework e sem build
 
+> Decisão superada pela
+> [ADR 0005](../adr/0005-react-vite-typescript-frontend.md): o painel passou a
+> ser React com TypeScript estrito, empacotado pelo Vite. O registro abaixo
+> descreve o que valia na SEN-47.
+
 O painel é ESM servido direto ao navegador. A única dependência introduzida é
 `typescript` como devDependency de raiz, usada para verificar JavaScript anotado
 com JSDoc contra os tipos gerados. Não há bundler, transpilação nem artefato de

@@ -32,46 +32,17 @@ INVALIDATION_ID_PATTERN = re.compile(r"^[A-Z0-9]{8,32}$")
 MAX_SOURCE_FILE_BYTES = 1_000_000
 MAX_SOURCE_TOTAL_BYTES = 4_000_000
 
-PUBLISHED_SOURCE_PATHS = frozenset(
-    {
-        "api/analysis-client.js",
-        "api/authenticated-fetch.js",
-        "api/document-client.js",
-        "api/offline-analysis-client.js",
-        "auth/cognito.js",
-        "auth/pkce.js",
-        "auth/session.js",
-        "config/runtime-config.js",
-        "core/comparison.js",
-        "core/contract-decode.js",
-        "core/document-presentation.js",
-        "core/document-registration.js",
-        "core/features.js",
-        "core/format.js",
-        "core/latest-request.js",
-        "core/presentation.js",
-        "core/request-import.js",
-        "generated/analysis-contract.js",
-        "generated/document-contract.js",
-        "index.html",
-        "main.js",
-        "styles.css",
-        "ui/console-view.js",
-        "ui/document-marks.js",
-        "ui/documents-view.js",
-        "ui/dom.js",
-        "ui/marks.js",
-        "ui/report-view.js",
-        "ui/workspace-navigation.js",
-    }
+# The published inventory is a build output, so it is validated as a closed
+# grammar instead of a file allowlist: exactly these unhashed entries at the
+# top level, plus a flat assets/ directory of Vite-hashed bundles.
+ROOT_KEYS = frozenset({INDEX_KEY, "favicon.svg", "theme-init.js"})
+ASSET_PREFIX = "assets/"
+ASSET_NAME_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}-[A-Za-z0-9_-]{8}\.(?:css|js)$"
 )
-EXCLUDED_DEVELOPMENT_PATHS = frozenset(
-    {
-        "generated/analysis-contract.d.ts",
-        "generated/document-contract.d.ts",
-    }
-)
-ASSET_SOURCE_PATHS = PUBLISHED_SOURCE_PATHS - {INDEX_KEY}
+ALLOWED_SUFFIXES = frozenset({".css", ".html", ".js", ".svg"})
+INDEX_REFERENCE_PATTERN = re.compile(r'(?:src|href)="(\./[^"]+)"')
+SCRIPT_TAG_PATTERN = re.compile(r"<script\b[^>]*>", re.IGNORECASE)
 
 
 class FrontendDeliveryError(RuntimeError):
@@ -105,36 +76,64 @@ Sleeper = Callable[[float], None]
 
 def _relative_files(source_root: Path) -> dict[str, Path]:
     if not source_root.is_dir() or source_root.is_symlink():
-        fail("Raiz pública do frontend está ausente ou não é um diretório regular.")
+        fail("Raiz publicável do frontend está ausente ou não é um diretório regular.")
     discovered: dict[str, Path] = {}
     total = 0
     for candidate in source_root.rglob("*"):
         if candidate.is_symlink():
-            fail("Fonte pública do frontend contém symlink proibido.")
+            fail("Build publicável do frontend contém symlink proibido.")
         if not candidate.is_file():
             continue
         relative = candidate.relative_to(source_root).as_posix()
         if relative in discovered:
-            fail("Inventário fonte do frontend possui caminho duplicado.")
+            fail("Inventário do build possui caminho duplicado.")
+        if relative in ROOT_KEYS:
+            pass
+        elif relative.startswith(ASSET_PREFIX):
+            name = relative[len(ASSET_PREFIX) :]
+            if "/" in name or ASSET_NAME_PATTERN.fullmatch(name) is None:
+                fail("Build do frontend contém asset fora da gramática publicável.")
+        else:
+            fail("Build do frontend contém arquivo fora da gramática publicável.")
+        if Path(relative).suffix not in ALLOWED_SUFFIXES:
+            fail("Build do frontend contém extensão inesperada.")
         size = candidate.stat().st_size
         if size > MAX_SOURCE_FILE_BYTES:
-            fail("Arquivo público do frontend excede o limite individual.")
+            fail("Arquivo publicável do frontend excede o limite individual.")
         total += size
         discovered[relative] = candidate
     if total > MAX_SOURCE_TOTAL_BYTES:
-        fail("Inventário público do frontend excede o limite total.")
-    expected = PUBLISHED_SOURCE_PATHS | EXCLUDED_DEVELOPMENT_PATHS
-    if set(discovered) != expected:
-        fail("Inventário fonte do frontend diverge da allowlist exata.")
-    for relative in PUBLISHED_SOURCE_PATHS:
-        suffix = Path(relative).suffix
-        if suffix not in {".css", ".html", ".js"}:
-            fail("Allowlist pública contém extensão inesperada.")
+        fail("Inventário publicável do frontend excede o limite total.")
+    if not set(discovered) >= ROOT_KEYS:
+        fail("Build do frontend não declara as entradas obrigatórias da raiz.")
+    assets = {key for key in discovered if key.startswith(ASSET_PREFIX)}
+    if not any(key.endswith(".js") for key in assets) or not any(
+        key.endswith(".css") for key in assets
+    ):
+        fail("Build do frontend não produziu os bundles esperados.")
+    for relative in sorted(set(discovered) - {"favicon.svg"}):
         try:
             discovered[relative].read_text(encoding="utf-8")
         except (OSError, UnicodeError):
-            fail("Arquivo público do frontend não é UTF-8 legível.")
+            fail("Arquivo publicável do frontend não é UTF-8 legível.")
+    _assert_inline_free_index(discovered)
     return discovered
+
+
+def _assert_inline_free_index(discovered: Mapping[str, Path]) -> None:
+    """Refuse an index the published CSP would block or that references a
+    file this publication does not carry."""
+    html = discovered[INDEX_KEY].read_text(encoding="utf-8")
+    lowered = html.lower()
+    if "<style" in lowered or " style=" in lowered:
+        fail("Índice publicável declara estilo inline recusado pela CSP.")
+    for tag in SCRIPT_TAG_PATTERN.findall(html):
+        if "src=" not in tag.lower():
+            fail("Índice publicável declara script inline recusado pela CSP.")
+    for reference in INDEX_REFERENCE_PATTERN.findall(html):
+        target = reference[2:]
+        if target not in discovered:
+            fail("Índice publicável referencia arquivo ausente do build.")
 
 
 def _content_type(relative: str) -> str:
@@ -144,6 +143,7 @@ def _content_type(relative: str) -> str:
         ".html": "text/html; charset=utf-8",
         ".js": "text/javascript; charset=utf-8",
         ".json": "application/json; charset=utf-8",
+        ".svg": "image/svg+xml; charset=utf-8",
     }
     if suffix not in content_types:
         fail("Extensão de publicação não pertence à allowlist.")
@@ -159,39 +159,26 @@ def stage_frontend(
     if stage_root.exists() and any(stage_root.iterdir()):
         fail("Diretório de staging precisa começar vazio.")
     stage_root.mkdir(parents=True, exist_ok=True)
-    asset_root = stage_root / "assets" / source_sha
     files: list[PublishedFile] = []
-    for relative in sorted(ASSET_SOURCE_PATHS):
-        destination = asset_root / Path(relative)
+    for relative in sorted(discovered):
+        destination = stage_root / Path(relative)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(discovered[relative], destination)
+        # Only the hashed bundles may be cached forever: every other key keeps
+        # its name across publications, so a stale copy would outlive the build.
+        cache_control = (
+            "public, max-age=31536000, immutable"
+            if relative.startswith(ASSET_PREFIX)
+            else "no-cache, no-store, must-revalidate"
+        )
         files.append(
             PublishedFile(
-                key=f"assets/{source_sha}/{relative}",
+                key=relative,
                 path=destination,
                 content_type=_content_type(relative),
-                cache_control="public, max-age=31536000, immutable",
+                cache_control=cache_control,
             )
         )
-
-    html = discovered[INDEX_KEY].read_text(encoding="utf-8")
-    stylesheet = 'href="./styles.css"'
-    entrypoint = 'src="./main.js"'
-    if html.count(stylesheet) != 1 or html.count(entrypoint) != 1:
-        fail("Entrypoints do HTML não correspondem ao contrato de staging.")
-    html = html.replace(
-        stylesheet, f'href="./assets/{source_sha}/styles.css"', 1
-    ).replace(entrypoint, f'src="./assets/{source_sha}/main.js"', 1)
-    index_path = stage_root / INDEX_KEY
-    index_path.write_text(html, encoding="utf-8", newline="\n")
-    files.append(
-        PublishedFile(
-            key=INDEX_KEY,
-            path=index_path,
-            content_type=_content_type(INDEX_KEY),
-            cache_control="no-cache, no-store, must-revalidate",
-        )
-    )
     return StagedFrontend(source_sha=source_sha, files=tuple(files))
 
 
@@ -271,16 +258,15 @@ def _validated_existing_keys(document: Mapping[str, Any]) -> set[str]:
     if type(raw_contents) is not list:
         fail("Listagem do bucket frontend omitiu Contents válido.")
     keys: set[str] = set()
-    asset_suffixes = {str(path) for path in ASSET_SOURCE_PATHS}
     for raw_item in raw_contents:
         if type(raw_item) is not dict or type(raw_item.get("Key")) is not str:
             fail("Listagem do bucket frontend contém item inválido.")
         key = cast(str, raw_item["Key"])
         if key in keys:
             fail("Listagem do bucket frontend contém chave duplicada.")
-        if key not in {INDEX_KEY, RUNTIME_CONFIG_KEY}:
-            match = re.fullmatch(r"assets/([0-9a-f]{40})/(.+)", key)
-            if match is None or match.group(2) not in asset_suffixes:
+        if key not in ROOT_KEYS | {RUNTIME_CONFIG_KEY}:
+            name = key[len(ASSET_PREFIX) :] if key.startswith(ASSET_PREFIX) else ""
+            if "/" in name or ASSET_NAME_PATTERN.fullmatch(name) is None:
                 fail("Bucket frontend contém chave fora da allowlist removível.")
         keys.add(key)
     return keys
@@ -325,15 +311,11 @@ def publish_frontend(
     ):
         fail("Destino da publicação do frontend é inválido.")
     files = staged.by_key()
-    expected_keys = {
-        INDEX_KEY,
-        RUNTIME_CONFIG_KEY,
-        *(f"assets/{staged.source_sha}/{path}" for path in ASSET_SOURCE_PATHS),
-    }
-    if set(files) != expected_keys or any(
+    expected_keys = set(files)
+    if not ROOT_KEYS | {RUNTIME_CONFIG_KEY} <= expected_keys or any(
         item.path.is_symlink() or not item.path.is_file() for item in files.values()
     ):
-        fail("Staging do frontend diverge da allowlist publicável.")
+        fail("Staging do frontend diverge da gramática publicável.")
 
     listed = _json_output(
         runner(("s3api", "list-objects-v2", "--bucket", bucket)),
@@ -341,9 +323,13 @@ def publish_frontend(
     )
     existing = _validated_existing_keys(listed)
 
-    immutable = [files[key] for key in sorted(files) if key.startswith("assets/")]
+    # Publish what the index depends on before the index itself, so no visitor
+    # can load a document whose bundles are not served yet.
+    immutable = [files[key] for key in sorted(files) if key.startswith(ASSET_PREFIX)]
     for item in immutable:
         _put_file(bucket, item, runner)
+    for key in sorted(ROOT_KEYS - {INDEX_KEY}):
+        _put_file(bucket, files[key], runner)
     _put_file(bucket, files[RUNTIME_CONFIG_KEY], runner)
     _put_file(bucket, files[INDEX_KEY], runner)
 

@@ -37,7 +37,7 @@ aplicado.
 | `apps/api/src/prescriptive_maintenance/modeling/` | Busca k-NN v3 em memória sobre 18 features, `StandardScaler` de treino, distância euclidiana, condição candidata baseada em históricos, política fechada dos cinco estados operacionais, suporte heurístico, abstenção tipada, adapter `ModelPort`, artefato NumPy/JSON íntegro, índice derivado versionado com adapters exatos em memória e PostgreSQL/pgvector e harness temporal com métricas candidatas, seletivas e exatas. | Só é ligada às rotas por `artifacts`, não calibra probabilidade, não usa o teste no fit, não faz tuning, não usa busca aproximada ou GPU; a avaliação é pós-hoc em um teste historicamente observado e não aprova o modelo para operação. |
 | `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, persistência, dados, geração e modelo, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | A suíte padrão não acessa materiais originais, serviços externos nem credenciais; a integração PostgreSQL é opcional e usa schema descartável. |
 | `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da readiness. | Não inclui dependências de desenvolvimento nem executa migrações automaticamente; a readiness segue o backend configurado. |
-| `apps/web` | Painel ESM sem framework nem bundler, contratos derivados do OpenAPI v1, análise e ciclo documental, servidor/proxy local e perfil AWS com runtime config público, Cognito Code + PKCE e bearer em memória. | Somente a origem final exata ativa AWS; local/LAN e offline permanecem disponíveis. Não há renovação automática nem `GET /analysis/{id}`. |
+| `apps/web` | Painel React/TypeScript empacotado pelo Vite, contratos derivados do OpenAPI v1, análise e ciclo documental, servidor/proxy local e perfil AWS com runtime config público, Cognito Code + PKCE e bearer em memória. | Somente a origem final exata ativa AWS; local/LAN e offline permanecem disponíveis. Não há renovação automática nem `GET /analysis/{id}`. |
 | `.dockerignore` e `apps/*/Dockerfile.dockerignore` | União segura na raiz e allowlists específicas dos manifests, locks e fontes necessários a cada build. | Excluem todo o restante do monorepo dos contextos; a API inclui somente o README exigido pelos metadados Python. |
 | `compose.yaml` | Topologia API, web e PostgreSQL 17/pgvector 0.8.6, binds em loopback, healthchecks e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
@@ -68,7 +68,8 @@ O caminho mínimo validado é:
 
 1. `uv run --frozen poe setup` sincroniza os workspaces Python e Node pelos
    locks e instala hooks;
-2. `uv run --frozen poe check` verifica formatação, lint, tipos e testes;
+2. `uv run --frozen poe check` verifica formatação, lint, tipos, testes e o
+   bundle de produção do painel;
 3. `uv run --frozen poe smoke` valida runtimes, configuração estática do
    Compose e a resposta HTTP real da liveness;
 4. quando o PostgreSQL já está iniciado por `services-up`,

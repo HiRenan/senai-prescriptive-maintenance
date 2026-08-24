@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import urllib.request
 from collections.abc import Callable
@@ -15,9 +14,9 @@ from unittest.mock import patch
 import published_smoke
 from aws_delivery import AwsDeliveryError, validated_frontend_bucket_output
 from frontend_delivery import (
-    ASSET_SOURCE_PATHS,
+    ASSET_PREFIX,
     INDEX_KEY,
-    PUBLISHED_SOURCE_PATHS,
+    ROOT_KEYS,
     RUNTIME_CONFIG_KEY,
     FrontendDeliveryError,
     StagedFrontend,
@@ -40,9 +39,11 @@ from published_smoke import (
 from remote_smoke import SCENARIOS, scenario_request
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-WEB_SOURCE = REPOSITORY_ROOT / "apps/web/src"
+WEB_DIST = REPOSITORY_ROOT / "apps/web/dist"
 SOURCE_SHA = "a" * 40
-OLD_SHA = "b" * 40
+RESIDUAL_ASSET_KEY = f"{ASSET_PREFIX}index-Legacy00.js"
+SYNTHETIC_SCRIPT_KEY = f"{ASSET_PREFIX}index-Synth001.js"
+SYNTHETIC_STYLE_KEY = f"{ASSET_PREFIX}index-Synth002.css"
 API_ORIGIN = "https://abc123def4.execute-api.us-east-1.amazonaws.com"
 COGNITO_ORIGIN = "https://spm-a1b2c3d4e5f6g7h8.auth.us-east-1.amazoncognito.com"
 CLIENT_ID = "abc123client"
@@ -72,7 +73,7 @@ class FakeAws:
                 "Contents": [
                     {"Key": INDEX_KEY},
                     {"Key": RUNTIME_CONFIG_KEY},
-                    {"Key": f"assets/{OLD_SHA}/main.js"},
+                    {"Key": RESIDUAL_ASSET_KEY},
                 ],
                 "IsTruncated": False,
             }
@@ -235,31 +236,190 @@ class FakeHttp:
         raise FrontendDeliveryRegressionError("fake recebeu operação fora do contrato")
 
 
-def require_failure(action: Callable[[], object]) -> None:
+def require_failure(action: Callable[[], object], context: str) -> None:
     try:
         action()
     except FrontendDeliveryError:
         return
-    raise FrontendDeliveryRegressionError("regressão hostil deveria falhar fechada")
-
-
-def prove_source_guardrails(temporary: Path) -> None:
-    hostile = temporary / "hostile-source"
-    shutil.copytree(WEB_SOURCE, hostile)
-    (hostile / "main.js.map").write_text("{}", encoding="utf-8")
-    require_failure(
-        lambda: stage_frontend(hostile, temporary / "hostile-stage", SOURCE_SHA)
+    raise FrontendDeliveryRegressionError(
+        f"gramática publicável deveria recusar {context}"
     )
+
+
+def synthetic_index(
+    *,
+    script_key: str | None = SYNTHETIC_SCRIPT_KEY,
+    style_key: str | None = SYNTHETIC_STYLE_KEY,
+    head_extra: str = "",
+    body_extra: str = "",
+) -> str:
+    script = f'    <script type="module" src="./{script_key}"></script>\n'
+    style = f'    <link rel="stylesheet" href="./{style_key}" />\n'
+    return (
+        "<!doctype html>\n"
+        '<html lang="pt-BR">\n'
+        "  <head>\n"
+        '    <meta charset="utf-8" />\n'
+        "    <title>Manutenção prescritiva</title>\n"
+        '    <link rel="icon" href="./favicon.svg" />\n'
+        '    <script src="./theme-init.js"></script>\n'
+        f"{script if script_key is not None else ''}"
+        f"{style if style_key is not None else ''}"
+        f"{head_extra}"
+        "  </head>\n"
+        "  <body>\n"
+        '    <div id="root"></div>\n'
+        f"{body_extra}"
+        "  </body>\n"
+        "</html>\n"
+    )
+
+
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
+def write_synthetic_dist(root: Path) -> Path:
+    """Smallest tree the publishable grammar accepts, used as the hostile base."""
+    write_text(root / INDEX_KEY, synthetic_index())
+    write_text(
+        root / "favicon.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"></svg>\n',
+    )
+    write_text(
+        root / "theme-init.js", 'document.documentElement.dataset.theme="light";\n'
+    )
+    write_text(root / SYNTHETIC_SCRIPT_KEY, "export const boot = () => undefined;\n")
+    write_text(root / SYNTHETIC_STYLE_KEY, ":root { color-scheme: light dark; }\n")
+    return root
+
+
+HostileMutation = Callable[[Path], object]
+
+
+def oversized_asset(root: Path) -> object:
+    return (root / ASSET_PREFIX / "big-Synth004.js").write_text(
+        "x" * 1_000_001, encoding="utf-8", newline="\n"
+    )
+
+
+def oversized_inventory(root: Path) -> object:
+    for ordinal in range(1, 6):
+        (root / ASSET_PREFIX / f"bulk{ordinal}-Synth00{ordinal}.js").write_text(
+            "x" * 900_000, encoding="utf-8", newline="\n"
+        )
+    return None
+
+
+def prove_dist_guardrails(temporary: Path) -> None:
+    healthy = write_synthetic_dist(temporary / "healthy-dist")
+    stage_frontend(healthy, temporary / "healthy-stage", SOURCE_SHA)
+
+    mutations: tuple[tuple[str, HostileMutation], ...] = (
+        (
+            "source map publicado",
+            lambda root: write_text(root / f"{SYNTHETIC_SCRIPT_KEY}.map", "{}\n"),
+        ),
+        (
+            "script inline recusado pela CSP",
+            lambda root: write_text(
+                root / INDEX_KEY,
+                synthetic_index(head_extra="    <script>window.pm = 1;</script>\n"),
+            ),
+        ),
+        (
+            "bloco de estilo inline",
+            lambda root: write_text(
+                root / INDEX_KEY,
+                synthetic_index(head_extra="    <style>body { color: red; }</style>\n"),
+            ),
+        ),
+        (
+            "atributo style inline",
+            lambda root: write_text(
+                root / INDEX_KEY,
+                synthetic_index(body_extra='    <p style="color: red">a</p>\n'),
+            ),
+        ),
+        (
+            "asset em subdiretório",
+            lambda root: write_text(
+                root / ASSET_PREFIX / "chunk" / "deep-Synth003.js", "export {};\n"
+            ),
+        ),
+        (
+            "asset sem hash de conteúdo",
+            lambda root: write_text(root / ASSET_PREFIX / "vendor.js", "export {};\n"),
+        ),
+        (
+            "arquivo estranho na raiz",
+            lambda root: write_text(root / "robots.txt", "User-agent: *\n"),
+        ),
+        (
+            "entrada obrigatória ausente na raiz",
+            lambda root: (root / "favicon.svg").unlink(),
+        ),
+        (
+            "referência pendente no índice",
+            lambda root: write_text(
+                root / INDEX_KEY,
+                synthetic_index(script_key=f"{ASSET_PREFIX}index-Missing1.js"),
+            ),
+        ),
+        ("asset acima do limite individual", oversized_asset),
+        ("inventário acima do limite total", oversized_inventory),
+        (
+            "asset que não é UTF-8",
+            lambda root: (root / SYNTHETIC_SCRIPT_KEY).write_bytes(
+                b"export const boot = '\xff\xfe';\n"
+            ),
+        ),
+        (
+            "build sem bundle JavaScript",
+            lambda root: (
+                write_text(root / INDEX_KEY, synthetic_index(script_key=None)),
+                (root / SYNTHETIC_SCRIPT_KEY).unlink(),
+            ),
+        ),
+    )
+    for ordinal, (context, mutate) in enumerate(mutations):
+        hostile = write_synthetic_dist(temporary / f"hostile-{ordinal}")
+        mutate(hostile)
+        require_failure(
+            lambda hostile=hostile, ordinal=ordinal: stage_frontend(
+                hostile, temporary / f"hostile-stage-{ordinal}", SOURCE_SHA
+            ),
+            context,
+        )
 
     with patch.object(
         Path,
         "is_symlink",
         autospec=True,
-        side_effect=lambda candidate: candidate.name == "styles.css",
+        side_effect=lambda candidate: candidate.name == "favicon.svg",
     ):
         require_failure(
-            lambda: stage_frontend(WEB_SOURCE, temporary / "symlink-stage", SOURCE_SHA)
+            lambda: stage_frontend(healthy, temporary / "symlink-stage", SOURCE_SHA),
+            "symlink dentro do build",
         )
+
+    require_failure(
+        lambda: stage_frontend(
+            temporary / "absent-dist", temporary / "absent-stage", SOURCE_SHA
+        ),
+        "raiz publicável ausente",
+    )
+    require_failure(
+        lambda: stage_frontend(healthy, temporary / "sha-stage", "z" * 40),
+        "SHA de publicação fora do formato canônico",
+    )
+    occupied = temporary / "occupied-stage"
+    write_text(occupied / "leftover.txt", "resíduo\n")
+    require_failure(
+        lambda: stage_frontend(healthy, occupied, SOURCE_SHA),
+        "staging que já contém arquivos",
+    )
 
 
 def prove_publication(staged: StagedFrontend) -> FakeAws:
@@ -279,17 +439,19 @@ def prove_publication(staged: StagedFrontend) -> FakeAws:
         for command in fake.commands
         if command[:2] == ("s3api", "put-object")
     ]
+    asset_keys = sorted(key for key in staged.by_key() if key.startswith(ASSET_PREFIX))
     expect(
-        put_keys[:-2]
-        == [f"assets/{SOURCE_SHA}/{path}" for path in sorted(ASSET_SOURCE_PATHS)],
-        "assets imutáveis não foram publicados primeiro",
+        put_keys
+        == [
+            *asset_keys,
+            *sorted(ROOT_KEYS - {INDEX_KEY}),
+            RUNTIME_CONFIG_KEY,
+            INDEX_KEY,
+        ],
+        "ordem de upload divergiu de assets, raiz, runtime config e índice",
     )
     expect(
-        put_keys[-2:] == [RUNTIME_CONFIG_KEY, INDEX_KEY],
-        "runtime config e index não foram publicados por último",
-    )
-    expect(
-        keys[-1] == f"assets/{OLD_SHA}/main.js",
+        keys[-1] == RESIDUAL_ASSET_KEY,
         "deleção residual não ocorreu após os uploads",
     )
     deleted = [
@@ -298,16 +460,8 @@ def prove_publication(staged: StagedFrontend) -> FakeAws:
         if command[:2] == ("s3api", "delete-object")
     ]
     expect(
-        deleted == [f"assets/{OLD_SHA}/main.js"],
+        deleted == [RESIDUAL_ASSET_KEY],
         "deleção residual excedeu a chave allowlisted",
-    )
-    expect(
-        all(
-            key.startswith(f"assets/{OLD_SHA}/")
-            and key.removeprefix(f"assets/{OLD_SHA}/") in ASSET_SOURCE_PATHS
-            for key in deleted
-        ),
-        "deleção residual saiu da allowlist do SHA antigo",
     )
     for command in fake.commands:
         if command[:2] != ("s3api", "put-object"):
@@ -318,17 +472,17 @@ def prove_publication(staged: StagedFrontend) -> FakeAws:
         )
         key = command[command.index("--key") + 1]
         cache = command[command.index("--cache-control") + 1]
-        if key.startswith("assets/"):
+        if key.startswith(ASSET_PREFIX):
             expect(
                 cache == "public, max-age=31536000, immutable",
-                "asset não recebeu cache imutável",
+                "asset hasheado não recebeu cache imutável",
             )
         elif key == RUNTIME_CONFIG_KEY:
             expect(cache == "no-store", "runtime config não recebeu no-store")
         else:
             expect(
                 cache == "no-cache, no-store, must-revalidate",
-                "index não recebeu cache defensivo",
+                "chave de nome estável não recebeu cache defensivo",
             )
     return fake
 
@@ -351,6 +505,10 @@ def prove_hostile_bucket_listings(staged: StagedFrontend) -> None:
         {"Contents": [], "IsTruncated": True},
         {"Contents": [{"Key": "private/source.pdf"}], "IsTruncated": False},
         {
+            "Contents": [{"Key": f"{ASSET_PREFIX}chunk/deep-Synth003.js"}],
+            "IsTruncated": False,
+        },
+        {
             "Contents": [{"Key": INDEX_KEY}, {"Key": INDEX_KEY}],
             "IsTruncated": False,
         },
@@ -366,7 +524,8 @@ def prove_hostile_bucket_listings(staged: StagedFrontend) -> None:
                 runner=fake,
                 sleep=lambda _: None,
                 max_waits=1,
-            )
+            ),
+            "listagem hostil do bucket",
         )
         expect(
             fake.commands == [("s3api", "list-objects-v2", "--bucket", BUCKET)],
@@ -465,8 +624,14 @@ def prove_smoke(staged: StagedFrontend, config: dict[str, object]) -> None:
         ),
     )
 
-    def corrupt_main(key: str, body: bytes) -> bytes:
-        if key == f"assets/{SOURCE_SHA}/main.js":
+    script_key = next(
+        key
+        for key in sorted(staged.by_key())
+        if key.startswith(ASSET_PREFIX) and key.endswith(".js")
+    )
+
+    def corrupt_bundle(key: str, body: bytes) -> bytes:
+        if key == script_key:
             return body + b"\n"
         return body
 
@@ -478,7 +643,7 @@ def prove_smoke(staged: StagedFrontend, config: dict[str, object]) -> None:
             runtime_config=config,
             staged=staged,
             bearer_token=SYNTHETIC_BEARER,
-            transport=FakeHttp(staged, config, asset_mutation=corrupt_main),
+            transport=FakeHttp(staged, config, asset_mutation=corrupt_bundle),
         )
     except PublishedSmokeError:
         pass
@@ -686,10 +851,40 @@ def prove_http_transport_boundary() -> None:
     )
 
 
+def prove_real_build(staged: StagedFrontend) -> None:
+    """The grammar is only worth anything if the build Vite actually emits
+    satisfies it, so the published inventory is checked against the real dist."""
+    keys = set(staged.by_key())
+    assets = {key for key in keys if key.startswith(ASSET_PREFIX)}
+    expect(
+        keys == ROOT_KEYS | {RUNTIME_CONFIG_KEY} | assets,
+        "stage do build real declarou chave fora da gramática publicável",
+    )
+    expect(
+        any(key.endswith(".js") for key in assets)
+        and any(key.endswith(".css") for key in assets),
+        "build real não produziu os bundles esperados",
+    )
+    expect(
+        not any(key.endswith((".d.ts", ".map")) for key in keys),
+        "stage incluiu declaração ou source map proibido",
+    )
+    index_text = staged.by_key()[INDEX_KEY].path.read_text(encoding="utf-8")
+    expect(
+        all(f"./{key}" in index_text for key in assets),
+        "índice do build real não referencia todos os bundles publicados",
+    )
+
+
 def main() -> int:
+    expect(
+        WEB_DIST.is_dir(),
+        "build do frontend ausente: execute 'poe web-build' antes da regressão.",
+    )
     with tempfile.TemporaryDirectory(prefix="sen75-frontend-") as temporary_name:
         temporary = Path(temporary_name)
-        staged = stage_frontend(WEB_SOURCE, temporary / "stage", SOURCE_SHA)
+        prove_dist_guardrails(temporary)
+        staged = stage_frontend(WEB_DIST, temporary / "stage", SOURCE_SHA)
         config = runtime_config(
             api_origin=API_ORIGIN,
             client_id=CLIENT_ID,
@@ -702,31 +897,15 @@ def main() -> int:
             client_id=CLIENT_ID,
             cognito_origin=COGNITO_ORIGIN,
         )
-        expect(
-            set(staged.by_key())
-            == {
-                INDEX_KEY,
-                RUNTIME_CONFIG_KEY,
-                *(
-                    f"assets/{SOURCE_SHA}/{path}"
-                    for path in PUBLISHED_SOURCE_PATHS - {INDEX_KEY}
-                ),
-            },
-            "stage divergiu da allowlist publicada exata",
-        )
-        expect(
-            not any(key.endswith((".d.ts", ".map")) for key in staged.by_key()),
-            "stage incluiu declaração ou source map proibido",
-        )
-        prove_source_guardrails(temporary)
+        prove_real_build(staged)
         prove_publication(staged)
         prove_hostile_bucket_listings(staged)
         prove_aws_delivery_bucket_gate()
         prove_smoke(staged, config)
         prove_http_transport_boundary()
     print(
-        "Regressão local do frontend aprovada: allowlist, ordem, MIME, runtime config, "
-        "CORS e POST autenticado foram provados sem rede AWS."
+        "Regressão local do frontend aprovada: gramática do build, ordem, MIME, "
+        "runtime config, CORS e POST autenticado foram provados sem rede AWS."
     )
     return 0
 
