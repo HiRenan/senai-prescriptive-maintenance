@@ -314,6 +314,12 @@ def prove_contract_mutations_rejected() -> int:
 
     mutations.append(shared_environment)
 
+    def legacy_role_variable(contract: dict[str, Any]) -> None:
+        plan_role = role(contract, "plan")
+        plan_role["role_variable"] = plan_role.pop("role_secret")
+
+    mutations.append(legacy_role_variable)
+
     def unpinned_action(contract: dict[str, Any]) -> None:
         cast(list[str], contract["actions"])[0] = "actions/checkout@v7"
 
@@ -639,6 +645,50 @@ def prove_workflow_mutations_rejected(action_pins: Mapping[str, str]) -> int:
             "2099-01-01T00:00:00Z",
             1,
         ),
+        source.replace(
+            "allowed-account-ids: ${{ secrets.AWS_DEMO_ACCOUNT_ID }}",
+            "allowed-account-ids: ${{ vars.AWS_DEMO_ACCOUNT_ID }}",
+            1,
+        ),
+        source.replace(
+            "allowed-account-ids: ${{ secrets.AWS_DEMO_ACCOUNT_ID }}",
+            "allowed-account-ids: ${{ secrets.AWS_DEMO_ACCOUNT_ID }}-hostile",
+            1,
+        ),
+        source.replace(
+            "          action-timeout-s: 120",
+            "          action-timeout-s: 120\n"
+            "          external-id: ${{ secrets['HOSTILE_EXTERNAL_ID'] }}",
+            1,
+        ),
+        source.replace(
+            "role-to-assume: ${{ secrets.AWS_DEMO_DEPLOY_ROLE_ARN }}",
+            "role-to-assume: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}",
+            1,
+        ),
+        source.replace(
+            "TF_STATE_BUCKET: ${{ secrets.AWS_DEMO_STATE_BUCKET }}",
+            "TF_STATE_BUCKET: ${{ vars.AWS_DEMO_STATE_BUCKET }}",
+            1,
+        ),
+        source.replace(
+            "TF_VAR_frontend_certificate_arn: "
+            "${{ secrets.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}",
+            "TF_VAR_frontend_certificate_arn: "
+            "${{ vars.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}",
+            1,
+        ),
+        source.replace(
+            "TF_STATE_BUCKET: ${{ secrets.AWS_DEMO_STATE_BUCKET }}",
+            "TF_STATE_BUCKET: ${{ secrets.HOSTILE_STATE_BUCKET }}",
+            1,
+        ),
+        source.replace(
+            "          TF_STATE_BUCKET: ${{ secrets.AWS_DEMO_STATE_BUCKET }}",
+            "          HOSTILE_INPUT: ${{ secrets['HOSTILE_INPUT'] }}\n"
+            "          TF_STATE_BUCKET: ${{ secrets.AWS_DEMO_STATE_BUCKET }}",
+            1,
+        ),
         source.replace("run: |", "run: echo '${{ inputs.source_sha }}'", 1),
         source.replace("run: |", "run: >", 1),
         source.replace("AWS_DEMO_DEPLOY_ROLE_ARN", "AWS_DEMO_PLAN_ROLE_ARN", 1),
@@ -692,7 +742,7 @@ def prove_workflow_mutations_rejected(action_pins: Mapping[str, str]) -> int:
                     expected_environment="aws-demo-deploy",
                     uses_oidc=True,
                     action_pins=action_pins,
-                    expected_role_variable="AWS_DEMO_DEPLOY_ROLE_ARN",
+                    expected_role_name="AWS_DEMO_DEPLOY_ROLE_ARN",
                     expected_confirmation="DEPLOY-AWS-DEMO",
                     expected_operation="deploy",
                 ),
@@ -719,7 +769,7 @@ def prove_workflow_mutations_rejected(action_pins: Mapping[str, str]) -> int:
                     expected_environment=None,
                     uses_oidc=False,
                     action_pins=action_pins,
-                    expected_role_variable=None,
+                    expected_role_name=None,
                     expected_confirmation=None,
                     expected_operation=None,
                 ),
@@ -2227,12 +2277,48 @@ def synthetic_environment() -> dict[str, str]:
 
 
 def prove_hostile_environment_rejected() -> int:
-    approved = validated_configuration(synthetic_environment())
+    base_environment = synthetic_environment()
+    approved = validated_configuration(base_environment)
     if (
         approved.get("state_bucket") != "synthetic-state-bucket"
         or approved.get("state_key") != "demo/sen-67/terraform.tfstate"
     ):
         raise DeliveryRegressionError("Controller vars do state foram alteradas.")
+    raw_expiration = base_environment["AWS_DEMO_SESSION_EXPIRATION"]
+    json_string_environment = dict(base_environment)
+    json_string_environment["AWS_DEMO_SESSION_EXPIRATION"] = json.dumps(raw_expiration)
+    json_string_approved = validated_configuration(json_string_environment)
+    if json_string_approved.get("session_expiration_epoch") != approved.get(
+        "session_expiration_epoch"
+    ):
+        raise DeliveryRegressionError(
+            "Expiração JSON-string alterou a sessão OIDC aprovada."
+        )
+
+    hostile_expirations: tuple[object, ...] = (
+        json.dumps(raw_expiration).replace("Z", r"\u005a"),
+        f" {json.dumps(raw_expiration)}",
+        json.dumps({"expiration": raw_expiration}),
+        json.dumps([raw_expiration]),
+        "null",
+        json.dumps(7_000),
+        json.dumps(json.dumps(raw_expiration)),
+        f'"{raw_expiration}',
+        json.dumps(SENSITIVE_MARKER),
+        json.dumps("2000-01-01T00:00:00Z"),
+        json.dumps("2099-01-01T00:00:00Z"),
+        json.dumps(raw_expiration.replace("Z", "+00:00")),
+        7_000,
+    )
+    for hostile_expiration in hostile_expirations:
+        candidate = cast(dict[str, Any], synthetic_environment())
+        candidate["AWS_DEMO_SESSION_EXPIRATION"] = hostile_expiration
+        expect_failure(
+            lambda candidate=candidate: validated_configuration(
+                cast(Mapping[str, str], candidate)
+            ),
+            AwsDeliveryError,
+        )
     near_controller = synthetic_environment()
     near_controller["TF_STATE_BUCKET_EXTRA"] = SENSITIVE_MARKER
     expect_failure(lambda: validated_configuration(near_controller), AwsDeliveryError)
@@ -2325,7 +2411,7 @@ def prove_hostile_environment_rejected() -> int:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
-    return 9 + len(remote_smoke.FORBIDDEN_TLS_ENVIRONMENT)
+    return 10 + len(hostile_expirations) + len(remote_smoke.FORBIDDEN_TLS_ENVIRONMENT)
 
 
 def prove_final_profile_precedes_operations() -> int:
