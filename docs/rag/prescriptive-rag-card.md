@@ -13,9 +13,9 @@ uma resposta estruturada com citações. Seu uso permitido nesta versão é test
 contratos, recusas e rastreabilidade com dados sintéticos e revisão humana.
 
 Ela não comprova qualidade semântica, não autoriza manutenção e não pode ser
-apresentada como RAG operacional. A factory HTTP padrão usa serviços
-sintéticos; modelo, índice, mapping, documentos e provider reais só podem entrar
-por injeção e autorização exatas.
+apresentada como RAG operacional. A factory HTTP exige `synthetic_demo` ou
+`artifacts`; o segundo carrega modelo, índice, mapping e documentos somente por
+manifesto local com autorização e hashes exatos, sem fallback.
 
 ## Fluxo implementado
 

@@ -10,9 +10,13 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from starlette.types import ExceptionHandler
 
+from prescriptive_maintenance.analysis_runtime import (
+    AnalysisRuntimeComposition,
+    ConfiguredAnalysisService,
+    compose_analysis_runtime,
+)
 from prescriptive_maintenance.contracts import API_CONTRACT_VERSION
 from prescriptive_maintenance.document_registry import RuntimeDocumentLifecycleService
-from prescriptive_maintenance.fakes import build_synthetic_analysis_service
 from prescriptive_maintenance.http_api import (
     ApiContractError,
     build_api_router,
@@ -22,6 +26,7 @@ from prescriptive_maintenance.http_api import (
 )
 from prescriptive_maintenance.operations import (
     READINESS_TIMEOUT_SECONDS,
+    AnalysisModeHeaderMiddleware,
     ApplicationStartupError,
     CorrelationIdMiddleware,
     ReadinessProbe,
@@ -69,6 +74,7 @@ def create_app(
     selected_document_service = document_service or runtime_document_service
     if selected_document_service is None:
         raise AssertionError("Document service composition is incomplete.")
+    runtime_analysis_service = ConfiguredAnalysisService()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
@@ -79,13 +85,34 @@ def create_app(
             selected_settings = Settings.model_validate(
                 loaded_settings.model_dump(mode="python")
             )
+            runtime_analysis_service.select(selected_settings.analysis_mode)
+            if runtime_document_service is not None:
+                runtime_document_service.configure(selected_settings)
+        except Exception:
+            raise ApplicationStartupError(
+                "Application startup configuration is invalid."
+            ) from None
+
+        runtime_composition: AnalysisRuntimeComposition | None = None
+        if analysis_service is not None:
+            if selected_settings.analysis_mode != "synthetic_demo":
+                raise ApplicationStartupError(
+                    "Application startup configuration is invalid."
+                ) from None
+            runtime_analysis_service.configure(analysis_service)
+        else:
+            try:
+                runtime_composition = compose_analysis_runtime(selected_settings)
+                runtime_analysis_service.configure(runtime_composition.service)
+            except Exception:
+                runtime_composition = None
+        try:
             readiness = ReadinessService(
                 selected_settings,
                 database_probe=database_probe,
+                runtime_available=runtime_analysis_service.available,
                 timeout_seconds=readiness_timeout_seconds,
             )
-            if runtime_document_service is not None:
-                runtime_document_service.configure(selected_settings)
         except Exception:
             raise ApplicationStartupError(
                 "Application startup configuration is invalid."
@@ -93,6 +120,8 @@ def create_app(
         application.state.readiness = readiness
         application.state.environment = selected_settings.environment
         application.state.persistence_backend = selected_settings.persistence_backend
+        application.state.analysis_mode = selected_settings.analysis_mode
+        application.state.analysis_runtime = runtime_composition
         application.state.document_service = selected_document_service
         yield
 
@@ -100,8 +129,9 @@ def create_app(
         title="Prescriptive Maintenance API",
         summary="Contrato v1 de análise e ciclo documental.",
         description=(
-            "Contrato público congelado com fakes inteiramente sintéticos; "
-            "não executa modelo, recuperação, geração ou persistência reais."
+            "Contrato público v1 com runtime de análise selecionado "
+            "explicitamente por configuração. O cabeçalho X-Analysis-Mode "
+            "informa somente o modo sanitizado em uso."
         ),
         version=API_CONTRACT_VERSION,
         openapi_version="3.1.0",
@@ -109,6 +139,10 @@ def create_app(
     )
 
     application.add_middleware(CorrelationIdMiddleware)
+    application.add_middleware(
+        AnalysisModeHeaderMiddleware,
+        mode_provider=lambda: runtime_analysis_service.mode,
+    )
 
     application.add_api_route(
         "/health/live",
@@ -124,10 +158,9 @@ def create_app(
         include_in_schema=False,
     )
 
-    selected_analysis_service = analysis_service or build_synthetic_analysis_service()
     application.include_router(
         build_api_router(
-            analysis_service=selected_analysis_service,
+            analysis_service=runtime_analysis_service,
             document_service=selected_document_service,
         )
     )
@@ -145,6 +178,39 @@ def create_app(
     def openapi_with_complete_examples() -> dict[str, Any]:
         schema = default_openapi()
         restore_required_nulls_in_examples(schema)
+        components = schema.setdefault("components", {})
+        headers = components.setdefault("headers", {})
+        headers["AnalysisMode"] = {
+            "description": "Modo de análise configurado, com valor sanitizado.",
+            "schema": {
+                "type": "string",
+                "enum": ["synthetic_demo", "artifacts"],
+            },
+        }
+        paths = cast(dict[str, object], schema.get("paths", {}))
+        for raw_path in paths.values():
+            if not isinstance(raw_path, dict):
+                continue
+            path = cast(dict[str, object], raw_path)
+            for operation in path.values():
+                if not isinstance(operation, dict):
+                    continue
+                typed_operation = cast(dict[str, object], operation)
+                responses = cast(
+                    dict[str, object],
+                    typed_operation.get("responses", {}),
+                )
+                for response in responses.values():
+                    if not isinstance(response, dict):
+                        continue
+                    typed_response = cast(dict[str, object], response)
+                    response_headers = cast(
+                        dict[str, object],
+                        typed_response.setdefault("headers", {}),
+                    )
+                    response_headers["X-Analysis-Mode"] = {
+                        "$ref": "#/components/headers/AnalysisMode"
+                    }
         return schema
 
     application.openapi = openapi_with_complete_examples

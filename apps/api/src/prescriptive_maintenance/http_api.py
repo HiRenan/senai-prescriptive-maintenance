@@ -206,12 +206,12 @@ def build_api_router(
         summary="Consulta uma análise",
         responses={
             200: {
-                "description": "Resultado previamente criado no catálogo sintético.",
+                "description": "Resultado previamente criado no runtime configurado.",
                 "content": {
                     "application/json": {"examples": analysis_response_examples()}
                 },
             },
-            **_error_responses(404, 422),
+            **_error_responses(404, 422, 503),
         },
     )
     def _get_analysis(analysis_id: AnalysisId) -> AnalysisResponse:
@@ -222,6 +222,12 @@ def build_api_router(
                 status.HTTP_404_NOT_FOUND,
                 "analysis_not_found",
                 "A análise solicitada não foi encontrada.",
+            )
+        except AnalysisUnavailableError:
+            _raise_api_error(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "analysis_unavailable",
+                "A análise está temporariamente indisponível.",
             )
 
     @router.post(

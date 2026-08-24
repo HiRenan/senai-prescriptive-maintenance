@@ -164,7 +164,7 @@ alta disponibilidade, multi-região ou ambiente de produção.
 | `terraform validate` | configuração válida |
 | `static_plan.py` | plano sintético gerado fora do repositório |
 | `plan_audit.py` | allowlists, rede, IAM, outputs, Budget, alarmes, tags e teardown aprovados |
-| `security_regression.py` | baseline aceita; 22 mutações, output duplicado e três constantes não finitas rejeitados |
+| `security_regression.py` | baseline aceita; 23 mutações, output duplicado e três constantes não finitas rejeitados |
 | `delivery_policy.py` | três subjects, permissions, actions por SHA e operações manuais aprovados |
 | `delivery_regression.py` | 388 casos adversariais aprovados |
 | `uv run --frozen poe check` | Ruff e Pyright aprovados; 1.119 testes aprovados, 43 ignorados e cobertura de 80,32% |

@@ -65,6 +65,8 @@ porta do contêiner permanece `5432`, e a publicação continua restrita a
 `127.0.0.1`. Ao conectar a aplicação manualmente, ajuste também
 `PRESCRIPTIVE_MAINTENANCE_DATABASE_URL` para a mesma porta host. O comando
 `uv run --frozen poe smoke --with-services` é idêntico nos dois sistemas.
+O serviço da API declara `PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE=synthetic_demo`
+no Compose; não há seleção implícita nem montagem de derivados privados.
 
 ## Topologia de aplicação
 

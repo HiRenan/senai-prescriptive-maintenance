@@ -7,10 +7,11 @@ o índice de similaridade versionado, a recuperação documental governada, os
 guardrails de geração e a unidade de trabalho de persistência. A composição usa
 o contrato HTTP v1 existente sem alterar o snapshot OpenAPI.
 
-A fábrica padrão `create_app()` continua deliberadamente ligada aos fakes
-sintéticos. A integração só entra na rota quando uma instância completa do
-serviço é fornecida pelo composition root. Essa separação impede que a simples
-importação da aplicação descubra artefatos, credenciais ou serviços externos.
+A fábrica `create_app()` depende de um modo obrigatório. `synthetic_demo` liga
+deliberadamente os fakes; `artifacts` entrega à rota uma instância completa
+somente depois que o composition root valida o manifesto e todos os bindings.
+Essa separação impede que a simples importação da aplicação descubra artefatos,
+credenciais ou serviços externos e proíbe fallback entre os modos.
 
 ## Binding autorizado e fail-closed
 
@@ -91,6 +92,9 @@ provider, ausência documental, projeção sem fallback, subconjunto e união de
 citações, corrupção de identidade/rank/classe/distância, divergência do binding
 em todas as jornadas, rollback, classificação dos estágios de observabilidade,
 concorrência do cache e round-trip PostgreSQL opcional.
+`test_analysis_runtime.py` acrescenta a jornada HTTP com k-NN e índice reais
+gerados em diretório temporário, chunk aprovado, citação exata, persistência e
+matriz de corrupção/incompatibilidade do composition root.
 
 ```powershell
 uv run --frozen pytest apps/api/tests/test_analysis_integration.py --no-cov -q
@@ -104,7 +108,8 @@ Nenhum teste acessa os materiais originais, Bedrock ou a rede.
 
 ## Limites e decisão operacional
 
-- nenhum artefato de modelo real está autorizado por esta composição;
+- nenhum artefato privado é distribuído ou autorizado pelo repositório; o modo
+  `artifacts` aceita somente um manifesto local aprovado por hash;
 - a baseline real avaliada permanece somente como demonstração de similaridade
   e apoio humano, não como classificador, automação ou autorização de manutenção;
 - o provider padrão de teste é sintético e Bedrock permanece desabilitado até

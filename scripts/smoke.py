@@ -28,6 +28,7 @@ OPENAPI_SNAPSHOT: Final = REPOSITORY_ROOT / "apps" / "api" / "openapi" / "v1.jso
 LOOPBACK_HOST: Final = "127.0.0.1"
 EXPECTED_LIVENESS_BODY: Final = b'{"status":"ok"}'
 EXPECTED_READINESS_BODY: Final = b'{"status":"ready"}'
+ANALYSIS_MODE_HEADER: Final = "X-Analysis-Mode"
 CORRELATION_ID_HEADER: Final = "X-Correlation-ID"
 CORRELATION_ID_PATTERN: Final = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,62}[A-Za-z0-9])?"
@@ -172,6 +173,7 @@ def _check_example_configuration() -> None:
     if (
         settings.environment != "local"
         or settings.persistence_backend != "postgres"
+        or settings.analysis_mode != "synthetic_demo"
         or database_url is None
         or database_url.scheme != "postgresql"
     ):
@@ -221,6 +223,7 @@ def _read_liveness(port: int, process: subprocess.Popen[str]) -> None:
                 status_code = response.status
                 content_type = response.headers.get_content_type()
                 correlation_id = response.headers.get(CORRELATION_ID_HEADER)
+                analysis_mode = response.headers.get(ANALYSIS_MODE_HEADER)
                 response_body = response.read(len(EXPECTED_LIVENESS_BODY) + 1)
         except HTTPError as error:
             raise SmokeFailure(
@@ -245,6 +248,8 @@ def _read_liveness(port: int, process: subprocess.Popen[str]) -> None:
             or CORRELATION_ID_PATTERN.fullmatch(correlation_id) is None
         ):
             raise SmokeFailure("A liveness não retornou um correlation ID seguro.")
+        if analysis_mode != "synthetic_demo":
+            raise SmokeFailure("A liveness não informou o modo de análise esperado.")
         return
 
 
@@ -261,6 +266,7 @@ def _read_readiness(port: int) -> None:
             status_code = response.status
             content_type = response.headers.get_content_type()
             correlation_id = response.headers.get(CORRELATION_ID_HEADER)
+            analysis_mode = response.headers.get(ANALYSIS_MODE_HEADER)
             response_body = response.read(len(EXPECTED_READINESS_BODY) + 1)
     except (HTTPError, URLError) as error:
         raise SmokeFailure("A readiness offline não respondeu corretamente.") from error
@@ -274,6 +280,8 @@ def _read_readiness(port: int) -> None:
         or CORRELATION_ID_PATTERN.fullmatch(correlation_id) is None
     ):
         raise SmokeFailure("A readiness não retornou um correlation ID seguro.")
+    if analysis_mode != "synthetic_demo":
+        raise SmokeFailure("A readiness não informou o modo de análise esperado.")
 
 
 def _stop_process(process: subprocess.Popen[str]) -> None:
@@ -313,6 +321,7 @@ def _check_liveness() -> None:
     }
     process_environment["PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT"] = "offline"
     process_environment["PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND"] = "memory"
+    process_environment["PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE"] = "synthetic_demo"
 
     with TemporaryDirectory(prefix="prescriptive-maintenance-smoke-") as workdir:
         try:
@@ -441,7 +450,7 @@ def _read_http_response(
     failure_subject: str,
     *,
     max_body_bytes: int,
-) -> tuple[int, str, bytes]:
+) -> tuple[int, str, bytes, str | None]:
     # Callers build URLs only from fixed loopback hosts and validated numeric ports.
     request = Request(url, method="GET")  # noqa: S310
     try:
@@ -451,6 +460,7 @@ def _read_http_response(
         ) as response:
             status_code = response.status
             content_type = response.headers.get_content_type()
+            analysis_mode = response.headers.get(ANALYSIS_MODE_HEADER)
             body = response.read(max_body_bytes + 1)
     except HTTPError as error:
         raise SmokeFailure(
@@ -461,11 +471,11 @@ def _read_http_response(
 
     if len(body) > max_body_bytes:
         raise SmokeFailure(f"{failure_subject} excedeu o limite de resposta.")
-    return status_code, content_type, body
+    return status_code, content_type, body, analysis_mode
 
 
 def _check_container_liveness(url: str, service_name: str) -> None:
-    status_code, content_type, body = _read_http_response(
+    status_code, content_type, body, analysis_mode = _read_http_response(
         url,
         f"A liveness do contêiner {service_name}",
         max_body_bytes=len(EXPECTED_LIVENESS_BODY),
@@ -483,10 +493,14 @@ def _check_container_liveness(url: str, service_name: str) -> None:
         raise SmokeFailure(
             f"A liveness do contêiner {service_name} respondeu com corpo inesperado."
         )
+    if service_name == "api" and analysis_mode != "synthetic_demo":
+        raise SmokeFailure(
+            "A liveness do contêiner api não informou o modo de análise esperado."
+        )
 
 
 def _check_container_readiness(url: str) -> None:
-    status_code, content_type, body = _read_http_response(
+    status_code, content_type, body, analysis_mode = _read_http_response(
         url,
         "A readiness do contêiner api",
         max_body_bytes=len(EXPECTED_READINESS_BODY),
@@ -497,6 +511,10 @@ def _check_container_readiness(url: str) -> None:
         or body != EXPECTED_READINESS_BODY
     ):
         raise SmokeFailure("A readiness do contêiner api respondeu incorretamente.")
+    if analysis_mode != "synthetic_demo":
+        raise SmokeFailure(
+            "A readiness do contêiner api não informou o modo de análise esperado."
+        )
 
 
 def _check_containerized_applications() -> None:
@@ -550,7 +568,7 @@ def _check_containerized_applications() -> None:
         f"http://{LOOPBACK_HOST}:{api_port}/health/ready",
     )
 
-    status_code, content_type, body = _read_http_response(
+    status_code, content_type, body, _analysis_mode = _read_http_response(
         f"http://{LOOPBACK_HOST}:{api_port}/openapi.json",
         "O contrato OpenAPI do contêiner api",
         max_body_bytes=MAX_OPENAPI_RESPONSE_BYTES,
@@ -574,7 +592,89 @@ def _check_containerized_applications() -> None:
     print("Aplicações: api, web e contrato OpenAPI v1 verificados em contêineres.")
 
 
-def _run_smoke(with_services: bool, with_applications: bool) -> None:
+def _artifacts_mode_requested() -> bool:
+    configured = os.environ.get("PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE")
+    if configured is not None:
+        if configured not in {"synthetic_demo", "artifacts"}:
+            raise SmokeFailure("O modo de análise configurado é inválido.")
+        return configured == "artifacts"
+    dotenv = REPOSITORY_ROOT / ".env"
+    if not dotenv.is_file():
+        return False
+    try:
+        if dotenv.stat().st_size > 65_536:
+            raise SmokeFailure("A configuração local de análise é inválida.")
+        content = dotenv.read_text(encoding="utf-8", errors="strict")
+    except SmokeFailure:
+        raise
+    except (OSError, UnicodeError):
+        raise SmokeFailure("A configuração local de análise é inválida.") from None
+    assignments = re.findall(
+        r"(?m)^\s*PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE\s*=.*$",
+        content,
+    )
+    configured_values = re.findall(
+        r"(?m)^\s*PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE\s*=\s*"
+        r"['\"]?([^'\"\s#]+)['\"]?\s*(?:#.*)?$",
+        content,
+    )
+    if not assignments:
+        return False
+    if (
+        len(assignments) != 1
+        or len(configured_values) != 1
+        or configured_values[0]
+        not in {
+            "synthetic_demo",
+            "artifacts",
+        }
+    ):
+        raise SmokeFailure("O modo de análise configurado é inválido.")
+    return configured_values[0] == "artifacts"
+
+
+def _check_artifacts() -> bool:
+    if not _artifacts_mode_requested():
+        print("Artefatos: indisponíveis; verificação opcional ignorada.")
+        return False
+    try:
+        from prescriptive_maintenance.analysis_runtime import (
+            compose_analysis_runtime,
+        )
+        from prescriptive_maintenance.settings import Settings
+
+        dotenv = REPOSITORY_ROOT / ".env"
+        settings = Settings(
+            _env_file=(  # pyright: ignore[reportCallIssue]
+                dotenv if dotenv.is_file() else None
+            )
+        )
+        if settings.analysis_mode != "artifacts":
+            raise SmokeFailure("O modo artifacts não está configurado.")
+        summary = compose_analysis_runtime(settings).summary
+    except SmokeFailure:
+        raise
+    except Exception:
+        raise SmokeFailure(
+            "Os artefatos configurados estão indisponíveis ou incompatíveis."
+        ) from None
+
+    print(
+        "Artefatos: composição aprovada "
+        f"(amostras={summary.model_sample_count}, "
+        f"registros={summary.index_record_count}, "
+        f"documentos={summary.approved_document_count}, "
+        f"chunks={summary.indexed_chunk_count}, "
+        f"classes_mapeadas={summary.mapped_fault_count})."
+    )
+    return True
+
+
+def _run_smoke(
+    with_services: bool,
+    with_applications: bool,
+    with_artifacts: bool,
+) -> bool:
     _check_runtimes()
     _load_application()
     _check_example_configuration()
@@ -584,11 +684,15 @@ def _run_smoke(with_services: bool, with_applications: bool) -> None:
         _check_services()
     if with_applications:
         _check_containerized_applications()
+    if with_artifacts:
+        return _check_artifacts()
+    return False
 
 
 def main(
     with_services: bool = False,
     with_applications: bool = False,
+    with_artifacts: bool = False,
     extra_args: str | None = None,
 ) -> None:
     """Run smoke checks and translate failures into a concise non-zero result."""
@@ -598,7 +702,11 @@ def main(
                 "Argumentos adicionais não são aceitos; use somente as opções "
                 "de smoke documentadas."
             )
-        _run_smoke(with_services, with_applications)
+        artifacts_approved = _run_smoke(
+            with_services,
+            with_applications,
+            with_artifacts,
+        )
     except SmokeFailure as error:
         print(f"Smoke falhou: {error}", file=sys.stderr)
         raise SystemExit(1) from None
@@ -614,6 +722,7 @@ def main(
         for enabled, name in (
             (with_services, "serviços"),
             (with_applications, "aplicações em contêineres"),
+            (with_artifacts and artifacts_approved, "artefatos aprovados"),
         )
         if enabled
     ]

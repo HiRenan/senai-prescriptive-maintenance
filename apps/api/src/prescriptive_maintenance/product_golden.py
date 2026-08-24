@@ -459,6 +459,7 @@ def run_product_golden(
         {
             "environment": golden.configuration.environment,
             "persistence_backend": golden.configuration.persistence_backend,
+            "analysis_mode": "synthetic_demo",
         }
     )
     document_results, approved, rejected = _run_document_journeys(golden, settings)

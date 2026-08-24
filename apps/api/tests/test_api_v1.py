@@ -103,6 +103,10 @@ RESULT_FIELDS = {
 def configure_offline_startup_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT", "offline")
     monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND", "memory")
+    monkeypatch.setenv(
+        "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE",
+        "synthetic_demo",
+    )
     monkeypatch.delenv("PRESCRIPTIVE_MAINTENANCE_DATABASE_URL", raising=False)
 
 

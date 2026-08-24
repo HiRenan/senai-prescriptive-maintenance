@@ -906,6 +906,10 @@ def synthetic_container(image: str) -> str:
                 "entryPoint": [],
                 "environment": [
                     {
+                        "name": "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE",
+                        "value": "synthetic_demo",
+                    },
+                    {
                         "name": "PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT",
                         "value": "aws",
                     },

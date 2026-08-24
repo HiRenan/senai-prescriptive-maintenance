@@ -490,6 +490,10 @@ def validate_container_definition(
         fail("Task definition não usa exatamente o digest verificado no ECR.")
     environment = container.get("environment")
     expected_environment = [
+        {
+            "name": "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE",
+            "value": "synthetic_demo",
+        },
         {"name": "PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT", "value": "aws"},
         {
             "name": "PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND",

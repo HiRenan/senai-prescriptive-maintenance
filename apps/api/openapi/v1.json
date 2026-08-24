@@ -3,7 +3,7 @@
   "info": {
     "title": "Prescriptive Maintenance API",
     "summary": "Contrato v1 de análise e ciclo documental.",
-    "description": "Contrato público congelado com fakes inteiramente sintéticos; não executa modelo, recuperação, geração ou persistência reais.",
+    "description": "Contrato público v1 com runtime de análise selecionado explicitamente por configuração. O cabeçalho X-Analysis-Mode informa somente o modo sanitizado em uso.",
     "version": "1.0.0"
   },
   "paths": {
@@ -23,6 +23,11 @@
                   "type": "object",
                   "title": "Response  Liveness Health Live Get"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -455,6 +460,11 @@
                   }
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "422": {
@@ -465,6 +475,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "503": {
@@ -474,6 +489,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -501,7 +521,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Resultado previamente criado no catálogo sintético.",
+            "description": "Resultado previamente criado no runtime configurado.",
             "content": {
               "application/json": {
                 "schema": {
@@ -776,6 +796,11 @@
                   }
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "404": {
@@ -786,6 +811,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "422": {
@@ -795,6 +825,26 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
+            }
+          },
+          "503": {
+            "description": "A análise está temporariamente indisponível.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -817,6 +867,11 @@
                   "$ref": "#/components/schemas/DocumentListResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "503": {
@@ -826,6 +881,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -866,6 +926,11 @@
                   "status": "received"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "409": {
@@ -875,6 +940,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           },
@@ -886,6 +956,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "503": {
@@ -895,6 +970,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -1046,6 +1126,11 @@
                   }
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "404": {
@@ -1055,6 +1140,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           },
@@ -1066,6 +1156,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "503": {
@@ -1075,6 +1170,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -1119,6 +1219,11 @@
                   "$ref": "#/components/schemas/ApprovedDocument"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "404": {
@@ -1128,6 +1233,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           },
@@ -1139,6 +1249,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "422": {
@@ -1149,6 +1264,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "503": {
@@ -1158,6 +1278,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -1202,6 +1327,11 @@
                   "$ref": "#/components/schemas/RejectedDocument"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "404": {
@@ -1211,6 +1341,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           },
@@ -1222,6 +1357,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "422": {
@@ -1232,6 +1372,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "503": {
@@ -1241,6 +1386,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -1275,6 +1425,11 @@
                   "$ref": "#/components/schemas/ProcessingDocument"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "404": {
@@ -1284,6 +1439,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           },
@@ -1295,6 +1455,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "422": {
@@ -1305,6 +1470,11 @@
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
             }
           },
           "503": {
@@ -1314,6 +1484,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
               }
             }
           }
@@ -2884,6 +3059,18 @@
           "code"
         ],
         "title": "ValidationIssue"
+      }
+    },
+    "headers": {
+      "AnalysisMode": {
+        "description": "Modo de análise configurado, com valor sanitizado.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "synthetic_demo",
+            "artifacts"
+          ]
+        }
       }
     }
   }

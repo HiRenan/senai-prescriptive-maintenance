@@ -1,9 +1,23 @@
 """Validated application configuration."""
 
+from __future__ import annotations
+
+import re
+from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, ValidationInfo, field_validator
+from pydantic import (
+    Field,
+    PostgresDsn,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+
+type AnalysisMode = Literal["synthetic_demo", "artifacts"]
 
 
 class Settings(BaseSettings):
@@ -12,6 +26,12 @@ class Settings(BaseSettings):
     environment: Literal["local", "offline", "aws"]
     persistence_backend: Literal["memory", "postgres"]
     database_url: PostgresDsn | None = Field(default=None, repr=False)
+    analysis_mode: AnalysisMode
+    analysis_artifacts_manifest: Path | None = Field(default=None, repr=False)
+    analysis_artifacts_manifest_sha256: str | None = Field(
+        default=None,
+        repr=False,
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -43,6 +63,26 @@ class Settings(BaseSettings):
         if persistence_backend == "postgres" and database_url is None:
             raise ValueError("PostgreSQL backend requires a database URL.")
         return database_url
+
+    @model_validator(mode="after")
+    def validate_analysis_mode_dependencies(self) -> Settings:
+        """Require an exact artifact authorization only in artifacts mode."""
+
+        manifest = self.analysis_artifacts_manifest
+        manifest_sha256 = self.analysis_artifacts_manifest_sha256
+        if self.analysis_mode == "synthetic_demo":
+            if manifest is not None or manifest_sha256 is not None:
+                raise ValueError(
+                    "Synthetic demo mode cannot configure artifact references."
+                )
+            return self
+        if manifest is None or manifest_sha256 is None:
+            raise ValueError(
+                "Artifacts mode requires a manifest and its approved SHA-256."
+            )
+        if _SHA256_PATTERN.fullmatch(manifest_sha256) is None:
+            raise ValueError("Artifacts manifest SHA-256 is invalid.")
+        return self
 
 
 def load_settings() -> Settings:

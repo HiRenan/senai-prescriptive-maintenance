@@ -18,14 +18,15 @@ documental que sustenta cada ação sugerida.
 
 O projeto entrega as fronteiras técnicas dessa jornada com foco em
 reprodutibilidade, falha segura e proteção dos materiais fornecidos. O runtime
-padrão continua sintético e offline; integrações reais exigem composição e
-autorização explícitas.
+exige a escolha explícita entre `synthetic_demo` e `artifacts`; o primeiro é o
+modo público do Compose e da demonstração AWS, e o segundo só aceita um conjunto
+local integralmente identificado e autorizado.
 
 ## Estado atual
 
 | Capacidade | O que existe | Limite que importa |
 | --- | --- | --- |
-| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, health checks, correlation ID e erros sanitizados. | A factory padrão usa fakes sintéticos; não há autenticação nem artefatos reais autorizados. |
+| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, dois modos explícitos, health checks, correlation ID e erros sanitizados. | Não há autenticação; o repositório não distribui artefatos privados nem configuração operacional. |
 | Dados | Pipeline local auditado, contrato de 18 features, split temporal e checker determinístico. | A fonte e os derivados por registro permanecem locais e ignorados; a CI usa somente fixtures sintéticas. |
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
@@ -75,6 +76,7 @@ Para iniciar somente a API com memória e sem dependência externa:
 ```powershell
 $env:PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT = "offline"
 $env:PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND = "memory"
+$env:PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE = "synthetic_demo"
 uv run --frozen uvicorn prescriptive_maintenance.main:app `
   --host 127.0.0.1 --port 8000
 ```
@@ -98,6 +100,7 @@ Todos os comandos partem da raiz. Somente `format` reescreve código.
 | `uv run --frozen poe web-test` | Executa os testes essenciais do fluxo do painel. |
 | `uv run --frozen poe failure-matrix` | Exercita falhas P0/P1 e audita o histórico público. |
 | `uv run --frozen poe smoke` | Valida a aplicação offline e o Compose, sem iniciar serviços. |
+| `uv run --frozen poe smoke --with-artifacts` | Compõe somente derivados locais já aprovados; ausência é reportada como indisponível/skip. |
 | `uv run --frozen poe golden-e2e` | Executa a demonstração sintética ponta a ponta. |
 | `uv run --frozen poe services-up` | Inicia somente PostgreSQL/pgvector local. |
 | `uv run --frozen poe applications-audit` | Audita contextos e builders das imagens. |
@@ -127,9 +130,10 @@ gerado e os estados da prescrição.
 O backend é um monólito modular em `apps/api`; `apps/web` serve o painel de
 análise e o proxy de mesma origem, sem framework, bundler nem etapa de build.
 PostgreSQL/pgvector apoia o perfil local, e os artefatos reais de dados, modelo
-e documentos continuam fora do Git. A factory HTTP padrão não descobre esses
-artefatos: a composição integrada só é usada quando todas as identidades são
-injetadas e autorizadas.
+e documentos continuam fora do Git. A factory HTTP não descobre esses
+artefatos: `artifacts` exige o caminho e o SHA-256 de um
+manifesto local aprovado que vincula todas as identidades antes de aceitar uma
+análise.
 
 Os [diagramas lógico, local e AWS](docs/architecture/diagrams.md) marcam
 explicitamente essa separação. O
@@ -157,6 +161,15 @@ scripts        automação exposta pelo Poe
 `PRESCRIPTIVE_MAINTENANCE_DATABASE_URL`. A configuração falha no startup quando
 há campo ausente, extra ou combinação incoerente. `.env.example` usa valores
 fictícios exclusivos de desenvolvimento e `.env` permanece ignorado.
+
+`PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE` também é obrigatório. `synthetic_demo`
+proíbe referências de artefatos. `artifacts` exige
+`PRESCRIPTIVE_MAINTENANCE_ANALYSIS_ARTIFACTS_MANIFEST` e
+`PRESCRIPTIVE_MAINTENANCE_ANALYSIS_ARTIFACTS_MANIFEST_SHA256`; ausência,
+corrupção ou incompatibilidade deixam a readiness e as rotas de análise em 503,
+sem trocar para o demo. Toda resposta HTTP informa somente `X-Analysis-Mode`
+com um dos dois valores fechados. O protocolo e o manifesto estão documentados
+na [validação do runtime](docs/validation/analysis-runtime.md).
 
 ## Dados, modelo e RAG
 
@@ -213,8 +226,8 @@ Não estão implementados:
 - regras operacionais completas ou autorização automática de manutenção;
 - ingestão contínua e orquestração do pipeline pela aplicação;
 - upload, armazenamento ou validação de bytes documentais pela API;
-- composição padrão com modelo real aprovado, embedding semântico, mapeamento
-  real, pgvector preenchido e provider de geração habilitado;
+- artefatos operacionais distribuíveis, embedding semântico aprovado, pgvector
+  preenchido e provider de geração real habilitado;
 - autenticação, autorização, rate limiting e operação de produção;
 - gestão documental na interface, acabamento final de acessibilidade e
   responsividade e teste automatizado de ponta a ponta em navegador;

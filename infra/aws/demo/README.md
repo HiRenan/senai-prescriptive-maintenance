@@ -101,7 +101,8 @@ origem, headers ou métodos.
 
 O backend exige configuração explícita no startup. A task declara
 `PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT=aws` e
-`PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND=memory`; esse perfil rejeita uma
+`PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND=memory`, além de
+`PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE=synthetic_demo`; esse perfil rejeita uma
 `PRESCRIPTIVE_MAINTENANCE_DATABASE_URL`, portanto o Terraform não inventa uma
 URL PostgreSQL e não cria Aurora, RDS ou pgvector. A readiness em
 `/health/ready` não consulta dependência externa quando o backend é `memory` e é
@@ -226,19 +227,19 @@ Também são verificados OAC, client
 Cognito sem secret, CORS, tags, Budget, alarmes e propriedades de teardown. O
 `container_definitions` precisa estar conhecido e não sensível no plano e
 coincidir integralmente com a imagem ECR por digest, runtime endurecido, apenas
-as duas variáveis `aws`/`memory`, ausência de URL de banco e healthcheck exato de
-readiness. O auditor admite o único
+as três variáveis `aws`/`memory`/`synthetic_demo`, ausência de URL de banco e
+healthcheck exato de readiness. O auditor admite o único
 `Resource = "*"` inevitável: `ecr:GetAuthorizationToken`, ação que a AWS não
 permite restringir a um repositório; pull de layers e todas as demais ações usam
 ARNs específicos.
 
 `security_regression.py` primeiro aceita o plano real e então exige a rejeição
-automática de vinte e duas mutações: modo offline desabilitado, nonce persistido,
+automática de vinte e três mutações: modo offline desabilitado, nonce persistido,
 ingressos públicos IPv4 e IPv6, recurso adicional,
 type e address inesperados, ARN S3 externo, action IAM adicional, trust policy
 adulterada, output adicional, ausente ou redirecionado, certificado padrão do
-CloudFront, regra de security group sem descrição, environment ou backend da API
-adulterado, URL de banco injetada, liveness usada para tráfego, corpo de
+CloudFront, regra de security group sem descrição, environment, backend ou modo
+de análise da API adulterado, URL de banco injetada, liveness usada para tráfego, corpo de
 readiness incorreto, container marcado como sensível e referência de configuração
 inesperada. Outra prova injeta uma chave de output JSON duplicada.
 A mesma execução rejeita `NaN`, `Infinity` e `-Infinity`, comprova que nenhum
