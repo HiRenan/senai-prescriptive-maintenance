@@ -40,7 +40,7 @@
   "roles": {
     "plan": {
       "environment": "aws-demo-plan",
-      "role_variable": "AWS_DEMO_PLAN_ROLE_ARN",
+      "role_secret": "AWS_DEMO_PLAN_ROLE_ARN",
       "subject": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-plan",
       "trust_policy": {
         "Version": "2012-10-17",
@@ -208,7 +208,7 @@
     },
     "deploy": {
       "environment": "aws-demo-deploy",
-      "role_variable": "AWS_DEMO_DEPLOY_ROLE_ARN",
+      "role_secret": "AWS_DEMO_DEPLOY_ROLE_ARN",
       "subject": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-deploy",
       "trust_policy": {
         "Version": "2012-10-17",
@@ -837,7 +837,7 @@
     },
     "teardown": {
       "environment": "aws-demo-teardown",
-      "role_variable": "AWS_DEMO_TEARDOWN_ROLE_ARN",
+      "role_secret": "AWS_DEMO_TEARDOWN_ROLE_ARN",
       "subject": "repo:HiRenan@107653306/senai-prescriptive-maintenance@1342357031:environment:aws-demo-teardown",
       "trust_policy": {
         "Version": "2012-10-17",

@@ -141,6 +141,23 @@ def required_text(
     return value
 
 
+def normalized_session_expiration(value: object) -> str:
+    if type(value) is not str:
+        fail("Expiração da sessão AWS está ausente ou inválida.")
+    if value.startswith('"') or value.endswith('"'):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            fail("Expiração da sessão AWS está ausente ou inválida.")
+        if (
+            type(decoded) is not str
+            or json.dumps(decoded, ensure_ascii=True, separators=(",", ":")) != value
+        ):
+            fail("Expiração da sessão AWS está ausente ou inválida.")
+        return decoded
+    return value
+
+
 def require_final_profile(*, region: object, domain: object) -> None:
     if type(region) is not str or type(domain) is not str:
         fail("Perfil final da entrega está ausente ou inválido.")
@@ -154,13 +171,15 @@ def validated_configuration(environment: Mapping[str, str]) -> dict[str, str]:
     account_id = required_text(environment, "AWS_DEMO_ACCOUNT_ID", ACCOUNT_PATTERN)
     region = required_text(environment, "AWS_REGION", REGION_PATTERN)
     source_sha = required_text(environment, "AWS_DEMO_SOURCE_SHA", SHA_PATTERN)
-    expiration_text = environment.get("AWS_DEMO_SESSION_EXPIRATION")
+    expiration_text = normalized_session_expiration(
+        environment.get("AWS_DEMO_SESSION_EXPIRATION")
+    )
     name_prefix = required_text(environment, "TF_VAR_name_prefix", NAME_PATTERN)
     frontend_domain = environment.get("TF_VAR_frontend_domain_name")
     state_bucket = environment.get("TF_STATE_BUCKET")
     state_key = environment.get("TF_STATE_KEY")
     try:
-        if type(expiration_text) is not str or not expiration_text.endswith("Z"):
+        if not expiration_text.endswith("Z"):
             fail("Expiração da sessão AWS está ausente ou inválida.")
         expiration = datetime.fromisoformat(expiration_text.replace("Z", "+00:00"))
         if expiration.tzinfo is None or expiration.utcoffset() != UTC.utcoffset(None):

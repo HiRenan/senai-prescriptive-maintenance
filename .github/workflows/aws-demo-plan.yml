@@ -117,32 +117,32 @@ jobs:
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           action-timeout-s: 120
-          allowed-account-ids: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          allowed-account-ids: ${{ secrets.AWS_DEMO_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_DEMO_REGION }}
           mask-aws-account-id: true
           retry-max-attempts: 3
           output-credentials: true
           role-duration-seconds: 3600
           role-session-name: sen68-plan-${{ github.run_id }}
-          role-to-assume: ${{ vars.AWS_DEMO_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_DEMO_PLAN_ROLE_ARN }}
           unset-current-credentials: true
 
       - name: Produce and audit a private plan without apply
         shell: bash
         env:
-          AWS_DEMO_ACCOUNT_ID: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          AWS_DEMO_ACCOUNT_ID: ${{ secrets.AWS_DEMO_ACCOUNT_ID }}
           AWS_DEMO_SESSION_EXPIRATION: ${{ steps.aws-creds.outputs.aws-expiration }}
           AWS_DEMO_SOURCE_SHA: ${{ inputs.source_sha }}
           AWS_DEFAULT_REGION: ${{ vars.AWS_DEMO_REGION }}
           AWS_REGION: ${{ vars.AWS_DEMO_REGION }}
-          TF_STATE_BUCKET: ${{ vars.AWS_DEMO_STATE_BUCKET }}
+          TF_STATE_BUCKET: ${{ secrets.AWS_DEMO_STATE_BUCKET }}
           TF_STATE_KEY: demo/sen-67/terraform.tfstate
           TF_VAR_availability_zone: ${{ vars.AWS_DEMO_AVAILABILITY_ZONE }}
-          TF_VAR_aws_account_id: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          TF_VAR_aws_account_id: ${{ secrets.AWS_DEMO_ACCOUNT_ID }}
           TF_VAR_aws_region: ${{ vars.AWS_DEMO_REGION }}
           TF_VAR_budget_alert_email: ${{ secrets.AWS_DEMO_BUDGET_ALERT_EMAIL }}
           TF_VAR_enable_bedrock: "false"
-          TF_VAR_frontend_certificate_arn: ${{ vars.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}
+          TF_VAR_frontend_certificate_arn: ${{ secrets.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}
           TF_VAR_frontend_domain_name: ${{ vars.AWS_DEMO_FRONTEND_DOMAIN_NAME }}
           TF_VAR_monthly_budget_usd: "15"
           TF_VAR_name_prefix: senai-pm

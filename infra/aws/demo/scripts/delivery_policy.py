@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import sys
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -53,6 +54,11 @@ ACTION_USE_PATTERN = re.compile(
     r"^\s*uses:\s*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40})\s*(?:#.*)?$",
     re.MULTILINE,
 )
+CONTEXT_REFERENCE_PATTERN = re.compile(
+    r"\${{\s*(secrets|vars)\.([A-Za-z_][A-Za-z0-9_]*)\s*}}"
+)
+SECRET_ACCESS_PATTERN = re.compile(r"\bsecrets\s*(?:\.|\[)")
+CONTEXT_ACCESS_PATTERN = re.compile(r"\b(?:secrets|vars)\s*(?:\.|\[)")
 EXPECTED_ACTIONS = (
     "actions/checkout",
     "actions/setup-python",
@@ -79,6 +85,22 @@ COMMON_OPERATION_ENV_KEYS = (
     "TF_VAR_name_prefix",
     "TF_VAR_owner",
 )
+EXPECTED_OPERATION_ENV_REFERENCES = {
+    "AWS_DEMO_ACCOUNT_ID": "${{ secrets.AWS_DEMO_ACCOUNT_ID }}",
+    "AWS_DEMO_SESSION_EXPIRATION": "${{ steps.aws-creds.outputs.aws-expiration }}",
+    "AWS_DEMO_SOURCE_SHA": "${{ inputs.source_sha }}",
+    "AWS_DEFAULT_REGION": "${{ vars.AWS_DEMO_REGION }}",
+    "AWS_REGION": "${{ vars.AWS_DEMO_REGION }}",
+    "TF_STATE_BUCKET": "${{ secrets.AWS_DEMO_STATE_BUCKET }}",
+    "TF_VAR_availability_zone": "${{ vars.AWS_DEMO_AVAILABILITY_ZONE }}",
+    "TF_VAR_aws_account_id": "${{ secrets.AWS_DEMO_ACCOUNT_ID }}",
+    "TF_VAR_aws_region": "${{ vars.AWS_DEMO_REGION }}",
+    "TF_VAR_budget_alert_email": "${{ secrets.AWS_DEMO_BUDGET_ALERT_EMAIL }}",
+    "TF_VAR_frontend_certificate_arn": (
+        "${{ secrets.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}"
+    ),
+    "TF_VAR_frontend_domain_name": "${{ vars.AWS_DEMO_FRONTEND_DOMAIN_NAME }}",
+}
 BUILDX_CONFIG_EXPRESSION = (
     "${{ runner.temp }}/sen68-buildx-${{ github.run_id }}-${{ github.run_attempt }}"
 )
@@ -1051,7 +1073,7 @@ def audit_contract(contract: Mapping[str, Any]) -> dict[str, str]:
                 "environment",
                 "permission_policy",
                 "permission_policy_publication",
-                "role_variable",
+                "role_secret",
                 "subject",
                 "trust_policy",
             ),
@@ -1060,9 +1082,9 @@ def audit_contract(contract: Mapping[str, Any]) -> dict[str, str]:
         environment = f"aws-demo-{role_name}"
         exact_text(role.get("environment"), environment, context="environment")
         exact_text(
-            role.get("role_variable"),
+            role.get("role_secret"),
             f"AWS_DEMO_{role_name.upper()}_ROLE_ARN",
-            context="role variable",
+            context="role secret",
         )
         subject = expected_subject(environment)
         exact_text(role.get("subject"), subject, context="subject")
@@ -1116,7 +1138,7 @@ def audit_workflow(
     expected_environment: str | None,
     uses_oidc: bool,
     action_pins: Mapping[str, str],
-    expected_role_variable: str | None,
+    expected_role_name: str | None,
     expected_confirmation: str | None,
     expected_operation: str | None,
 ) -> None:
@@ -1126,6 +1148,17 @@ def audit_workflow(
         raise DeliveryPolicyError("Workflow de entrega não é UTF-8 válido.") from None
     if "\r" in workflow or not workflow.endswith("\n"):
         fail("Workflow deve usar LF e newline final.")
+
+    def exact_declarations(name: str, value: str) -> list[re.Match[str]]:
+        return list(
+            re.finditer(
+                rf"^[ \t]+{re.escape(name)}[ \t]*:[ \t]*"
+                rf"{re.escape(value)}[ \t]*$",
+                workflow,
+                re.MULTILINE,
+            )
+        )
+
     if workflow.count("permissions: {}") != 1:
         fail("Workflow deve negar permissões no topo.")
     forbidden = (
@@ -1165,7 +1198,7 @@ def audit_workflow(
         if any(
             value is not None
             for value in (
-                expected_role_variable,
+                expected_role_name,
                 expected_confirmation,
                 expected_operation,
             )
@@ -1196,7 +1229,7 @@ def audit_workflow(
         return
 
     if (
-        expected_role_variable is None
+        expected_role_name is None
         or expected_confirmation is None
         or expected_operation is None
     ):
@@ -1212,7 +1245,10 @@ def audit_workflow(
         fail("OIDC deve existir apenas no job protegido da operação.")
     if f"environment: {expected_environment}" not in workflow:
         fail("Workflow usa environment diferente do contrato.")
-    expected_role = f"role-to-assume: ${{{{ vars.{expected_role_variable} }}}}"
+    expected_role_reference = f"${{{{ secrets.{expected_role_name} }}}}"
+    expected_account_reference = "${{ secrets.AWS_DEMO_ACCOUNT_ID }}"
+    expected_region_reference = "${{ vars.AWS_DEMO_REGION }}"
+    expected_role = f"role-to-assume: {expected_role_reference}"
     expected_command = (
         f"python infra/aws/demo/scripts/aws_delivery.py {expected_operation}"
     )
@@ -1251,6 +1287,7 @@ def audit_workflow(
         f"{action_pins['aws-actions/configure-aws-credentials']}"
     )
     credential_offset = workflow.find(credential_reference)
+    credential_end = workflow.find("\n      - name:", credential_offset)
     command_offset = workflow.find(expected_command)
     source_checkout_offset = workflow.find("ref: ${{ inputs.source_sha }}")
     revalidation_offset = workflow.find(PROTECTED_MAIN_REVALIDATION)
@@ -1276,7 +1313,21 @@ def audit_workflow(
         < command_offset
     ):
         fail("Job protegido não revalida o HEAD atual de main antes do OIDC.")
+    if SECRET_ACCESS_PATTERN.search(workflow[:credential_offset]):
+        fail("Segredos não podem alcançar steps anteriores à assunção OIDC.")
+    credential_declarations = (
+        exact_declarations("allowed-account-ids", expected_account_reference),
+        exact_declarations("aws-region", expected_region_reference),
+        exact_declarations("role-to-assume", expected_role_reference),
+    )
+    if credential_end < 0 or any(
+        len(declarations) != 1
+        or not credential_offset < declarations[0].start() < credential_end
+        for declarations in credential_declarations
+    ):
+        fail("Action OIDC diverge das referências exatas e mínimas aprovadas.")
     operation_env_keys: list[str] = list(COMMON_OPERATION_ENV_KEYS)
+    operation_step_count = 2 if expected_operation == "deploy" else 1
     if expected_operation == "deploy":
         if foundation_command is None:
             fail("Workflow de deploy perdeu o comando de fundação.")
@@ -1348,8 +1399,40 @@ def audit_workflow(
                     "Ambiente operacional deve existir somente no último step "
                     "protegido."
                 )
-    if credential_offset < 0 or "${{ secrets." in workflow[:credential_offset]:
-        fail("Segredos não podem alcançar actions de preparação ou OIDC.")
+    for key, value in EXPECTED_OPERATION_ENV_REFERENCES.items():
+        if len(exact_declarations(key, value)) != operation_step_count:
+            fail("Ambiente operacional diverge das referências exatas aprovadas.")
+    smoke_declarations = exact_declarations(
+        "AWS_DEMO_SMOKE_BEARER_TOKEN",
+        "${{ secrets.AWS_DEMO_SMOKE_BEARER_TOKEN }}",
+    )
+    if len(smoke_declarations) != (1 if expected_operation == "deploy" else 0):
+        fail("Token de smoke diverge do secret e do step de runtime aprovados.")
+
+    expected_context_references: Counter[tuple[str, str]] = Counter(
+        {
+            ("secrets", "AWS_DEMO_ACCOUNT_ID"): 1 + 2 * operation_step_count,
+            ("secrets", "AWS_DEMO_BUDGET_ALERT_EMAIL"): operation_step_count,
+            (
+                "secrets",
+                "AWS_DEMO_FRONTEND_CERTIFICATE_ARN",
+            ): operation_step_count,
+            ("secrets", "AWS_DEMO_STATE_BUCKET"): operation_step_count,
+            ("secrets", expected_role_name): 1,
+            ("vars", "AWS_DEMO_AVAILABILITY_ZONE"): operation_step_count,
+            ("vars", "AWS_DEMO_FRONTEND_DOMAIN_NAME"): operation_step_count,
+            ("vars", "AWS_DEMO_REGION"): 1 + 3 * operation_step_count,
+        }
+    )
+    if expected_operation == "deploy":
+        expected_context_references[("secrets", "AWS_DEMO_SMOKE_BEARER_TOKEN")] = 1
+    observed_context_references = Counter(CONTEXT_REFERENCE_PATTERN.findall(workflow))
+    if (
+        len(CONTEXT_ACCESS_PATTERN.findall(workflow))
+        != sum(observed_context_references.values())
+        or observed_context_references != expected_context_references
+    ):
+        fail("Workflow usa secret, variável ou contexto fora do contrato exato.")
     expected_duration = "3600" if expected_operation == "plan" else "7200"
     expected_timeout = "45" if expected_operation == "plan" else "90"
     expected_expiration_references = 2 if expected_operation == "deploy" else 1
@@ -1376,21 +1459,21 @@ def audit_workflow(
         for (
             environment,
             _,
-            role_variable,
+            role_secret,
             confirmation,
             operation,
         ) in WORKFLOW_CONTRACT.values()
-        for value in (environment, role_variable, confirmation, operation)
+        for value in (environment, role_secret, confirmation, operation)
         if value is not None
     } - {
         expected_environment,
-        expected_role_variable,
+        expected_role_name,
         expected_confirmation,
         expected_operation,
     }
     if any(
         (
-            f"vars.{value}" in workflow
+            f"secrets.{value}" in workflow
             if value.endswith("_ROLE_ARN")
             else f'"{value}"' in workflow
         )
@@ -1423,7 +1506,7 @@ def audit_workflows(action_pins: Mapping[str, str], root: Path) -> None:
     for filename, (
         environment,
         uses_oidc,
-        role_variable,
+        role_secret,
         confirmation,
         operation,
     ) in WORKFLOW_CONTRACT.items():
@@ -1432,7 +1515,7 @@ def audit_workflows(action_pins: Mapping[str, str], root: Path) -> None:
             expected_environment=environment,
             uses_oidc=uses_oidc,
             action_pins=action_pins,
-            expected_role_variable=role_variable,
+            expected_role_name=role_secret,
             expected_confirmation=confirmation,
             expected_operation=operation,
         )
