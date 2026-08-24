@@ -594,6 +594,9 @@ def prove_contract_mutations_rejected() -> int:
                 "plan", "ReadDemoResources", "ec2:DescribeNetworkAcls"
             ),
             without_provider_action(
+                "plan", "ReadDemoResources", "ec2:DescribePrefixLists"
+            ),
+            without_provider_action(
                 "plan", "ReadDemoResources", "ec2:DescribeVpcAttribute"
             ),
             without_provider_action(
@@ -604,6 +607,10 @@ def prove_contract_mutations_rejected() -> int:
             ),
             without_provider_action("deploy", "GlobalReads", "aws-portal:ViewBilling"),
             without_provider_action("deploy", "GlobalReads", "ec2:DescribeNetworkAcls"),
+            without_provider_action("deploy", "GlobalReads", "ec2:DescribePrefixLists"),
+            without_provider_action(
+                "deploy", "TaggedRW", "ec2:RevokeSecurityGroupEgress"
+            ),
             without_provider_action(
                 "deploy", "GlobalReads", "ec2:DescribeVpcAttribute"
             ),
@@ -627,6 +634,11 @@ def prove_contract_mutations_rejected() -> int:
                 "teardown",
                 "InventoryDemoResourcesGlobal",
                 "ec2:DescribeNetworkAcls",
+            ),
+            without_provider_action(
+                "teardown",
+                "InventoryDemoResourcesGlobal",
+                "ec2:DescribePrefixLists",
             ),
             without_provider_action(
                 "teardown", "InventoryDemoResourcesGlobal", "ec2:DescribeVpcAttribute"

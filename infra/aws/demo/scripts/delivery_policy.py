@@ -109,9 +109,9 @@ BUILDX_NAME_EXPRESSION = "sen68-${{ github.run_id }}-${{ github.run_attempt }}"
 BUILDX_OUTPUT_EXPRESSION = "${{ steps.buildx.outputs.name }}"
 PROTECTED_MAIN_REVALIDATION = "Revalidate the current main revision after approval"
 EXPECTED_PERMISSION_POLICY_SHA256 = {
-    "deploy": "1865a2fb9af0fa45b62034c91807a241850231bcf434c5aaa29067164a7f5d3d",
-    "plan": "5668b6259afb11b266bd82ea3ad10015f1b0bb70ec42f34d525ff0557b7c64b5",
-    "teardown": "b790abe34cb3349db1b3962e4329b2e49abb81379cbebbdde94d0958d3c4c92b",
+    "deploy": "a0faf9238fdc73f8e81598b9c9fccae10c1dddea0cc3174488608817a08dba46",
+    "plan": "1f6ca83a1d337edd7b459aa48f5c0411117e0f8891184a2a4823d506da62d55e",
+    "teardown": "bad12e300a8928f4e80ed2b8062b8bf543454c1e292e1e4b766faa3449a95dca",
 }
 EXPECTED_PERMISSION_SIDS = {
     "deploy": (
@@ -310,14 +310,17 @@ REQUIRED_PROVIDER_ACTIONS = {
         "aws-portal:ViewBilling",
         "cognito-idp:DescribeUserPoolDomain",
         "ec2:DescribeNetworkAcls",
+        "ec2:DescribePrefixLists",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
+        "ec2:RevokeSecurityGroupEgress",
         "iam:ListAttachedRolePolicies",
     },
     "plan": {
         "aws-portal:ViewBilling",
         "cognito-idp:DescribeUserPoolDomain",
         "ec2:DescribeNetworkAcls",
+        "ec2:DescribePrefixLists",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
@@ -327,6 +330,7 @@ REQUIRED_PROVIDER_ACTIONS = {
         "aws-portal:ViewBilling",
         "cognito-idp:DescribeUserPoolDomain",
         "ec2:DescribeNetworkAcls",
+        "ec2:DescribePrefixLists",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
