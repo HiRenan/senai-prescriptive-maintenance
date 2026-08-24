@@ -26,6 +26,7 @@ from aws_delivery import (
     AwsDeliveryError,
     capture_silent,
     child_environment,
+    delivery_identity,
     login_and_build,
     parse_ecr_lookup,
     strict_json,
@@ -3257,6 +3258,66 @@ def prove_cli_failures_are_sanitized() -> int:
     return len(commands)
 
 
+def prove_controller_identity_is_scoped() -> int:
+    configuration = {
+        "account_id": "000000000000",
+        "frontend_domain": "senai.maib.com.br",
+        "name_prefix": "senai-pm",
+        "region": "us-east-1",
+        "session_expiration_epoch": "9999999999",
+        "source_sha": "a" * 40,
+        "state_bucket": "synthetic-state-bucket",
+        "state_key": aws_delivery.STATE_KEY,
+    }
+    expected = {
+        "account_id": "000000000000",
+        "frontend_domain": "senai.maib.com.br",
+        "name_prefix": "senai-pm",
+        "region": "us-east-1",
+    }
+    if delivery_identity(configuration) != expected:
+        raise DeliveryRegressionError(
+            "Controlador não isolou a identidade usada pelos gates de state e plano."
+        )
+
+    observed: list[Mapping[str, str]] = []
+    original_audit = aws_delivery.audit_state_snapshot
+
+    def capture_identity(
+        snapshot: object,
+        *,
+        mode: str,
+        identity: Mapping[str, str],
+        expected_image: str | None = None,
+    ) -> None:
+        del snapshot, mode, expected_image
+        observed.append(identity)
+
+    try:
+        aws_delivery.audit_state_snapshot = capture_identity
+        with tempfile.TemporaryDirectory(prefix="sen68-identity-scope-") as temporary:
+            state_path = Path(temporary) / "state.txt"
+            state_path.write_text("", encoding="utf-8")
+            aws_delivery.audit_pulled_state(
+                state_path,
+                {},
+                mode="fresh",
+                configuration=configuration,
+            )
+    finally:
+        aws_delivery.audit_state_snapshot = original_audit
+
+    if observed != [expected]:
+        raise DeliveryRegressionError(
+            "Gate de state recebeu configuração operacional além da identidade."
+        )
+
+    missing = dict(configuration)
+    del missing["region"]
+    expect_failure(lambda: delivery_identity(missing), AwsDeliveryError)
+    return 3
+
+
 def main() -> int:
     contract = mutable_contract()
     action_pins = audit_contract(contract)
@@ -3281,6 +3342,7 @@ def main() -> int:
         "immutable_ecr": prove_immutable_ecr_recovery(),
         "hostile_streams": prove_hostile_streams_fail_closed(),
         "cli_sanitization": prove_cli_failures_are_sanitized(),
+        "identity_scope": prove_controller_identity_is_scoped(),
     }
     total = sum(checks.values())
     print(
