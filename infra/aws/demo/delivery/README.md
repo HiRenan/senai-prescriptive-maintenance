@@ -194,7 +194,7 @@ apenas o namespace do comando AWS CLI.
 ### Publicação e margem das permission policies
 
 O contrato declara como cada policy deve ser publicada. Plan e teardown usam um
-documento inline cada; deploy usa três customer-managed policies versionadas e
+documento inline cada; deploy usa quatro customer-managed policies versionadas e
 anexadas à mesma role. Essa divisão não altera ações, recursos ou condições: cada
 Sid aparece exatamente uma vez, e o auditor falha se houver omissão, duplicidade,
 mudança de modo ou nome sem versão.
@@ -205,20 +205,21 @@ caracteres livres em inline policies e 900 em cada customer-managed policy.
 
 | role/documento | modo | tamanho | limite | margem |
 | --- | --- | ---: | ---: | ---: |
-| plan / `senai-pm-demo-plan-v1` | inline | 2.890 | 10.240 | 7.350 |
-| deploy / `senai-pm-demo-deploy-core-v1` | customer-managed | 5.024 | 6.144 | 1.120 |
-| deploy / `senai-pm-demo-deploy-runtime-v1` | customer-managed | 5.050 | 6.144 | 1.094 |
+| plan / `senai-pm-demo-plan-v1` | inline | 2.941 | 10.240 | 7.299 |
+| deploy / `senai-pm-demo-deploy-core-v1` | customer-managed | 5.075 | 6.144 | 1.069 |
+| deploy / `senai-pm-demo-deploy-network-v1` | customer-managed | 1.135 | 6.144 | 5.009 |
+| deploy / `senai-pm-demo-deploy-runtime-v1` | customer-managed | 4.851 | 6.144 | 1.293 |
 | deploy / `senai-pm-demo-deploy-frontend-v1` | customer-managed | 1.097 | 6.144 | 5.047 |
-| teardown / `senai-pm-demo-teardown-v1` | inline | 6.801 | 10.240 | 3.439 |
+| teardown / `senai-pm-demo-teardown-v1` | inline | 6.945 | 10.240 | 3.295 |
 
-Sem particionamento, o deploy renderizado ocuparia 11.095 caracteres e excederia
-o limite inline de 10.240. As três policies anexadas consomem 3 das 10 associações
-customer-managed padrão da role, preservando 7. O documento `frontend-v1` cobre
+Sem particionamento, o deploy renderizado ocuparia 12.044 caracteres e excederia
+o limite inline de 10.240. As quatro policies anexadas consomem 4 das 10 associações
+customer-managed padrão da role, preservando 6. O documento `frontend-v1` cobre
 explicitamente criação do domínio, listagem do bucket, uploads AES256 nas três
 famílias de key aprovadas, limpeza somente de `assets/*` e invalidação/espera da
-distribuição; o bootstrap deve publicar e anexar os três documentos.
+distribuição; o bootstrap deve publicar e anexar os quatro documentos.
 
-O administrador gera os cinco documentos sanitizados e o manifesto de hashes
+O administrador gera os seis documentos sanitizados e o manifesto de hashes
 em um diretório novo antes do bootstrap:
 
 ```powershell
@@ -410,11 +411,19 @@ enumerada para não esconder privilégio dentro de um ARN aparentemente restrito
 - Deploy, `CloudMapNew` (ARN): `servicediscovery:CreateService`. IDs de
   namespace/service são gerados; account/região e
   `aws:RequestTag/Profile = aws-demo` limitam a criação.
-- Deploy, `Ec2Create` (ARN): `ec2:CreateRouteTable`,
+- Deploy, `Ec2CreateInTaggedVpc` (ARN): `ec2:CreateRouteTable`,
+  `ec2:CreateSecurityGroup`, `ec2:CreateSubnet` e `ec2:CreateVpcEndpoint`
+  podem referenciar somente VPC já existente com
+  `aws:ResourceTag/Profile = aws-demo`.
+- Deploy, `Ec2CreateTagged` (ARN): `ec2:CreateRouteTable`,
   `ec2:CreateSecurityGroup`, `ec2:CreateSubnet`, `ec2:CreateTags`,
-  `ec2:CreateVpc` e `ec2:CreateVpcEndpoint`. IDs EC2 ainda não existem;
-  account/região ficam no ARN e todas as chamadas exigem
+  `ec2:CreateVpc` e `ec2:CreateVpcEndpoint` ficam limitadas aos tipos exatos na
+  conta/região aprovadas; os recursos novos exigem
   `aws:RequestTag/Profile = aws-demo`.
+- Deploy, `Ec2EndpointInTaggedNetwork` (ARN): `ec2:CreateVpcEndpoint` pode
+  referenciar somente route tables, security groups e subnets já existentes com
+  `aws:ResourceTag/Profile = aws-demo`. A separação é necessária porque as
+  operações EC2 de criação avaliam simultaneamente o recurso novo e seus pais.
 - Deploy, `TaskNew` (ARN): `ecs:RegisterTaskDefinition`. Somente a
   revisão gerada usa wildcard; family, account e região são exatos, e o request
   exige `Profile = aws-demo`, CPU numérica `256` e memória numérica `512`.
@@ -861,12 +870,12 @@ externa explícita, exceto pela assunção OIDC parcial registrada no run
 
 - O bootstrap e a prova real dependem de autorização e conta AWS; nenhum check
   offline substitui a avaliação das policies pelo serviço.
-- A policy lógica de deploy ocupa 11.095 caracteres e por isso é publicada em
-  três documentos customer-managed de 5.024, 5.050 e 1.097 caracteres, com
-  margens de 1.120, 1.094 e 5.047. O bootstrap precisa publicar e anexar os três,
-  incluindo `frontend-v1` para upload/invalidação, medir de novo e validar cada
-  documento no Access Analyzer; qualquer excesso ou ação faltante bloqueia o
-  exercício.
+- A policy lógica de deploy ocupa 12.044 caracteres e por isso é publicada em
+  quatro documentos customer-managed de 5.075, 1.135, 4.851 e 1.097 caracteres,
+  com margens de 1.069, 5.009, 1.293 e 5.047. O bootstrap precisa publicar e
+  anexar os quatro, incluindo `network-v1` para o ciclo de autorização EC2 e
+  `frontend-v1` para upload/invalidação, medir de novo e validar cada documento
+  no Access Analyzer; qualquer excesso ou ação faltante bloqueia o exercício.
 - Os três environments/reviewer/restrições a `main` permanecem controles
   externos, embora a configuração efetiva tenha sido comprovada somente para
   leitura em 23/08/2026. A API REST e a segunda aprovação do mesmo operador

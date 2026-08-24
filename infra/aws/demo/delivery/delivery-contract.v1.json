@@ -706,7 +706,23 @@
             }
           },
           {
-            "Sid": "Ec2Create",
+            "Sid": "Ec2CreateInTaggedVpc",
+            "Effect": "Allow",
+            "Action": [
+              "ec2:CreateRouteTable",
+              "ec2:CreateSecurityGroup",
+              "ec2:CreateSubnet",
+              "ec2:CreateVpcEndpoint"
+            ],
+            "Resource": "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:vpc/*",
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "Ec2CreateTagged",
             "Effect": "Allow",
             "Action": [
               "ec2:CreateRouteTable",
@@ -716,10 +732,31 @@
               "ec2:CreateVpc",
               "ec2:CreateVpcEndpoint"
             ],
-            "Resource": "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:*/*",
+            "Resource": [
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:route-table/*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:security-group/*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:subnet/*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:vpc-endpoint/*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:vpc/*"
+            ],
             "Condition": {
               "StringEquals": {
                 "aws:RequestTag/Profile": "aws-demo"
+              }
+            }
+          },
+          {
+            "Sid": "Ec2EndpointInTaggedNetwork",
+            "Effect": "Allow",
+            "Action": "ec2:CreateVpcEndpoint",
+            "Resource": [
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:route-table/*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:security-group/*",
+              "arn:aws:ec2:${AWS_REGION}:${AWS_ACCOUNT_ID}:subnet/*"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Profile": "aws-demo"
               }
             }
           },
@@ -810,6 +847,14 @@
             ]
           },
           {
+            "name": "${NAME_PREFIX}-demo-deploy-network-v1",
+            "sids": [
+              "Ec2CreateInTaggedVpc",
+              "Ec2CreateTagged",
+              "Ec2EndpointInTaggedNetwork"
+            ]
+          },
+          {
             "name": "${NAME_PREFIX}-demo-deploy-runtime-v1",
             "sids": [
               "AlarmCreate",
@@ -823,7 +868,6 @@
               "CloudMapTag",
               "CognitoRW",
               "CognitoTag",
-              "Ec2Create",
               "EcrWrites",
               "EcsCreate",
               "GlobalNew",
