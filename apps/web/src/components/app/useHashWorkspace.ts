@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-export type WorkspaceName = "analysis" | "assistant" | "documents";
+export type WorkspaceName = "analysis" | "documents";
 
 export const WORKSPACES: readonly WorkspaceName[] = Object.freeze([
   "analysis",
-  "assistant",
   "documents",
 ]);
 

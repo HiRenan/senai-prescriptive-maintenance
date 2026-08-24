@@ -18,12 +18,6 @@ function renderShell() {
       contractVersion="v1"
       documentContractVersion="v1"
       analysis={<p>Área de análise</p>}
-      assistant={
-        <>
-          <h2 id="assistant-heading">Assistente</h2>
-          <p>Área do assistente</p>
-        </>
-      }
       documents={
         <>
           <h2 id="documents-heading">Gestão documental</h2>

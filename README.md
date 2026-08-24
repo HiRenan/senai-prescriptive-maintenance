@@ -19,7 +19,7 @@ documental que sustenta cada ação sugerida.
 O projeto entrega as fronteiras técnicas dessa jornada com foco em
 reprodutibilidade, falha segura e proteção dos materiais fornecidos. O runtime
 exige a escolha explícita entre `synthetic_demo` e `artifacts`; o primeiro é o
-modo público do Compose e da demonstração AWS, e o segundo só aceita um conjunto
+modo público do Compose e da demonstração local, e o segundo só aceita um conjunto
 local integralmente identificado e autorizado.
 
 ## Estado atual
@@ -31,8 +31,8 @@ local integralmente identificado e autorizado.
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração, guardrails pré/pós-provider e assistente extrativo TF-IDF com citações. | A API registra metadados, não recebe bytes; o corpus público do assistente é sintético e fixo, e não prova qualidade semântica sobre os documentos privados. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
-| Web | Painel responsivo de análise, assistente e gestão documental em React/TypeScript, temas claro e escuro, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Vitest/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
-| AWS | Perfil Terraform efêmero, OIDC e workflows manuais protegidos, validados offline e exercitados na conta autorizada. | A primeira foundation live alcançou a criação dos recursos e parou por permissões EC2 ausentes no contrato; não existe ainda URL pública, login, smoke ou deploy concluído. |
+| Web | Painel responsivo de análise e gestão documental em React/TypeScript, temas claro e escuro, modo offline dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Vitest/Chromium. | Local/offline permanecem sem login; o assistente experimental não integra a navegação final. |
+| AWS | Perfil Terraform efêmero, OIDC e workflows manuais protegidos, validados offline e parcialmente exercitados na conta autorizada. | A execução live foi encerrada sem URL pública, login ou smoke; a entrega demonstrável desta versão é local. |
 
 Nos environments AWS, região, AZ e domínio são variáveis (`vars`); account ID,
 bucket de state, certificado e role exclusiva são segredos (`secrets`), assim como
@@ -128,10 +128,14 @@ uv run --frozen poe smoke --with-services --with-applications
 uv run --frozen poe services-down
 ```
 
-O painel fica em `127.0.0.1:3000` e localiza a API por `API_BASE_URL`, cujo
+O painel fica em `127.0.0.1:3000`. A demonstração final usa as áreas **Análise**
+e **Documentos**; o assistente experimental permanece disponível somente no
+contrato da API e não integra a navegação apresentada à banca.
+
+O painel localiza a API por `API_BASE_URL`, cujo
 padrão é `http://127.0.0.1:8000` e cujo valor no Compose é `http://api:8000`. O
 navegador chama sempre a mesma origem da página: o processo web encaminha a
-análise, o assistente e somente as seis operações documentais publicadas no
+análise e somente as seis operações documentais publicadas no
 contrato, então a
 API não precisa de exceção de CORS. O [README do painel](apps/web/README.md)
 descreve os fluxos, os contratos gerados e os estados apresentados.
@@ -154,7 +158,7 @@ código que o comprova.
 
 ```text
 apps/api       API, domínio, dados, modelo, recuperação, geração e persistência
-apps/web       painel de análise, assistente e gestão documental e processo que o serve
+apps/web       painel de análise e gestão documental e processo que o serve
 data           manifesto, fixtures sintéticas e derivados públicos permitidos
 docs           arquitetura, cards, decisões, runbooks e evidências
 infra          Compose local e perfil Terraform AWS demo
@@ -217,6 +221,10 @@ aprovado. Quando a similaridade cosseno TF-IDF atinge o limiar fechado, ele
 extrai a resposta e devolve documento, versão, chunk, página e seção; abaixo do
 limiar responde `insufficient_evidence` e não inventa orientação. Ele não usa
 LLM, Bedrock nem os PDFs privados durante a execução pública.
+
+Essa capacidade continua testada e acessível por `POST /assistant/query`, mas
+foi retirada da interface final porque o corpus público fixo serve apenas para
+provar o contrato de recuperação e abstenção, não uma consulta documental real.
 
 O custo AWS de USD 2,72 com contingência para uma janela de oito horas é uma
 **estimativa**, não gasto observado. As hipóteses, a data de referência e a

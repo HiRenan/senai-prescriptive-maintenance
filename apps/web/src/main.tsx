@@ -8,7 +8,6 @@ import "./styles/shell.css";
 import "./styles/console.css";
 import "./styles/report.css";
 import "./styles/documents.css";
-import "./styles/assistant.css";
 
 import { readAndCleanOAuthCallback } from "./auth/cognito";
 import { StatusProvider } from "./components/ui/StatusToaster";

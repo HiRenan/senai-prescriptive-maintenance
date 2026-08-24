@@ -1,13 +1,22 @@
 # Roteiro final da demonstração — SEN-70
 
 - Responsável: Renan Mocelin
-- Status: roteiro pré-release reconciliado com as entregas finais da SEN-64 e da
-  SEN-75; aceite temporal técnico aprovado
-- Baseline confrontado: `origin/develop` em
-  `039c0f83819f4cc673e45a960c409a7e31d0f48b`
+- Status: roteiro técnico consolidado; release estável promovida
+- Baseline final de integração: `origin/develop` em
+  `32944dfabba772a7713c2c7b3d9cc3d7c6ec687c`
+- Release final: `origin/main` em
+  `601c26717de021bc424bf4b3e310078cee3d7186`
 - Janela principal: 15 minutos, composta por 14 minutos e 30 segundos de
   conteúdo e 30 segundos de reserva; o ensaio técnico integral mediu 06:53,535
   sem cortes
+
+> **Atualização final:** a demonstração oficial desta versão é local e usa as
+> áreas **Análise** e **Documentos**. O assistente experimental permanece
+> testado na API, mas não integra a navegação final porque seu corpus público é
+> fixo e demonstrativo. A tentativa AWS criou recursos parcialmente e foi
+> encerrada sem URL, login ou smoke; todas as referências abaixo a uma execução
+> AWS futura devem ser lidas como histórico do planejamento, não como parte da
+> apresentação final.
 
 > O baseline indicado contém o painel local responsivo da SEN-64, cinco outcomes
 > visuais por fixtures sintéticas no modo offline, zero chamadas à API nesse
