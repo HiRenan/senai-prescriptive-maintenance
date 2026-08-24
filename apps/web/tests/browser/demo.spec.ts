@@ -4,7 +4,6 @@ import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 
 import { PKCE_STORAGE_KEY } from "../../src/auth/pkce";
-import { SYNTHETIC_ASSISTANT_EXAMPLES } from "../../src/generated/assistant-contract.js";
 import { requestExample, responseExample } from "../helpers/contract-fixtures";
 import { deferred } from "../helpers/async";
 
@@ -445,7 +444,6 @@ test("offline demonstra cinco outcomes e toda a navegação sem chamar a API", a
     const path = new URL(request.url()).pathname;
     if (
       path === "/api/analysis" ||
-      path === "/api/assistant/query" ||
       path === "/api/documents" ||
       path.startsWith("/api/documents/")
     ) {
@@ -470,46 +468,7 @@ test("offline demonstra cinco outcomes e toda a navegação sem chamar a API", a
   await expect(page.locator("#documents-panel")).toContainText(
     "Gestão documental indisponível offline",
   );
-  await page.locator("#assistant-navigation").focus();
-  await page.keyboard.press("Enter");
-  await expect(page.locator("#assistant")).toBeFocused();
-  await expect(page.locator("#assistant")).toContainText(
-    "Indisponível no modo offline",
-  );
-  await expect(page.locator("#assistant-question")).toBeDisabled();
   expect(apiRequests).toEqual([]);
-});
-
-test("assistente apresenta resposta citada e abstenção pelo endpoint real", async ({
-  page,
-}) => {
-  await mockEmptyDocuments(page);
-  let calls = 0;
-  await page.route("**/api/assistant/query", async (route) => {
-    const fixture = SYNTHETIC_ASSISTANT_EXAMPLES[calls];
-    calls += 1;
-    await route.fulfill({ status: 200, json: fixture?.response });
-  });
-  await page.goto("/#assistant");
-
-  await page.locator("#assistant-question").fill(
-    "Como verificar vibração radial elevada na bomba?",
-  );
-  await page.getByRole("button", { name: "Enviar pergunta" }).click();
-  await expect(page.getByRole("heading", { name: "Fonte recuperável" })).toBeVisible();
-  await expect(page.locator("#assistant")).toContainText("Similaridade");
-
-  await page.locator("#assistant-question").fill(
-    "Qual é a previsão do tempo para amanhã?",
-  );
-  await page.getByRole("button", { name: "Enviar pergunta" }).click();
-  await expect(page.locator("#assistant")).toContainText(
-    "Não há evidência aprovada e vigente",
-  );
-  await expect(page.locator("#assistant")).toContainText(
-    "nenhuma orientação ou citação foi produzida",
-  );
-  expect(calls).toBe(2);
 });
 
 test("teclado, foco e erros associados cobrem análise e troca de área", async ({
@@ -672,7 +631,6 @@ for (const viewport of [
       "#online-mode",
       "#offline-mode",
       "#analysis-navigation",
-      "#assistant-navigation",
       "#documents-navigation",
       "#example-select",
       '[data-feature="z_rms_velocity_mm_s"]',

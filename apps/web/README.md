@@ -20,7 +20,7 @@ apps/web/
 ├── src/
 │   ├── main.tsx      # leitura do callback OAuth e montagem da aplicação
 │   ├── App.tsx       # perfis offline, local e publicado com PKCE
-│   ├── styles/       # tokens, base, primitivos, shell e as três áreas
+│   ├── styles/       # tokens, base, primitivos, shell e as duas áreas
 │   ├── components/   # primitivos de interface e a moldura da aplicação
 │   ├── features/     # console, laudo e ciclo documental
 │   ├── api/          # clientes da análise e do ciclo documental

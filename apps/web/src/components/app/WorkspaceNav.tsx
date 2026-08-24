@@ -2,7 +2,6 @@ import type { WorkspaceName } from "./useHashWorkspace";
 
 const LINKS: readonly { workspace: WorkspaceName; label: string }[] = [
   { workspace: "analysis", label: "Análise" },
-  { workspace: "assistant", label: "Assistente" },
   { workspace: "documents", label: "Documentos" },
 ];
 
