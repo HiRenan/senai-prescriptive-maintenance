@@ -2242,6 +2242,69 @@ def prove_inventory_is_fail_closed() -> int:
     ):
         raise DeliveryRegressionError("Inventário não fixa scan de route tables.")
 
+    expected_cluster_arn = "arn:aws:ecs:us-east-1:000000000000:cluster/senai-pm-demo"
+    tagged_queries = tuple(
+        candidate
+        for candidate in actual_queries
+        if candidate.name == "tagged resources"
+    )
+    cluster_status_queries = tuple(
+        candidate
+        for candidate in actual_queries
+        if candidate.name == "ECS canonical cluster status"
+    )
+    if (
+        len(tagged_queries) != 1
+        or tagged_queries[0].predicate({"ResourceARN": expected_cluster_arn})
+        or not tagged_queries[0].predicate(
+            {
+                "ResourceARN": (
+                    "arn:aws:ecs:us-east-1:000000000000:cluster/unexpected-demo"
+                )
+            }
+        )
+        or len(cluster_status_queries) != 1
+        or cluster_status_queries[0].arguments
+        != (
+            "ecs",
+            "describe-clusters",
+            "--clusters",
+            expected_cluster_arn,
+            "--region",
+            "us-east-1",
+        )
+        or cluster_status_queries[0].predicate(
+            {"clusterArn": expected_cluster_arn, "status": "INACTIVE"}
+        )
+        or not cluster_status_queries[0].predicate(
+            {"clusterArn": expected_cluster_arn, "status": "ACTIVE"}
+        )
+    ):
+        raise DeliveryRegressionError(
+            "Inventário não reconcilia estritamente o cluster ECS inativo."
+        )
+    expect_failure(
+        lambda: tagged_queries[0].predicate({}),
+        OrphanInventoryError,
+    )
+    expect_failure(
+        lambda: cluster_status_queries[0].predicate(
+            {"clusterArn": expected_cluster_arn, "status": ""}
+        ),
+        OrphanInventoryError,
+    )
+    expect_failure(
+        lambda: cluster_status_queries[0].predicate(
+            {
+                "clusterArn": (
+                    "arn:aws:ecs:us-east-1:000000000000:cluster/unexpected-demo"
+                ),
+                "status": "INACTIVE",
+            }
+        ),
+        OrphanInventoryError,
+    )
+
     bucket_queries = tuple(
         candidate for candidate in actual_queries if candidate.name == "S3 buckets"
     )
@@ -2402,7 +2465,7 @@ def prove_inventory_is_fail_closed() -> int:
         raise DeliveryRegressionError("Inventário herdou proxy ou trust root hostil.")
     if SENSITIVE_MARKER in repr(inventory_environment):
         raise DeliveryRegressionError("Ambiente do inventário expõe credencial.")
-    return 18
+    return 25
 
 
 def prove_inventory_capture_is_bounded() -> int:
