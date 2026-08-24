@@ -14,6 +14,8 @@ dependencies = [
 [dependency-groups]
 dev = [
   "httpx2>=2.12.0,<3.0.0",
+  "matplotlib>=3.11.1,<3.12",
+  "pandas-stubs==3.0.5.260730",
   "poethepoet>=0.46.0,<0.47.0",
   "pre-commit>=4.6.2,<5.0.0",
   "pyright>=1.1.411,<2.0.0",
@@ -67,6 +69,33 @@ cmd = "pyright"
 help = "Executa os testes Pytest com cobertura."
 cmd = "pytest"
 
+[tool.poe.tasks.web-contract]
+help = "Gera o contrato web a partir do snapshot OpenAPI v1."
+cmd = "python scripts/generate_web_contract.py"
+
+[tool.poe.tasks.web-contract-check]
+help = "Verifica se o contrato web rastreado corresponde ao OpenAPI v1."
+cmd = "python scripts/generate_web_contract.py --check"
+
+[tool.poe.tasks.web-typecheck]
+help = "Executa a verificação de tipos TypeScript sobre as fontes da web."
+cmd = "corepack pnpm exec tsc --noEmit"
+executor = { type = "simple" }
+
+[tool.poe.tasks.web-test]
+help = "Executa os testes essenciais do fluxo web com o runner do Node."
+cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web test"
+executor = { type = "simple" }
+
+[tool.poe.tasks.web-browser-test]
+help = "Executa os fluxos reais de acessibilidade e reflow no Chromium."
+cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web test:browser"
+executor = { type = "simple" }
+
+[tool.poe.tasks.aws-demo-frontend-regression]
+help = "Prova staging, publicação e smoke do frontend AWS somente com fakes locais."
+cmd = "python infra/aws/demo/scripts/frontend_delivery_regression.py"
+
 [tool.poe.tasks.check]
 help = "Executa todos os checks; não aceita argumentos adicionais."
 sequence = [
@@ -74,6 +103,50 @@ sequence = [
   "lint",
   "typecheck",
   "test",
+  "web-contract-check",
+  "web-typecheck",
+  "web-test",
+  "aws-demo-frontend-regression",
+]
+
+[tool.poe.tasks.golden-e2e]
+help = "Executa o golden set sintético dos cinco estados e do ciclo documental."
+script = "scripts.product_golden:main()"
+
+[tool.poe.tasks.public-repository-audit]
+help = "Audita nomes e fingerprints protegidos somente nos objetos Git públicos."
+cmd = "python -m scripts.public_repository_audit ${POE_EXTRA_ARGS:+--poe-task-does-not-accept-arguments}"
+
+[tool.poe.tasks.failure-matrix]
+help = "Executa a matriz SEN-66 e a auditoria sanitizada do repositório público."
+sequence = [
+  { cmd = "pytest --no-cov -m failure_matrix ${POE_EXTRA_ARGS:+--poe-task-does-not-accept-arguments}" },
+  "public-repository-audit",
+]
+
+[tool.poe.tasks.data-build]
+help = "Constrói o dataset canônico local em destino explícito."
+cmd = "python -m prescriptive_maintenance.data.cli build --input ${input} --manifest ${manifest} --inventory ${inventory} --baseline-json ${baseline_json} --baseline-markdown ${baseline_markdown} --lock ${lock} --output ${output}"
+args = [
+  { name = "input", options = ["--input"], required = true },
+  { name = "manifest", options = ["--manifest"], required = true },
+  { name = "inventory", options = ["--inventory"], required = true },
+  { name = "baseline_json", options = ["--baseline-json"], required = true },
+  { name = "baseline_markdown", options = ["--baseline-markdown"], required = true },
+  { name = "lock", options = ["--lock"], required = true },
+  { name = "output", options = ["--output"], required = true },
+]
+
+[tool.poe.tasks.data-check]
+help = "Verifica manifesto, reconciliações e gates locais sem reescrever."
+cmd = "python -m prescriptive_maintenance.data.cli check --manifest ${manifest} --inventory ${inventory} --baseline-json ${baseline_json} --baseline-markdown ${baseline_markdown} --lock ${lock} --output ${output}"
+args = [
+  { name = "manifest", options = ["--manifest"], required = true },
+  { name = "inventory", options = ["--inventory"], required = true },
+  { name = "baseline_json", options = ["--baseline-json"], required = true },
+  { name = "baseline_markdown", options = ["--baseline-markdown"], required = true },
+  { name = "lock", options = ["--lock"], required = true },
+  { name = "output", options = ["--output"], required = true },
 ]
 
 [tool.poe.tasks.hooks]
@@ -84,15 +157,29 @@ cmd = "pre-commit run --all-files"
 help = "Inicia o PostgreSQL local e aguarda o healthcheck."
 cmd = "docker compose up --detach --wait postgres"
 
+[tool.poe.tasks.applications-build]
+help = "Constrói as imagens locais da API e da web pelos locks congelados."
+cmd = "docker compose build api web"
+
+[tool.poe.tasks.applications-audit]
+help = "Audita os contextos Docker reais e os filesystems dos builders."
+script = "scripts.container_audit:main()"
+
+[tool.poe.tasks.applications-up]
+help = "Inicia PostgreSQL, API e web e aguarda todos os healthchecks."
+cmd = "docker compose up --detach --build --wait postgres api web"
+
 [tool.poe.tasks.services-down]
 help = "Remove contêiner e rede locais, preservando o volume."
 cmd = "docker compose down"
 
 [tool.poe.tasks.smoke]
-help = "Valida runtimes, configuração e liveness; banco é opcional."
-script = "scripts.smoke:main(with_services, environ.get('POE_EXTRA_ARGS'))"
+help = "Valida runtimes, configuração, liveness e readiness offline; banco é opcional."
+script = "scripts.smoke:main(with_services, with_applications, with_artifacts, environ.get('POE_EXTRA_ARGS'))"
 args = [
   { name = "with_services", options = ["--with-services"], type = "boolean", help = "Verifica o PostgreSQL já iniciado e o pgvector." },
+  { name = "with_applications", options = ["--with-applications"], type = "boolean", help = "Verifica API, web e OpenAPI v1 em contêineres já iniciados." },
+  { name = "with_artifacts", options = ["--with-artifacts"], type = "boolean", help = "Compõe derivados aprovados quando artifacts está configurado localmente." },
 ]
 
 [tool.ruff]
@@ -124,6 +211,9 @@ addopts = [
   "--cov=prescriptive_maintenance",
   "--cov-report=term-missing",
   "--cov-fail-under=80",
+]
+markers = [
+  "failure_matrix: regressões P0/P1 da matriz de falha segura SEN-66",
 ]
 testpaths = ["apps/api/tests"]
 

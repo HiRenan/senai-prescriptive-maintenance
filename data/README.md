@@ -1,8 +1,9 @@
 # Preparação dos materiais locais
 
 Os oito arquivos recebidos para o desafio são fontes locais e não devem ser
-adicionados ao Git. Este diretório mantém somente o manifesto de integridade e
-fixtures sintéticas que podem ser compartilhadas publicamente.
+adicionados ao Git. Este diretório mantém o manifesto de integridade, fixtures
+sintéticas e as exceções públicas estritas da baseline agregada e do inventário
+categórico auditado descritas abaixo.
 
 ## Arquivos esperados
 
@@ -81,6 +82,14 @@ O arquivo `source-manifest.json` segue um formato JSON simples:
 O hash é representado por 64 caracteres hexadecimais em minúsculas. O tamanho é
 o número exato de bytes, sem conversão de unidade.
 
+No backend, o consumo de `banner.csv` passa exclusivamente pela porta segura do
+pacote `prescriptive_maintenance.data`. `consume_banner_source()` preserva a
+interface compatível e devolve somente o resultado do consumidor. O caminho da
+baseline usa `consume_banner_source_audited()`, que devolve esse resultado junto
+de um recibo imutável dos fingerprints efetivamente observados antes e depois do
+consumo. O caminho da fonte e o caminho deste manifesto são obrigatórios e
+explícitos; as duas verificações ocorrem no mesmo descritor binário read-only.
+
 Para comparar as cópias locais com o manifesto no PowerShell:
 
 ```powershell
@@ -121,17 +130,151 @@ para gerar o manifesto; ela não concede licença para publicar esses materiais.
 
 - `fixtures/banner.synthetic.csv` preserva o cabeçalho e os tipos essenciais do
   conjunto tabular: identificador inteiro, data ISO 8601, medições numéricas,
-  rótulo textual e rotação numérica.
+  rótulo textual e rotação numérica. Seus três rótulos de falha autorizados são
+  `synthetic_healthy`, `synthetic_imbalance` e
+  `synthetic_bearing_warning`; eles não representam o vocabulário original.
 - `fixtures/maintenance.synthetic.txt` contém um relato fictício curto para
   futuros testes de leitura e recuperação textual.
 
 Todos os valores e textos das fixtures são sintéticos e independentes dos
 materiais originais.
 
+## Derivados locais dos documentos PDF
+
+A porta `extract_source_documents()` pode gravar o inventário e as extrações
+de `Doc1.pdf` a `Doc6.pdf` em um destino explícito sob
+`data/processed/documents/`. Antes de executar contra materiais reais,
+confirme a proteção do destino:
+
+```powershell
+git check-ignore -v data/processed/documents/inventory.v1.json
+```
+
+Essa proteção também é aplicada pela porta antes de cada escrita quando o
+destino pertence a uma worktree Git. Destinos rastreáveis, symlinks, junctions,
+outros reparse points, escapes e erros de verificação são rejeitados sem criar o
+artefato.
+
+O inventário contém metadados e estados por documento; cada artefato de
+extração contém o texto derivado e as métricas por página. Ambos permanecem
+locais e ignorados. Não use `git add -f`, não publique esses JSON e não copie
+seu conteúdo para logs, testes ou documentação. Os testes da porta constroem
+PDFs, engines e respostas OCR inteiramente sintéticos em diretórios temporários.
+
+Chunks, vetores e relatórios de validação criados a partir desses JSON também
+são derivados locais. Qualquer persistência em arquivo deve usar um destino
+ignorado sob `data/processed/`; validações públicas registram somente contagens,
+estados e identidades/hashes sanitizados, nunca o conteúdo dos chunks.
+
+O mapeamento real entre classes canônicas e documentos lógicos também pode ser
+derivado dos materiais locais e não é uma exceção pública. Mantenha sua
+configuração versionada em um caminho explícito sob `data/external/`, como
+`data/external/knowledge/fault-knowledge-mapping.v1.json`, e nunca a adicione ao
+Git. Validações privadas podem registrar somente versão e hash da configuração,
+contagens, IDs opacos e estados; nomes, textos e associações descritivas não
+devem aparecer em logs, testes ou documentação.
+
+## Artefatos públicos derivados aprovados
+
+A baseline pública é o par exato abaixo, identificado pelo SHA-256 aprovado no
+manifesto:
+
+- `baselines/banner/<source-sha>/baseline.v1.json`;
+- `baselines/banner/<source-sha>/summary.md`.
+
+Os dois arquivos são artefatos de auditoria agregados, determinísticos,
+sanitizados e somente leitura. `baseline.v1.json` registra apenas configuração,
+integridade pre/post, gates, reconciliações e métricas agregadas aprovadas;
+`summary.md` é derivado exclusivamente desse JSON sanitizado e não acrescenta
+fatos independentes. Nenhum deles contém linhas, valores ou timestamps
+individuais, identificadores, rótulos nominais, caminhos locais ou cópias dos
+arquivos originais.
+
+O inventário categórico autorizado é o arquivo exato abaixo, sob a mesma
+identidade pública da fonte:
+
+- `inventories/banner/<source-sha>/fault-labels.v1.json`.
+
+Ele contém exatamente os 151 valores de `raw_label`, cada frequência global,
+`normalized_label`, `slug` e o estado/resolução auditável de colisão. Metadados
+adicionais limitam-se a versões de schema, normalização e Unicode, marca do
+escopo categórico aprovado, identidade pública da fonte, recibos pre/post,
+reconciliações agregadas, resumo e decisões aprovadas de colisões e
+`inventory_id` derivado por SHA-256 da serialização canônica. Cada decisão
+registra o fingerprint ligado à versão, ao destino normalizado e aos membros
+categóricos exatos e é revalidada offline. Não há identificadores, medições,
+timestamps, ocorrências, caminhos locais nem combinações por linha.
+
+Essas exceções não autorizam outras saídas. Arquivos originais, dados brutos,
+intermediários ou processados locais e qualquer outro artefato gerado permanecem
+ignorados, proibidos de versionamento e fora do repositório público. Os
+artefatos não devem ser editados manualmente: a validação pública é somente
+leitura e não depende de acessar a fonte local.
+
+## Derivados canônicos locais
+
+O pipeline canônico pode ler `banner.csv` somente por um caminho explicitamente
+autorizado e pela porta auditada do backend. A fonte não deve ser copiada,
+movida, renomeada ou gravada. Antes de escrever, `data-build` verifica de forma
+fail-closed que todo destino dentro de uma worktree Git está ignorado. Destinos
+rastreáveis, erros do Git, escapes e caminhos com symlink ou junction são
+recusados; diretórios temporários externos a uma worktree são permitidos.
+
+Cada build local contém somente os seis arquivos declarados pelo pipeline. O
+`manifest.json` expõe apenas metadados técnicos, contagens agregadas, IDs, hashes,
+reconciliações e gates. Os Parquets são derivados privados por registro e nunca
+podem ser adicionados ao Git, publicados, copiados para fixtures ou usados em CI.
+`data-check` valida o conjunto offline contra manifesto, inventário, baseline e
+lock públicos sem abrir novamente a fonte e sem alterar os arquivos. Para provar
+determinismo, execute builds independentes em dois destinos ignorados e compare
+`dataset_id`, hashes físicos e hashes lógicos.
+
+## Artefatos locais de modelo
+
+A baseline k-NN consome somente as partições canônicas já verificadas e grava
+seu artefato em um destino explícito, como `data/processed/models/<model-id>/`.
+O diretório contém um manifesto JSON e três arrays NumPy com vetores
+padronizados, índices de classe e referências opacas. Esses arrays permanecem
+derivados privados por registro: não use `git add -f`, não publique e não copie
+seu conteúdo para fixtures, logs ou documentação.
+
+Dentro de uma worktree, `save_knn_model()` exige que o destino esteja ignorado e
+rejeita links, junctions e substituição de bytes divergentes. A carga não usa
+pickle; ela exige `allow_pickle=False`, o conjunto exato de arquivos e a
+verificação de schema, compatibilidade, hashes e `model_id` antes de disponibilizar
+o modelo em memória.
+
+O artefato atual usa schema/model 3 e incorpora a política fechada
+`operating-states.v1`. A leitura rejeita artefatos v2: a mudança semântica exige
+rebuild local a partir dos derivados aprovados e nunca rebind silencioso. IDs,
+hashes, contagens e métricas agregadas podem ser documentados; manifesto, arrays
+e labels por registro permanecem privados.
+
+## Índice de similaridade local
+
+O índice derivado do modelo deve ser gravado em outro destino explícito e
+ignorado, como `data/processed/indexes/<index-id>/`. Ele contém manifesto,
+estado do pré-processador, metadados por referência opaca e vetores `float32`.
+Embora não contenha a fonte original, todo o diretório continua sendo derivado
+privado por registro: não use `git add -f`, não publique e não copie seus bytes
+para fixtures, logs ou documentação.
+
+`save_similarity_index_from_knn_artifact()` só aceita um artefato de modelo já
+validado, exige destino ignorado dentro de worktrees e faz publicação atômica.
+Um índice reconstruído para o modelo v3 vincula exatamente seu ID e hash; um
+índice ligado ao modelo v2 falha fechado no runtime atual.
+`load_similarity_index()` verifica versões, configuração, dimensão, métrica,
+quantidade, identidades e hashes antes de carregar o array com
+`allow_pickle=False`. Somente um índice carregado por essa fronteira deve ser
+entregue a `install_similarity_index()` para instalação transacional no banco
+local. Testes públicos de memória e PostgreSQL constroem exclusivamente índices
+sintéticos em diretórios e schemas descartáveis.
+
 ## Conteúdo público
 
-Somente fixtures inteiramente sintéticas e samples previamente sanitizados podem
-ser publicados. Um sample sanitizado não pode conter conteúdo proprietário,
-identificadores reais, credenciais ou trechos que permitam reconstruir os
-materiais originais; `data/raw/` e `data/processed/` permanecem exclusivamente
-locais e ignorados pelo Git.
+Somente fixtures inteiramente sintéticas, samples previamente sanitizados, o par
+agregado da baseline e o inventário categórico estritamente limitado definidos
+acima podem ser publicados. Um sample sanitizado não pode conter conteúdo
+proprietário, identificadores reais, credenciais ou trechos que permitam
+reconstruir os materiais originais; `data/raw/`, `data/processed/` e demais
+saídas locais permanecem exclusivamente locais e ignoradas pelo Git.

@@ -9,7 +9,15 @@ authors = [
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "fastapi>=0.141.1,<1.0.0",
+  "onnxruntime>=1.28,<2",
+  "pandas>=3.0.5,<3.1",
+  "pandera[pandas]>=0.32.1,<0.33",
   "pydantic-settings>=2.15.0,<3.0.0",
+  "psycopg[binary]>=3.2.9,<4.0.0",
+  "pyarrow>=25.0.1,<26",
+  "pypdfium2>=5.13.0,<6.0.0",
+  "rapidocr>=3.9.2,<4",
+  "scikit-learn>=1.9.0,<1.10.0",
   "uvicorn>=0.52.4,<1.0.0",
 ]
 

@@ -1,0 +1,1343 @@
+{
+  "inventory_schema_version": 1,
+  "versions": {
+    "inventory_schema": 1,
+    "normalization": 1,
+    "unicode": "15.1.0",
+    "baseline_schema": 1
+  },
+  "scope": {
+    "classification": "approved_categorical_only",
+    "fields": [
+      "raw_label",
+      "frequency",
+      "normalized_label",
+      "slug",
+      "collision_status",
+      "collision_resolution"
+    ],
+    "row_level_data": false
+  },
+  "pipeline": {
+    "normalization_version": 1,
+    "unicode_normalization": "NFKC",
+    "unicode_data_version": "15.1.0",
+    "steps": [
+      "unicode_nfkc",
+      "trim",
+      "collapse_whitespace",
+      "casefold",
+      "normalize_separators",
+      "stable_slug"
+    ],
+    "whitespace_code_points": [
+      "U+0020",
+      "U+00A0",
+      "U+1680",
+      "U+2000",
+      "U+2001",
+      "U+2002",
+      "U+2003",
+      "U+2004",
+      "U+2005",
+      "U+2006",
+      "U+2007",
+      "U+2008",
+      "U+2009",
+      "U+200A",
+      "U+2028",
+      "U+2029",
+      "U+202F",
+      "U+205F",
+      "U+3000"
+    ],
+    "separator_code_points": [
+      "U+002D",
+      "U+002F",
+      "U+005C",
+      "U+005F"
+    ],
+    "separator_replacement": "U+0020",
+    "slug_scheme": "utf8-percent-v1"
+  },
+  "source": {
+    "basename": "banner.csv",
+    "size_bytes": 32321076,
+    "source_sha256": "48ce42c0362edb7e25c215c68dd8e51890d435ab6df4b359501a83b001a994b7"
+  },
+  "integrity": {
+    "round_count": 2,
+    "rounds": [
+      {
+        "round": 1,
+        "pre": {
+          "size_bytes": 32321076,
+          "sha256": "48ce42c0362edb7e25c215c68dd8e51890d435ab6df4b359501a83b001a994b7",
+          "status": "matched_manifest"
+        },
+        "post": {
+          "size_bytes": 32321076,
+          "sha256": "48ce42c0362edb7e25c215c68dd8e51890d435ab6df4b359501a83b001a994b7",
+          "status": "unchanged"
+        }
+      },
+      {
+        "round": 2,
+        "pre": {
+          "size_bytes": 32321076,
+          "sha256": "48ce42c0362edb7e25c215c68dd8e51890d435ab6df4b359501a83b001a994b7",
+          "status": "matched_manifest"
+        },
+        "post": {
+          "size_bytes": 32321076,
+          "sha256": "48ce42c0362edb7e25c215c68dd8e51890d435ab6df4b359501a83b001a994b7",
+          "status": "unchanged"
+        }
+      }
+    ]
+  },
+  "expectations": {
+    "row_count": 166796,
+    "raw_label_count": 151
+  },
+  "reconciliations": [
+    {
+      "code": "frequency.total",
+      "expected": 166796,
+      "actual": 166796,
+      "passed": true
+    },
+    {
+      "code": "raw_label.cardinality",
+      "expected": 151,
+      "actual": 151,
+      "passed": true
+    },
+    {
+      "code": "frequency.positive",
+      "expected": 151,
+      "actual": 151,
+      "passed": true
+    }
+  ],
+  "collisions": {
+    "normalized_label_group_count": 0,
+    "normalized_label_raw_count": 0,
+    "slug_group_count": 0,
+    "slug_normalized_label_count": 0,
+    "status": "clear",
+    "fingerprint": "9d43c4dd92351ead7e62e4f8d41369ffc88f243905b816d00abda3a920a0a73b",
+    "approved_normalized_label_decisions": []
+  },
+  "labels": [
+    {
+      "raw_label": "acelerando",
+      "frequency": 7,
+      "normalized_label": "acelerando",
+      "slug": "acelerando",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "cockecocked_adxl_0",
+      "frequency": 50,
+      "normalized_label": "cockecocked adxl 0",
+      "slug": "cockecocked-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "cocked_adxl_0",
+      "frequency": 100,
+      "normalized_label": "cocked adxl 0",
+      "slug": "cocked-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "cocked_rotor",
+      "frequency": 10000,
+      "normalized_label": "cocked rotor",
+      "slug": "cocked-rotor",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "cocked_rotor_2",
+      "frequency": 3075,
+      "normalized_label": "cocked rotor 2",
+      "slug": "cocked-rotor-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "cocked_rotor_2_pos_2",
+      "frequency": 150,
+      "normalized_label": "cocked rotor 2 pos 2",
+      "slug": "cocked-rotor-2-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "cocked_rotor_carga",
+      "frequency": 150,
+      "normalized_label": "cocked rotor carga",
+      "slug": "cocked-rotor-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "cocked_rotor_pos_2",
+      "frequency": 150,
+      "normalized_label": "cocked rotor pos 2",
+      "slug": "cocked-rotor-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "correia",
+      "frequency": 9000,
+      "normalized_label": "correia",
+      "slug": "correia",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "correia_2",
+      "frequency": 2999,
+      "normalized_label": "correia 2",
+      "slug": "correia-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "ddesbalanceado_adxl_0",
+      "frequency": 50,
+      "normalized_label": "ddesbalanceado adxl 0",
+      "slug": "ddesbalanceado-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "dedesbalanceado_adxl_1",
+      "frequency": 21,
+      "normalized_label": "dedesbalanceado adxl 1",
+      "slug": "dedesbalanceado-adxl-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desabalanceado_3",
+      "frequency": 50,
+      "normalized_label": "desabalanceado 3",
+      "slug": "desabalanceado-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desalinhado",
+      "frequency": 4000,
+      "normalized_label": "desalinhado",
+      "slug": "desalinhado",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desalinhado_2",
+      "frequency": 3998,
+      "normalized_label": "desalinhado 2",
+      "slug": "desalinhado-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desalinhado_3",
+      "frequency": 150,
+      "normalized_label": "desalinhado 3",
+      "slug": "desalinhado-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_1parafuso",
+      "frequency": 10079,
+      "normalized_label": "desbalanceado 1parafuso",
+      "slug": "desbalanceado-1parafuso",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_1parafuso_3",
+      "frequency": 237,
+      "normalized_label": "desbalanceado 1parafuso 3",
+      "slug": "desbalanceado-1parafuso-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_2_pos_2",
+      "frequency": 150,
+      "normalized_label": "desbalanceado 2 pos 2",
+      "slug": "desbalanceado-2-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_3",
+      "frequency": 100,
+      "normalized_label": "desbalanceado 3",
+      "slug": "desbalanceado-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_adxl_0",
+      "frequency": 100,
+      "normalized_label": "desbalanceado adxl 0",
+      "slug": "desbalanceado-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_adxl_1",
+      "frequency": 42,
+      "normalized_label": "desbalanceado adxl 1",
+      "slug": "desbalanceado-adxl-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_carga",
+      "frequency": 150,
+      "normalized_label": "desbalanceado carga",
+      "slug": "desbalanceado-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_carga_2",
+      "frequency": 150,
+      "normalized_label": "desbalanceado carga 2",
+      "slug": "desbalanceado-carga-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_carga_3",
+      "frequency": 100,
+      "normalized_label": "desbalanceado carga 3",
+      "slug": "desbalanceado-carga-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_carga_3_2",
+      "frequency": 100,
+      "normalized_label": "desbalanceado carga 3 2",
+      "slug": "desbalanceado-carga-3-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_novo",
+      "frequency": 150,
+      "normalized_label": "desbalanceado novo",
+      "slug": "desbalanceado-novo",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceado_pos_2",
+      "frequency": 150,
+      "normalized_label": "desbalanceado pos 2",
+      "slug": "desbalanceado-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbalanceamento",
+      "frequency": 100,
+      "normalized_label": "desbalanceamento",
+      "slug": "desbalanceamento",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "desbanlanceado_carga_3_2",
+      "frequency": 50,
+      "normalized_label": "desbanlanceado carga 3 2",
+      "slug": "desbanlanceado-carga-3-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_2_pos_2",
+      "frequency": 39,
+      "normalized_label": "eccentric 2 pos 2",
+      "slug": "eccentric-2-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_adxl_0",
+      "frequency": 150,
+      "normalized_label": "eccentric adxl 0",
+      "slug": "eccentric-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor",
+      "frequency": 11808,
+      "normalized_label": "eccentric rotor",
+      "slug": "eccentric-rotor",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor_2",
+      "frequency": 3000,
+      "normalized_label": "eccentric rotor 2",
+      "slug": "eccentric-rotor-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor_2_pos_2",
+      "frequency": 150,
+      "normalized_label": "eccentric rotor 2 pos 2",
+      "slug": "eccentric-rotor-2-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor_3",
+      "frequency": 150,
+      "normalized_label": "eccentric rotor 3",
+      "slug": "eccentric-rotor-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor_4",
+      "frequency": 150,
+      "normalized_label": "eccentric rotor 4",
+      "slug": "eccentric-rotor-4",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor_carga",
+      "frequency": 150,
+      "normalized_label": "eccentric rotor carga",
+      "slug": "eccentric-rotor-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor_carga_2",
+      "frequency": 150,
+      "normalized_label": "eccentric rotor carga 2",
+      "slug": "eccentric-rotor-carga-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "eccentric_rotor_pos_2",
+      "frequency": 150,
+      "normalized_label": "eccentric rotor pos 2",
+      "slug": "eccentric-rotor-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "mortor_desligado_novo",
+      "frequency": 50,
+      "normalized_label": "mortor desligado novo",
+      "slug": "mortor-desligado-novo",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "motor_desligado",
+      "frequency": 397,
+      "normalized_label": "motor desligado",
+      "slug": "motor-desligado",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "motor_desligado_novo",
+      "frequency": 50,
+      "normalized_label": "motor desligado novo",
+      "slug": "motor-desligado-novo",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_baseline",
+      "frequency": 69,
+      "normalized_label": "new baseline",
+      "slug": "new-baseline",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_cocked_0",
+      "frequency": 150,
+      "normalized_label": "new cocked 0",
+      "slug": "new-cocked-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_cocked_1",
+      "frequency": 150,
+      "normalized_label": "new cocked 1",
+      "slug": "new-cocked-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_cocked_2",
+      "frequency": 150,
+      "normalized_label": "new cocked 2",
+      "slug": "new-cocked-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_cocked_3",
+      "frequency": 150,
+      "normalized_label": "new cocked 3",
+      "slug": "new-cocked-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desabanceado_1",
+      "frequency": 50,
+      "normalized_label": "new desabanceado 1",
+      "slug": "new-desabanceado-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desalinhado_0",
+      "frequency": 199,
+      "normalized_label": "new desalinhado 0",
+      "slug": "new-desalinhado-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desalinhado_1",
+      "frequency": 200,
+      "normalized_label": "new desalinhado 1",
+      "slug": "new-desalinhado-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desalinhado_2",
+      "frequency": 400,
+      "normalized_label": "new desalinhado 2",
+      "slug": "new-desalinhado-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desalinhado_3",
+      "frequency": 200,
+      "normalized_label": "new desalinhado 3",
+      "slug": "new-desalinhado-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desalinhado_4",
+      "frequency": 31,
+      "normalized_label": "new desalinhado 4",
+      "slug": "new-desalinhado-4",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_0",
+      "frequency": 200,
+      "normalized_label": "new desbalanceado 0",
+      "slug": "new-desbalanceado-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_1",
+      "frequency": 200,
+      "normalized_label": "new desbalanceado 1",
+      "slug": "new-desbalanceado-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_2",
+      "frequency": 208,
+      "normalized_label": "new desbalanceado 2",
+      "slug": "new-desbalanceado-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_3",
+      "frequency": 200,
+      "normalized_label": "new desbalanceado 3",
+      "slug": "new-desbalanceado-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_antigo_0",
+      "frequency": 150,
+      "normalized_label": "new desbalanceado antigo 0",
+      "slug": "new-desbalanceado-antigo-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_antigo_1",
+      "frequency": 150,
+      "normalized_label": "new desbalanceado antigo 1",
+      "slug": "new-desbalanceado-antigo-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_antigo_2",
+      "frequency": 150,
+      "normalized_label": "new desbalanceado antigo 2",
+      "slug": "new-desbalanceado-antigo-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_desbalanceado_antigo_3",
+      "frequency": 150,
+      "normalized_label": "new desbalanceado antigo 3",
+      "slug": "new-desbalanceado-antigo-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_eccentric_0",
+      "frequency": 150,
+      "normalized_label": "new eccentric 0",
+      "slug": "new-eccentric-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_eccentric_1",
+      "frequency": 150,
+      "normalized_label": "new eccentric 1",
+      "slug": "new-eccentric-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_eccentric_2",
+      "frequency": 150,
+      "normalized_label": "new eccentric 2",
+      "slug": "new-eccentric-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_eccentric_3",
+      "frequency": 150,
+      "normalized_label": "new eccentric 3",
+      "slug": "new-eccentric-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_falta_fase_0",
+      "frequency": 200,
+      "normalized_label": "new falta fase 0",
+      "slug": "new-falta-fase-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_falta_fase_1",
+      "frequency": 200,
+      "normalized_label": "new falta fase 1",
+      "slug": "new-falta-fase-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_falta_fase_2",
+      "frequency": 200,
+      "normalized_label": "new falta fase 2",
+      "slug": "new-falta-fase-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_falta_fase_3",
+      "frequency": 200,
+      "normalized_label": "new falta fase 3",
+      "slug": "new-falta-fase-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_normal_0",
+      "frequency": 200,
+      "normalized_label": "new normal 0",
+      "slug": "new-normal-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_normal_1",
+      "frequency": 200,
+      "normalized_label": "new normal 1",
+      "slug": "new-normal-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_normal_2",
+      "frequency": 200,
+      "normalized_label": "new normal 2",
+      "slug": "new-normal-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_normal_3",
+      "frequency": 200,
+      "normalized_label": "new normal 3",
+      "slug": "new-normal-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_normal_4",
+      "frequency": 150,
+      "normalized_label": "new normal 4",
+      "slug": "new-normal-4",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_normal_5",
+      "frequency": 150,
+      "normalized_label": "new normal 5",
+      "slug": "new-normal-5",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_normal_6",
+      "frequency": 200,
+      "normalized_label": "new normal 6",
+      "slug": "new-normal-6",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_ball_0",
+      "frequency": 200,
+      "normalized_label": "new rolamento ball 0",
+      "slug": "new-rolamento-ball-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_ball_1",
+      "frequency": 200,
+      "normalized_label": "new rolamento ball 1",
+      "slug": "new-rolamento-ball-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_ball_2",
+      "frequency": 200,
+      "normalized_label": "new rolamento ball 2",
+      "slug": "new-rolamento-ball-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_ball_3",
+      "frequency": 200,
+      "normalized_label": "new rolamento ball 3",
+      "slug": "new-rolamento-ball-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_comb_0",
+      "frequency": 200,
+      "normalized_label": "new rolamento comb 0",
+      "slug": "new-rolamento-comb-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_comb_1",
+      "frequency": 200,
+      "normalized_label": "new rolamento comb 1",
+      "slug": "new-rolamento-comb-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_comb_2",
+      "frequency": 200,
+      "normalized_label": "new rolamento comb 2",
+      "slug": "new-rolamento-comb-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_comb_3",
+      "frequency": 200,
+      "normalized_label": "new rolamento comb 3",
+      "slug": "new-rolamento-comb-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_inner_0",
+      "frequency": 200,
+      "normalized_label": "new rolamento inner 0",
+      "slug": "new-rolamento-inner-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_inner_1",
+      "frequency": 200,
+      "normalized_label": "new rolamento inner 1",
+      "slug": "new-rolamento-inner-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_inner_2",
+      "frequency": 200,
+      "normalized_label": "new rolamento inner 2",
+      "slug": "new-rolamento-inner-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_inner_3",
+      "frequency": 200,
+      "normalized_label": "new rolamento inner 3",
+      "slug": "new-rolamento-inner-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_outer_0",
+      "frequency": 200,
+      "normalized_label": "new rolamento outer 0",
+      "slug": "new-rolamento-outer-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_outer_1",
+      "frequency": 200,
+      "normalized_label": "new rolamento outer 1",
+      "slug": "new-rolamento-outer-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_outer_2",
+      "frequency": 200,
+      "normalized_label": "new rolamento outer 2",
+      "slug": "new-rolamento-outer-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_rolamento_outer_3",
+      "frequency": 200,
+      "normalized_label": "new rolamento outer 3",
+      "slug": "new-rolamento-outer-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_tes",
+      "frequency": 2,
+      "normalized_label": "new tes",
+      "slug": "new-tes",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "new_teste",
+      "frequency": 2,
+      "normalized_label": "new teste",
+      "slug": "new-teste",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal",
+      "frequency": 5738,
+      "normalized_label": "normal",
+      "slug": "normal",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_2",
+      "frequency": 6000,
+      "normalized_label": "normal 2",
+      "slug": "normal-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_2_pos_2",
+      "frequency": 150,
+      "normalized_label": "normal 2 pos 2",
+      "slug": "normal-2-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_3",
+      "frequency": 100,
+      "normalized_label": "normal 3",
+      "slug": "normal-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_3_pos_2",
+      "frequency": 150,
+      "normalized_label": "normal 3 pos 2",
+      "slug": "normal-3-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_6",
+      "frequency": 20,
+      "normalized_label": "normal 6",
+      "slug": "normal-6",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_adxl_0",
+      "frequency": 150,
+      "normalized_label": "normal adxl 0",
+      "slug": "normal-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_adxl_1",
+      "frequency": 150,
+      "normalized_label": "normal adxl 1",
+      "slug": "normal-adxl-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_carga",
+      "frequency": 300,
+      "normalized_label": "normal carga",
+      "slug": "normal-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_carga_3",
+      "frequency": 150,
+      "normalized_label": "normal carga 3",
+      "slug": "normal-carga-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_carga_3_2",
+      "frequency": 150,
+      "normalized_label": "normal carga 3 2",
+      "slug": "normal-carga-3-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_carga_3_3",
+      "frequency": 100,
+      "normalized_label": "normal carga 3 3",
+      "slug": "normal-carga-3-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_novo",
+      "frequency": 300,
+      "normalized_label": "normal novo",
+      "slug": "normal-novo",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_novo_teste",
+      "frequency": 100,
+      "normalized_label": "normal novo teste",
+      "slug": "normal-novo-teste",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normal_pos_2",
+      "frequency": 150,
+      "normalized_label": "normal pos 2",
+      "slug": "normal-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "normla_carga_3_3",
+      "frequency": 50,
+      "normalized_label": "normla carga 3 3",
+      "slug": "normla-carga-3-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "polia",
+      "frequency": 9000,
+      "normalized_label": "polia",
+      "slug": "polia",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "polia_2",
+      "frequency": 3000,
+      "normalized_label": "polia 2",
+      "slug": "polia-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball",
+      "frequency": 9004,
+      "normalized_label": "rolamento ball",
+      "slug": "rolamento-ball",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball_2",
+      "frequency": 3000,
+      "normalized_label": "rolamento ball 2",
+      "slug": "rolamento-ball-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball_3",
+      "frequency": 150,
+      "normalized_label": "rolamento ball 3",
+      "slug": "rolamento-ball-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball_4",
+      "frequency": 150,
+      "normalized_label": "rolamento ball 4",
+      "slug": "rolamento-ball-4",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball_adxl_0",
+      "frequency": 150,
+      "normalized_label": "rolamento ball adxl 0",
+      "slug": "rolamento-ball-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball_carga",
+      "frequency": 150,
+      "normalized_label": "rolamento ball carga",
+      "slug": "rolamento-ball-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball_carga_3",
+      "frequency": 150,
+      "normalized_label": "rolamento ball carga 3",
+      "slug": "rolamento-ball-carga-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_ball_pos_2",
+      "frequency": 150,
+      "normalized_label": "rolamento ball pos 2",
+      "slug": "rolamento-ball-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_comb_adxl_0",
+      "frequency": 150,
+      "normalized_label": "rolamento comb adxl 0",
+      "slug": "rolamento-comb-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_combination",
+      "frequency": 10000,
+      "normalized_label": "rolamento combination",
+      "slug": "rolamento-combination",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_combination_2",
+      "frequency": 3000,
+      "normalized_label": "rolamento combination 2",
+      "slug": "rolamento-combination-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_combination_3",
+      "frequency": 150,
+      "normalized_label": "rolamento combination 3",
+      "slug": "rolamento-combination-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_combination_4",
+      "frequency": 150,
+      "normalized_label": "rolamento combination 4",
+      "slug": "rolamento-combination-4",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_combination_carga",
+      "frequency": 150,
+      "normalized_label": "rolamento combination carga",
+      "slug": "rolamento-combination-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_combination_pos_2",
+      "frequency": 150,
+      "normalized_label": "rolamento combination pos 2",
+      "slug": "rolamento-combination-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner",
+      "frequency": 13000,
+      "normalized_label": "rolamento inner",
+      "slug": "rolamento-inner",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner_2",
+      "frequency": 3012,
+      "normalized_label": "rolamento inner 2",
+      "slug": "rolamento-inner-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner_3",
+      "frequency": 150,
+      "normalized_label": "rolamento inner 3",
+      "slug": "rolamento-inner-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner_4",
+      "frequency": 150,
+      "normalized_label": "rolamento inner 4",
+      "slug": "rolamento-inner-4",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner_adxl_0",
+      "frequency": 150,
+      "normalized_label": "rolamento inner adxl 0",
+      "slug": "rolamento-inner-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner_carga",
+      "frequency": 150,
+      "normalized_label": "rolamento inner carga",
+      "slug": "rolamento-inner-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner_carga_2",
+      "frequency": 150,
+      "normalized_label": "rolamento inner carga 2",
+      "slug": "rolamento-inner-carga-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_inner_pos_2",
+      "frequency": 150,
+      "normalized_label": "rolamento inner pos 2",
+      "slug": "rolamento-inner-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer",
+      "frequency": 10000,
+      "normalized_label": "rolamento outer",
+      "slug": "rolamento-outer",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_2",
+      "frequency": 3000,
+      "normalized_label": "rolamento outer 2",
+      "slug": "rolamento-outer-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_3",
+      "frequency": 150,
+      "normalized_label": "rolamento outer 3",
+      "slug": "rolamento-outer-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_4",
+      "frequency": 150,
+      "normalized_label": "rolamento outer 4",
+      "slug": "rolamento-outer-4",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_adxl_0",
+      "frequency": 150,
+      "normalized_label": "rolamento outer adxl 0",
+      "slug": "rolamento-outer-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_adxl_1",
+      "frequency": 63,
+      "normalized_label": "rolamento outer adxl 1",
+      "slug": "rolamento-outer-adxl-1",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_carga",
+      "frequency": 150,
+      "normalized_label": "rolamento outer carga",
+      "slug": "rolamento-outer-carga",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_novo",
+      "frequency": 150,
+      "normalized_label": "rolamento outer novo",
+      "slug": "rolamento-outer-novo",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_novo_teste",
+      "frequency": 50,
+      "normalized_label": "rolamento outer novo teste",
+      "slug": "rolamento-outer-novo-teste",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "rolamento_outer_pos_2",
+      "frequency": 150,
+      "normalized_label": "rolamento outer pos 2",
+      "slug": "rolamento-outer-pos-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "teste",
+      "frequency": 97,
+      "normalized_label": "teste",
+      "slug": "teste",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "ventoinha",
+      "frequency": 9000,
+      "normalized_label": "ventoinha",
+      "slug": "ventoinha",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "ventoinha_2",
+      "frequency": 2999,
+      "normalized_label": "ventoinha 2",
+      "slug": "ventoinha-2",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "ventoinha_3",
+      "frequency": 150,
+      "normalized_label": "ventoinha 3",
+      "slug": "ventoinha-3",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    },
+    {
+      "raw_label": "ventoinha_adxl_0",
+      "frequency": 150,
+      "normalized_label": "ventoinha adxl 0",
+      "slug": "ventoinha-adxl-0",
+      "collision_status": "clear",
+      "collision_resolution": "not_required"
+    }
+  ],
+  "inventory_id": "aabf85c066bcf12fb8b27c4bb6ab7fce601dfc1512b64f762c42bab24b98aa78"
+}

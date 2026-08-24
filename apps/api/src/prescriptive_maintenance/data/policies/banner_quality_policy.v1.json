@@ -1,0 +1,639 @@
+{
+  "schema_version": 1,
+  "policy_version": 1,
+  "subject": "banner",
+  "contract_version": 2,
+  "profile_schema_version": 1,
+  "policy_id": "51190f2c6662c2ffb236d887f4bb43f1f7cb03f98dfc387441cc5410dcd3838b",
+  "columns": [
+    {
+      "position": 1,
+      "name": "id",
+      "role": "identifier",
+      "unit": "1"
+    },
+    {
+      "position": 2,
+      "name": "created_at",
+      "role": "event_timestamp",
+      "unit": "UTC"
+    },
+    {
+      "position": 3,
+      "name": "z_rms_velocity_in_s",
+      "role": "measurement",
+      "unit": "in/s"
+    },
+    {
+      "position": 4,
+      "name": "z_rms_velocity_mm_s",
+      "role": "measurement",
+      "unit": "mm/s"
+    },
+    {
+      "position": 5,
+      "name": "temperature_f",
+      "role": "measurement",
+      "unit": "°F"
+    },
+    {
+      "position": 6,
+      "name": "temperature_c",
+      "role": "measurement",
+      "unit": "°C"
+    },
+    {
+      "position": 7,
+      "name": "x_rms_velocity_in_s",
+      "role": "measurement",
+      "unit": "in/s"
+    },
+    {
+      "position": 8,
+      "name": "x_rms_velocity_mm_s",
+      "role": "measurement",
+      "unit": "mm/s"
+    },
+    {
+      "position": 9,
+      "name": "z_peak_acceleration_g",
+      "role": "measurement",
+      "unit": "g"
+    },
+    {
+      "position": 10,
+      "name": "x_peak_acceleration_g",
+      "role": "measurement",
+      "unit": "g"
+    },
+    {
+      "position": 11,
+      "name": "z_peak_vel_comp_freq_hz",
+      "role": "measurement",
+      "unit": "Hz"
+    },
+    {
+      "position": 12,
+      "name": "x_peak_vel_comp_freq_hz",
+      "role": "measurement",
+      "unit": "Hz"
+    },
+    {
+      "position": 13,
+      "name": "z_rms_acceleration_g",
+      "role": "measurement",
+      "unit": "g"
+    },
+    {
+      "position": 14,
+      "name": "x_rms_acceleration_g",
+      "role": "measurement",
+      "unit": "g"
+    },
+    {
+      "position": 15,
+      "name": "z_kurtosis",
+      "role": "measurement",
+      "unit": "1"
+    },
+    {
+      "position": 16,
+      "name": "x_kurtosis",
+      "role": "measurement",
+      "unit": "1"
+    },
+    {
+      "position": 17,
+      "name": "z_crest_factor",
+      "role": "measurement",
+      "unit": "1"
+    },
+    {
+      "position": 18,
+      "name": "x_crest_factor",
+      "role": "measurement",
+      "unit": "1"
+    },
+    {
+      "position": 19,
+      "name": "z_peak_velocity_in_s",
+      "role": "measurement",
+      "unit": "in/s"
+    },
+    {
+      "position": 20,
+      "name": "z_peak_velocity_mm_s",
+      "role": "measurement",
+      "unit": "mm/s"
+    },
+    {
+      "position": 21,
+      "name": "x_peak_velocity_in_s",
+      "role": "measurement",
+      "unit": "in/s"
+    },
+    {
+      "position": 22,
+      "name": "x_peak_velocity_mm_s",
+      "role": "measurement",
+      "unit": "mm/s"
+    },
+    {
+      "position": 23,
+      "name": "z_high_freq_rms_accel_g",
+      "role": "measurement",
+      "unit": "g"
+    },
+    {
+      "position": 24,
+      "name": "x_high_freq_rms_accel_g",
+      "role": "measurement",
+      "unit": "g"
+    },
+    {
+      "position": 25,
+      "name": "fault",
+      "role": "raw_label",
+      "unit": "1"
+    },
+    {
+      "position": 26,
+      "name": "rpm",
+      "role": "measurement",
+      "unit": "rpm"
+    }
+  ],
+  "duplicate_key_columns": [
+    "id"
+  ],
+  "reason_code_order": [
+    "required_value_missing",
+    "non_finite",
+    "invalid_physical_domain",
+    "conflicting_duplicate",
+    "inconsistent_redundant_unit",
+    "identical_duplicate",
+    "iqr_outlier"
+  ],
+  "effective_action_precedence": [
+    "reject",
+    "correct_deterministically",
+    "map",
+    "flag",
+    "keep"
+  ],
+  "iqr": {
+    "q1_probability": 0.25,
+    "q3_probability": 0.75,
+    "quantile_method": "linear_type_7",
+    "multiplier": 1.5,
+    "population": "finite_values_only",
+    "lower_fence_operator": "<",
+    "upper_fence_operator": ">",
+    "outlier_boundary_inclusive": false,
+    "preserves_record": true,
+    "origin": "banner_profile.v1.definitions"
+  },
+  "unit_relations": [
+    {
+      "relation_id": "temperature_c_to_temperature_f",
+      "left_column": "temperature_c",
+      "left_unit": "°C",
+      "right_column": "temperature_f",
+      "right_unit": "°F",
+      "multiplier": 1.8,
+      "offset": 32.0,
+      "relation": "right = left * 1.8 + 32",
+      "absolute_tolerance": 0.000001,
+      "relative_tolerance": 0.000001,
+      "tolerance_inclusive": true,
+      "origin": "banner_profile.v1.redundant_unit_pairs"
+    },
+    {
+      "relation_id": "x_peak_velocity_in_s_to_mm_s",
+      "left_column": "x_peak_velocity_in_s",
+      "left_unit": "in/s",
+      "right_column": "x_peak_velocity_mm_s",
+      "right_unit": "mm/s",
+      "multiplier": 25.4,
+      "offset": 0.0,
+      "relation": "right = left * 25.4",
+      "absolute_tolerance": 0.000001,
+      "relative_tolerance": 0.000001,
+      "tolerance_inclusive": true,
+      "origin": "banner_profile.v1.redundant_unit_pairs"
+    },
+    {
+      "relation_id": "x_rms_velocity_in_s_to_mm_s",
+      "left_column": "x_rms_velocity_in_s",
+      "left_unit": "in/s",
+      "right_column": "x_rms_velocity_mm_s",
+      "right_unit": "mm/s",
+      "multiplier": 25.4,
+      "offset": 0.0,
+      "relation": "right = left * 25.4",
+      "absolute_tolerance": 0.000001,
+      "relative_tolerance": 0.000001,
+      "tolerance_inclusive": true,
+      "origin": "banner_profile.v1.redundant_unit_pairs"
+    },
+    {
+      "relation_id": "z_peak_velocity_in_s_to_mm_s",
+      "left_column": "z_peak_velocity_in_s",
+      "left_unit": "in/s",
+      "right_column": "z_peak_velocity_mm_s",
+      "right_unit": "mm/s",
+      "multiplier": 25.4,
+      "offset": 0.0,
+      "relation": "right = left * 25.4",
+      "absolute_tolerance": 0.000001,
+      "relative_tolerance": 0.000001,
+      "tolerance_inclusive": true,
+      "origin": "banner_profile.v1.redundant_unit_pairs"
+    },
+    {
+      "relation_id": "z_rms_velocity_in_s_to_mm_s",
+      "left_column": "z_rms_velocity_in_s",
+      "left_unit": "in/s",
+      "right_column": "z_rms_velocity_mm_s",
+      "right_unit": "mm/s",
+      "multiplier": 25.4,
+      "offset": 0.0,
+      "relation": "right = left * 25.4",
+      "absolute_tolerance": 0.000001,
+      "relative_tolerance": 0.000001,
+      "tolerance_inclusive": true,
+      "origin": "banner_profile.v1.redundant_unit_pairs"
+    }
+  ],
+  "rules": [
+    {
+      "rule_id": "required.identifier.missing",
+      "reason_code": "required_value_missing",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 10,
+      "condition": "required_identifier_is_missing",
+      "scope": {
+        "role": "identifier",
+        "columns": []
+      },
+      "threshold": {
+        "operator": "is_missing",
+        "value": null,
+        "inclusive": null
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "O identificador é obrigatório no contrato; sua ausência impede rastrear a ocorrência.",
+      "origins": [
+        "banner_contract.v2.nullable"
+      ]
+    },
+    {
+      "rule_id": "required.event_timestamp.missing",
+      "reason_code": "required_value_missing",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 20,
+      "condition": "required_event_timestamp_is_missing",
+      "scope": {
+        "role": "event_timestamp",
+        "columns": []
+      },
+      "threshold": {
+        "operator": "is_missing",
+        "value": null,
+        "inclusive": null
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "O instante é obrigatório no contrato; sem ele não há contexto temporal verificável.",
+      "origins": [
+        "banner_contract.v2.nullable"
+      ]
+    },
+    {
+      "rule_id": "required.measurement.missing",
+      "reason_code": "required_value_missing",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 30,
+      "condition": "required_measurement_is_missing",
+      "scope": {
+        "role": "measurement",
+        "columns": []
+      },
+      "threshold": {
+        "operator": "is_missing",
+        "value": null,
+        "inclusive": null
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "As medições declaradas são obrigatórias e não recebem imputação nesta etapa.",
+      "origins": [
+        "banner_contract.v2.nullable",
+        "SEN-27.out_of_scope.statistical_imputation"
+      ]
+    },
+    {
+      "rule_id": "required.raw_label.missing",
+      "reason_code": "required_value_missing",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 40,
+      "condition": "required_raw_label_is_missing",
+      "scope": {
+        "role": "raw_label",
+        "columns": []
+      },
+      "threshold": {
+        "operator": "is_missing",
+        "value": null,
+        "inclusive": null
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "O rótulo bruto não vazio é obrigatório; a taxonomia e a imputação permanecem fora do escopo.",
+      "origins": [
+        "banner_contract.v2.fault_domain",
+        "banner_contract.v2.nullable"
+      ]
+    },
+    {
+      "rule_id": "measurement.non_finite",
+      "reason_code": "non_finite",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 50,
+      "condition": "measurement_is_nan_or_infinite",
+      "scope": {
+        "role": "measurement",
+        "columns": []
+      },
+      "threshold": {
+        "operator": "not_finite",
+        "value": null,
+        "inclusive": null
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "NaN e infinito não representam uma medição finita e são excluídos da população estatística.",
+      "origins": [
+        "banner_contract.v2.float_domain",
+        "banner_profile.v1.finite_population"
+      ]
+    },
+    {
+      "rule_id": "physical.nonnegative.lower_bound",
+      "reason_code": "invalid_physical_domain",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 60,
+      "condition": "measurement_is_below_declared_nonnegative_domain",
+      "scope": {
+        "role": "measurement",
+        "columns": [
+          "x_high_freq_rms_accel_g",
+          "x_peak_vel_comp_freq_hz",
+          "x_rms_acceleration_g",
+          "x_rms_velocity_in_s",
+          "x_rms_velocity_mm_s",
+          "z_high_freq_rms_accel_g",
+          "z_peak_vel_comp_freq_hz",
+          "z_rms_acceleration_g",
+          "z_rms_velocity_in_s",
+          "z_rms_velocity_mm_s"
+        ]
+      },
+      "threshold": {
+        "operator": "<",
+        "value": 0.0,
+        "inclusive": false
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "O contrato declara zero como limite físico inferior válido para essas grandezas.",
+      "origins": [
+        "banner_contract.v2.physical_lower_bound"
+      ]
+    },
+    {
+      "rule_id": "physical.temperature_f.absolute_zero",
+      "reason_code": "invalid_physical_domain",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 70,
+      "condition": "fahrenheit_temperature_is_below_absolute_zero",
+      "scope": {
+        "role": "measurement",
+        "columns": [
+          "temperature_f"
+        ]
+      },
+      "threshold": {
+        "operator": "<",
+        "value": -459.67,
+        "inclusive": false
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "O contrato adota o zero absoluto em Fahrenheit como limite inferior inclusivo do domínio válido.",
+      "origins": [
+        "banner_contract.v2.physical_lower_bound"
+      ]
+    },
+    {
+      "rule_id": "physical.temperature_c.absolute_zero",
+      "reason_code": "invalid_physical_domain",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 80,
+      "condition": "celsius_temperature_is_below_absolute_zero",
+      "scope": {
+        "role": "measurement",
+        "columns": [
+          "temperature_c"
+        ]
+      },
+      "threshold": {
+        "operator": "<",
+        "value": -273.15,
+        "inclusive": false
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "O contrato adota o zero absoluto em Celsius como limite inferior inclusivo do domínio válido.",
+      "origins": [
+        "banner_contract.v2.physical_lower_bound"
+      ]
+    },
+    {
+      "rule_id": "duplicate.conflicting.reject",
+      "reason_code": "conflicting_duplicate",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 90,
+      "condition": "declared_key_repeats_and_any_other_field_differs",
+      "scope": {
+        "role": "record",
+        "columns": [
+          "id"
+        ]
+      },
+      "threshold": {
+        "operator": "repeated_key_with_different_record",
+        "value": "all_non_key_columns",
+        "inclusive": null
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "A mesma chave com conteúdos diferentes é ambígua e bloqueia uma disposição automática.",
+      "origins": [
+        "banner_baseline.v1.profile.duplicates.key_columns",
+        "banner_profile.v1.conflicting_key_groups"
+      ]
+    },
+    {
+      "rule_id": "unit.inconsistent.ambiguous",
+      "reason_code": "inconsistent_redundant_unit",
+      "action": "reject",
+      "severity": "error",
+      "precedence": 100,
+      "condition": "relation_is_inconsistent_and_no_single_counterpart_is_independently_proven",
+      "scope": {
+        "role": "measurement",
+        "columns": [
+          "temperature_c",
+          "temperature_f",
+          "x_peak_velocity_in_s",
+          "x_peak_velocity_mm_s",
+          "x_rms_velocity_in_s",
+          "x_rms_velocity_mm_s",
+          "z_peak_velocity_in_s",
+          "z_peak_velocity_mm_s",
+          "z_rms_velocity_in_s",
+          "z_rms_velocity_mm_s"
+        ]
+      },
+      "threshold": {
+        "operator": "outside_tolerance_without_unique_trusted_counterpart",
+        "value": "declared_relation",
+        "inclusive": false
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [
+        "temperature_c_to_temperature_f",
+        "x_peak_velocity_in_s_to_mm_s",
+        "x_rms_velocity_in_s_to_mm_s",
+        "z_peak_velocity_in_s_to_mm_s",
+        "z_rms_velocity_in_s_to_mm_s"
+      ],
+      "justification": "O contrato preserva as duas colunas como independentes; sem uma única contraparte comprovada, escolher qual valor alterar seria arbitrário.",
+      "origins": [
+        "banner_contract.v2.source_units",
+        "banner_profile.v1.redundant_unit_pairs"
+      ]
+    },
+    {
+      "rule_id": "unit.inconsistent.deterministic",
+      "reason_code": "inconsistent_redundant_unit",
+      "action": "correct_deterministically",
+      "severity": "warning",
+      "precedence": 110,
+      "condition": "relation_is_inconsistent_and_exactly_one_counterpart_is_independently_proven",
+      "scope": {
+        "role": "measurement",
+        "columns": [
+          "temperature_c",
+          "temperature_f",
+          "x_peak_velocity_in_s",
+          "x_peak_velocity_mm_s",
+          "x_rms_velocity_in_s",
+          "x_rms_velocity_mm_s",
+          "z_peak_velocity_in_s",
+          "z_peak_velocity_mm_s",
+          "z_rms_velocity_in_s",
+          "z_rms_velocity_mm_s"
+        ]
+      },
+      "threshold": {
+        "operator": "outside_tolerance_with_unique_trusted_counterpart",
+        "value": "declared_relation",
+        "inclusive": false
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [
+        "temperature_c_to_temperature_f",
+        "x_peak_velocity_in_s_to_mm_s",
+        "x_rms_velocity_in_s_to_mm_s",
+        "z_peak_velocity_in_s_to_mm_s",
+        "z_rms_velocity_in_s_to_mm_s"
+      ],
+      "justification": "A correção é permitida somente quando uma contraparte independente e única prova o valor de origem e a fórmula declarada determina o resultado sem escolha.",
+      "origins": [
+        "banner_contract.v2.source_units",
+        "banner_profile.v1.redundant_unit_pairs",
+        "SEN-27.deterministic_correction_guard"
+      ]
+    },
+    {
+      "rule_id": "duplicate.identical.map_identity",
+      "reason_code": "identical_duplicate",
+      "action": "map",
+      "severity": "warning",
+      "precedence": 120,
+      "condition": "declared_key_and_all_record_fields_are_identical",
+      "scope": {
+        "role": "record",
+        "columns": [
+          "id"
+        ]
+      },
+      "threshold": {
+        "operator": "repeated_key_with_identical_record",
+        "value": "all_contract_columns",
+        "inclusive": null
+      },
+      "uses_iqr": false,
+      "unit_relation_ids": [],
+      "justification": "A ocorrência é associada à mesma identidade de conteúdo para auditoria; cada duplicata permanece como registro distinto, sem deduplicação nem remoção.",
+      "origins": [
+        "banner_profile.v1.complete_duplicates",
+        "SEN-27.identical_duplicate_auditability",
+        "SEN-27.identical_duplicate_preservation"
+      ]
+    },
+    {
+      "rule_id": "outlier.iqr.flag",
+      "reason_code": "iqr_outlier",
+      "action": "flag",
+      "severity": "warning",
+      "precedence": 130,
+      "condition": "finite_measurement_is_strictly_outside_iqr_fences",
+      "scope": {
+        "role": "measurement",
+        "columns": []
+      },
+      "threshold": {
+        "operator": "outside_iqr_fences",
+        "value": "Q1 - 1.5 * IQR; Q3 + 1.5 * IQR",
+        "inclusive": false
+      },
+      "uses_iqr": true,
+      "unit_relation_ids": [],
+      "justification": "Raridade estatística pode carregar sinal industrial; a regra apenas sinaliza e preserva o registro.",
+      "origins": [
+        "banner_profile.v1.iqr",
+        "SEN-27.outlier_preservation"
+      ]
+    }
+  ],
+  "limitations": [
+    "A política não avalia, altera, remove, imputa ou publica registros individuais.",
+    "A comparação com a baseline usa somente agregados rastreados e não acessa a fonte original.",
+    "O contrato não define uma contraparte autoritativa nos pares redundantes; sem prova independente única, a inconsistência bloqueia.",
+    "O IQR sinaliza raridade estatística e não prova erro físico."
+  ]
+}

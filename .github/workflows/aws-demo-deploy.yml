@@ -1,0 +1,202 @@
+name: AWS demo deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "SHA completo igual ao HEAD atual de main"
+        required: true
+        type: string
+      confirmation:
+        description: "Modo manual explícito da fundação ou do runtime"
+        required: true
+        type: choice
+        options:
+          - FOUNDATION-AWS-DEMO
+          - DEPLOY-AWS-DEMO
+
+permissions: {}
+
+concurrency:
+  group: aws-demo-state
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: AWS demo / Deploy preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Reject unauthorized repository, event, ref, or input
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_REF: refs/heads/main
+          EXPECTED_REPOSITORY: HiRenan/senai-prescriptive-maintenance
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]
+          [[ "$GITHUB_REPOSITORY" == "$EXPECTED_REPOSITORY" ]]
+          [[ "$GITHUB_REF" == "$EXPECTED_REF" ]]
+          [[ "$CONFIRMATION" == "FOUNDATION-AWS-DEMO" || "$CONFIRMATION" == "DEPLOY-AWS-DEMO" ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" == "$GITHUB_SHA" ]]
+
+      - name: Check out main for ancestry verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: main
+
+      - name: Require the immutable SHA to equal the checked out main HEAD
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+
+      - name: Require the protected deploy environment before OIDC
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python infra/aws/demo/scripts/github_environment_gate.py aws-demo-deploy
+
+  deploy:
+    name: AWS demo / Protected deploy and smoke
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: aws-demo-deploy
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the immutable source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Revalidate the current main revision after approval
+        shell: bash
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_NO_REPLACE_OBJECTS: "1"
+          GIT_TERMINAL_PROMPT: "0"
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags --no-recurse-submodules --depth=1 \
+            origin refs/heads/main:refs/remotes/origin/main
+          [[ "$(git rev-parse --verify HEAD)" == "$SOURCE_SHA" ]]
+          [[ "$(git rev-parse --verify refs/remotes/origin/main)" == "$SOURCE_SHA" ]]
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up Terraform 1.15.9
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.15.9"
+          terraform_wrapper: false
+
+      - name: Prepare the isolated Buildx configuration
+        if: ${{ inputs.confirmation == 'DEPLOY-AWS-DEMO' }}
+        shell: bash
+        env:
+          BUILDX_CONFIG_PATH: ${{ runner.temp }}/sen68-buildx-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 -- "$BUILDX_CONFIG_PATH"
+
+      - name: Set up the approved Buildx builder
+        id: buildx
+        if: ${{ inputs.confirmation == 'DEPLOY-AWS-DEMO' }}
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/sen68-buildx-${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          cleanup: true
+          install: false
+          name: sen68-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Assume the deploy role through OIDC
+        id: aws-creds
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          action-timeout-s: 120
+          allowed-account-ids: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          aws-region: ${{ vars.AWS_DEMO_REGION }}
+          mask-aws-account-id: true
+          retry-max-attempts: 3
+          output-credentials: true
+          role-duration-seconds: 7200
+          role-session-name: sen68-deploy-${{ github.run_id }}
+          role-to-assume: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}
+          unset-current-credentials: true
+
+      - name: Provision the empty foundation without runtime credentials
+        if: ${{ inputs.confirmation == 'FOUNDATION-AWS-DEMO' }}
+        shell: bash
+        env:
+          AWS_DEMO_ACCOUNT_ID: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          AWS_DEMO_SESSION_EXPIRATION: ${{ steps.aws-creds.outputs.aws-expiration }}
+          AWS_DEMO_SOURCE_SHA: ${{ inputs.source_sha }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEMO_REGION }}
+          AWS_REGION: ${{ vars.AWS_DEMO_REGION }}
+          TF_STATE_BUCKET: ${{ vars.AWS_DEMO_STATE_BUCKET }}
+          TF_STATE_KEY: demo/sen-67/terraform.tfstate
+          TF_VAR_availability_zone: ${{ vars.AWS_DEMO_AVAILABILITY_ZONE }}
+          TF_VAR_aws_account_id: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          TF_VAR_aws_region: ${{ vars.AWS_DEMO_REGION }}
+          TF_VAR_budget_alert_email: ${{ secrets.AWS_DEMO_BUDGET_ALERT_EMAIL }}
+          TF_VAR_enable_bedrock: "false"
+          TF_VAR_frontend_certificate_arn: ${{ vars.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}
+          TF_VAR_frontend_domain_name: ${{ vars.AWS_DEMO_FRONTEND_DOMAIN_NAME }}
+          TF_VAR_monthly_budget_usd: "15"
+          TF_VAR_name_prefix: senai-pm
+          TF_VAR_owner: demo-team
+        run: |
+          set -euo pipefail
+          python infra/aws/demo/scripts/aws_delivery.py foundation
+
+      - name: Deploy by verified digest and run the authenticated smoke
+        if: ${{ inputs.confirmation == 'DEPLOY-AWS-DEMO' }}
+        shell: bash
+        env:
+          AWS_DEMO_ACCOUNT_ID: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          AWS_DEMO_BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+          AWS_DEMO_BUILDX_DOCKER_CONFIG: ${{ runner.temp }}/sen68-buildx-${{ github.run_id }}-${{ github.run_attempt }}
+          AWS_DEMO_SESSION_EXPIRATION: ${{ steps.aws-creds.outputs.aws-expiration }}
+          AWS_DEMO_SMOKE_BEARER_TOKEN: ${{ secrets.AWS_DEMO_SMOKE_BEARER_TOKEN }}
+          AWS_DEMO_SOURCE_SHA: ${{ inputs.source_sha }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEMO_REGION }}
+          AWS_REGION: ${{ vars.AWS_DEMO_REGION }}
+          TF_STATE_BUCKET: ${{ vars.AWS_DEMO_STATE_BUCKET }}
+          TF_STATE_KEY: demo/sen-67/terraform.tfstate
+          TF_VAR_availability_zone: ${{ vars.AWS_DEMO_AVAILABILITY_ZONE }}
+          TF_VAR_aws_account_id: ${{ vars.AWS_DEMO_ACCOUNT_ID }}
+          TF_VAR_aws_region: ${{ vars.AWS_DEMO_REGION }}
+          TF_VAR_budget_alert_email: ${{ secrets.AWS_DEMO_BUDGET_ALERT_EMAIL }}
+          TF_VAR_enable_bedrock: "false"
+          TF_VAR_frontend_certificate_arn: ${{ vars.AWS_DEMO_FRONTEND_CERTIFICATE_ARN }}
+          TF_VAR_frontend_domain_name: ${{ vars.AWS_DEMO_FRONTEND_DOMAIN_NAME }}
+          TF_VAR_monthly_budget_usd: "15"
+          TF_VAR_name_prefix: senai-pm
+          TF_VAR_owner: demo-team
+        run: |
+          set -euo pipefail
+          python infra/aws/demo/scripts/aws_delivery.py deploy

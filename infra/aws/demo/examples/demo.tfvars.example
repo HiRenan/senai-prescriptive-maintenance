@@ -1,0 +1,14 @@
+aws_account_id          = "000000000000"
+aws_region              = "us-east-1"
+availability_zone       = "us-east-1a"
+frontend_domain_name    = "demo.example.invalid"
+frontend_certificate_arn = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-4000-8000-000000000000"
+api_image_digest        = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+api_desired_count       = 0
+budget_alert_email      = "finops-demo@example.invalid"
+monthly_budget_usd      = 15
+name_prefix             = "senai-pm"
+owner                   = "demo-team"
+
+enable_bedrock   = false
+bedrock_model_id = null

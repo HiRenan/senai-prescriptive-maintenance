@@ -4,107 +4,49 @@
 [![Pull Request Policy](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/pull-request-policy.yml/badge.svg?branch=develop)](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/pull-request-policy.yml?query=branch%3Adevelop)
 [![Security](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/HiRenan/senai-prescriptive-maintenance/actions/workflows/security.yml?query=branch%3Adevelop)
 
-## Problema
+Este repositório reúne uma plataforma demonstrável para apoiar manutenção
+prescritiva de ativos industriais. Ela organiza medições, histórico e
+conhecimento técnico em uma resposta rastreável, mas não autoriza ações de
+manutenção nem substitui avaliação humana.
 
-Ativos industriais perdem disponibilidade quando sinais de degradação são
-percebidos tarde ou analisados sem contexto. A manutenção prescritiva busca
-transformar medições, histórico e conhecimento técnico em recomendações
-justificáveis para apoiar a decisão de manutenção: o que observar, qual ação
-avaliar e por que ela merece prioridade.
+## O problema
 
-Este repositório organiza a fundação técnica de uma solução para esse problema.
-O foco atual é oferecer uma base local reproduzível, testável e segura para que
-as capacidades de domínio sejam acrescentadas sem confundir intenção com
-funcionalidade entregue.
+Sinais de degradação percebidos tarde reduzem a disponibilidade dos ativos.
+Analisar somente uma medição também é insuficiente: uma recomendação precisa
+explicar a condição observada, mostrar casos comparáveis e apontar a evidência
+documental que sustenta cada ação sugerida.
 
-## Visão proposta
+O projeto entrega as fronteiras técnicas dessa jornada com foco em
+reprodutibilidade, falha segura e proteção dos materiais fornecidos. O runtime
+exige a escolha explícita entre `synthetic_demo` e `artifacts`; o primeiro é o
+modo público do Compose e da demonstração AWS, e o segundo só aceita um conjunto
+local integralmente identificado e autorizado.
 
-A visão de produto é uma plataforma capaz de receber dados autorizados de
-ativos, contextualizar condições observadas e apoiar recomendações de
-manutenção com evidências rastreáveis. Essa visão orienta as decisões
-arquiteturais, mas **ainda não representa o estado implementado**.
+## Estado atual
 
-## Estado implementado
+| Capacidade | O que existe | Limite que importa |
+| --- | --- | --- |
+| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, dois modos explícitos, health checks, correlation ID e erros sanitizados. | O runtime local/offline não autentica; no perfil AWS, a HTTP API exige JWT Cognito. O repositório não distribui artefatos privados nem configuração operacional. |
+| Dados | Pipeline local auditado, contrato de 18 features, split temporal e checker determinístico. | A fonte e os derivados por registro permanecem locais e ignorados; a CI usa somente fixtures sintéticas. |
+| Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
+| Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
+| Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
+| Web | Painel responsivo de análise e gestão documental em módulos ESM, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Node/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
+| AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline. | Nenhum recurso, identidade, deploy, smoke ou teardown foi executado na AWS. |
 
-A versão atual contém:
+As afirmações públicas usam quatro rótulos:
 
-- um workspace Python gerenciado por uv, com um backend instalável em
-  `apps/api`;
-- uma aplicação FastAPI mínima, inicializável pelo Uvicorn, com liveness em
-  `GET /health/live`;
-- configuração tipada e explícita para ambiente e URL PostgreSQL;
-- PostgreSQL 17 com pgvector 0.8.6 para desenvolvimento local via Docker
-  Compose;
-- automação Poe para bootstrap, formatação, lint, tipagem estrita, testes,
-  hooks, smoke e controle do serviço local;
-- um workspace Node gerenciado por Corepack e pnpm, com `apps/web` reservado
-  como fronteira de integração, ainda sem interface;
-- manifesto de integridade dos materiais locais e duas fixtures públicas
-  inteiramente sintéticas;
-- CI em Ubuntu e Windows, política automatizada para títulos, origens de pull
-  request e integridade Git de releases, além de verificações de segurança com
-  CodeQL, revisão de dependências e varredura de segredos;
-- atualizações semanais agrupadas pelo Dependabot para os ecossistemas uv, npm,
-  GitHub Actions e Docker Compose, sempre direcionadas a `develop`;
-- documentação de governança, segurança, arquitetura e decisões fundamentais.
+- **implementado**: comportamento presente em código e coberto por teste;
+- **medido**: resultado de uma execução identificada, com ambiente e limites;
+- **estimado**: cálculo baseado em hipóteses explícitas, não observação;
+- **futuro**: capacidade ausente, que não deve ser apresentada como entrega.
 
-Não há, nesta etapa, regras de negócio, ingestão de dados, análise de
-similaridade, vetores integrados à aplicação, RAG, LLM, autenticação,
-persistência integrada, readiness, infraestrutura AWS, deploy ou interface web.
+## Quickstart offline
 
-## Arquitetura atual
-
-O repositório é um monorepo e o backend segue um monólito modular: uma única
-aplicação implantável, com fronteiras internas que poderão receber módulos de
-domínio quando houver requisitos implementáveis. Essa escolha reduz a
-complexidade operacional da fundação sem impedir separação de responsabilidades
-no código.
-
-Os componentes existentes são:
-
-| Componente | Responsabilidade atual |
-| --- | --- |
-| `apps/api` | Pacote `prescriptive_maintenance`, aplicação FastAPI, liveness e settings. |
-| `apps/web` | Fronteira vazia do workspace Node; nenhuma UI foi implementada. |
-| `compose.yaml` e `infra/` | PostgreSQL/pgvector local e script de habilitação da extensão. |
-| `scripts/smoke.py` | Verificação de runtimes, configuração, Compose, importação e liveness; banco opcional. |
-| `data/` | Manifesto dos materiais locais e fixtures sintéticas versionáveis. |
-
-O inventário detalhado está em
-[`docs/architecture/README.md`](docs/architecture/README.md), e as decisões que
-sustentam essa estrutura estão registradas em [`docs/adr/`](docs/adr/README.md).
-
-## Estrutura do repositório
-
-```text
-.
-├── .github/          # governança de pull requests, responsáveis e CI
-├── apps/
-│   ├── api/          # pacote Python instalável do backend
-│   └── web/          # fronteira de workspace, sem implementação de UI
-├── data/             # manifesto, fixtures sintéticas e dados locais ignorados
-├── docs/
-│   ├── adr/          # decisões arquiteturais
-│   └── architecture/ # inventário da arquitetura implementada
-├── experiments/      # estudos isolados do código de produção
-├── infra/            # PostgreSQL e pgvector para desenvolvimento local
-└── scripts/          # automação cross-platform exposta pelo Poe
-```
-
-## Pré-requisitos
-
-- Git;
-- Python `>=3.13,<3.14`, com a linha `3.13` registrada em
-  `.python-version`;
-- uv compatível com o lock do projeto;
-- Node.js `>=22,<23`, com a linha `22` registrada em `.node-version`;
-- Corepack e pnpm `10.15.1`;
-- Docker Desktop ou Docker Engine com Compose v2 para o smoke e os comandos de
-  infraestrutura.
-
-## Quickstart
-
-Clone o repositório, use a branch de integração e prepare o ambiente pela raiz:
+Pré-requisitos: Git, Python `>=3.13,<3.14`, uv, Node.js `>=22,<23`, Corepack,
+pnpm `10.15.1` e Docker Compose v2. O primeiro setup pode baixar dependências;
+depois de instaladas, o smoke e a demonstração abaixo não acessam AWS,
+providers pagos nem materiais locais protegidos.
 
 ```powershell
 git clone https://github.com/HiRenan/senai-prescriptive-maintenance.git
@@ -113,140 +55,198 @@ git switch develop
 uv run --frozen poe setup
 uv run --frozen poe check
 uv run --frozen poe smoke
+uv run --frozen poe golden-e2e
 ```
 
-`setup` sincroniza todos os pacotes Python pelo lock, instala o workspace pnpm
-com lock congelado e instala os hooks pre-commit. O projeto mantém um único
-`uv.lock` e um único `pnpm-lock.yaml`, ambos na raiz.
+- `check` executa formatação somente leitura, lint, tipagem estrita, testes e
+  as verificações da web;
+- `smoke` valida runtimes, Compose e liveness/readiness reais em loopback, sem
+  iniciar serviços;
+- `golden-e2e` percorre por HTTP os cinco estados do produto e o ciclo
+  documental com dados e providers inteiramente sintéticos.
 
-O smoke padrão não exige banco em execução nem cria `.env`. O Docker precisa
-estar disponível porque a validação inclui `docker compose config`.
+O [guia de scripts](scripts/README.md) detalha smoke, demonstração e benchmark;
+a [infraestrutura local](infra/README.md) cobre os caminhos opcionais com
+contêineres.
+
+## Executar a API
+
+Para iniciar somente a API com memória e sem dependência externa:
+
+```powershell
+$env:PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT = "offline"
+$env:PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND = "memory"
+$env:PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE = "synthetic_demo"
+uv run --frozen uvicorn prescriptive_maintenance.main:app `
+  --host 127.0.0.1 --port 8000
+```
+
+Os endpoints operacionais ficam em `GET /health/live` e
+`GET /health/ready`. O contrato de negócio, os endpoints e o ciclo documental
+estão no [README do backend](apps/api/README.md); o snapshot OpenAPI canônico está em
+[`apps/api/openapi/v1.json`](apps/api/openapi/v1.json).
 
 ## Comandos canônicos
 
-Todas as tarefas abaixo são executadas da raiz. Somente `format` reescreve
-código; `check` é uma sequência fail-fast somente leitura.
+Todos os comandos partem da raiz. Somente `format` reescreve código.
 
 | Comando | Finalidade |
 | --- | --- |
-| `uv run --frozen poe setup` | Sincroniza dependências congeladas e instala os hooks locais. |
-| `uv run --frozen poe format` | Aplica correções seguras e formata arquivos Python com Ruff. |
-| `uv run --frozen poe format-check` | Verifica a formatação sem escrever. |
-| `uv run --frozen poe lint` | Executa Ruff sem correções automáticas. |
-| `uv run --frozen poe typecheck` | Executa Pyright em modo estrito. |
-| `uv run --frozen poe test` | Executa Pytest com cobertura mínima configurada. |
-| `uv run --frozen poe check` | Executa format-check, lint, typecheck e test, nessa ordem. |
-| `uv run --frozen poe hooks` | Executa todos os hooks pre-commit em todos os arquivos. |
-| `uv run --frozen poe services-up` | Inicia o PostgreSQL local e aguarda o healthcheck. |
-| `uv run --frozen poe services-down` | Remove contêiner e rede, preservando o volume local. |
-| `uv run --frozen poe smoke` | Valida runtimes, configuração, Compose e liveness real. |
-| `uv run --frozen poe smoke --with-services` | Acrescenta a validação do PostgreSQL e do pgvector já iniciados. |
+| `uv run --frozen poe setup` | Sincroniza os workspaces pelos locks e instala hooks. |
+| `uv run --frozen poe format` | Aplica correções seguras e formata Python. |
+| `uv run --frozen poe check` | Executa format-check, lint, typecheck, testes e as verificações da web. |
+| `uv run --frozen poe hooks` | Executa todos os hooks em todos os arquivos. |
+| `uv run --frozen poe web-contract` | Gera o contrato web a partir do snapshot OpenAPI v1. |
+| `uv run --frozen poe web-test` | Executa os testes essenciais do fluxo do painel. |
+| `uv run --frozen poe web-browser-test` | Valida offline, teclado, foco e reflow em Chromium. |
+| `uv run --frozen poe failure-matrix` | Exercita falhas P0/P1 e audita o histórico público. |
+| `uv run --frozen poe smoke` | Valida a aplicação offline e o Compose, sem iniciar serviços. |
+| `uv run --frozen poe smoke --with-artifacts` | Compõe somente derivados locais já aprovados; ausência é reportada como indisponível/skip. |
+| `uv run --frozen poe golden-e2e` | Executa a demonstração sintética ponta a ponta. |
+| `uv run --frozen poe services-up` | Inicia somente PostgreSQL/pgvector local. |
+| `uv run --frozen poe applications-audit` | Audita contextos e builders das imagens. |
+| `uv run --frozen poe applications-build` | Constrói as imagens da API e do painel web. |
+| `uv run --frozen poe applications-up` | Inicia PostgreSQL, API e web localmente. |
+| `uv run --frozen poe services-down` | Remove contêineres e rede, preservando o volume. |
 
-Para incluir o banco no smoke:
+Para validar a topologia completa:
 
 ```powershell
-uv run --frozen poe services-up
-uv run --frozen poe smoke --with-services
+uv run --frozen poe applications-audit
+uv run --frozen poe applications-build
+uv run --frozen poe applications-up
+uv run --frozen poe smoke --with-services --with-applications
 uv run --frozen poe services-down
 ```
 
-Se `127.0.0.1:5432` estiver ocupada, escolha uma porta host livre por
-`PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT`. A porta interna permanece
-`5432`; os exemplos para PowerShell e Bash estão em
-[`infra/README.md`](infra/README.md).
+O painel fica em `127.0.0.1:3000` e localiza a API por `API_BASE_URL`, cujo
+padrão é `http://127.0.0.1:8000` e cujo valor no Compose é `http://api:8000`. O
+navegador chama sempre a mesma origem da página: o processo web encaminha a
+análise e somente as seis operações documentais publicadas no contrato, então a
+API não precisa de exceção de CORS. O [README do painel](apps/web/README.md)
+descreve os fluxos, os contratos gerados e os estados apresentados.
 
-## Configuração local
+## Arquitetura
 
-O backend exige `PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT` e
-`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL` somente quando `Settings` é
-instanciado. A liveness não carrega essas configurações.
+O backend é um monólito modular em `apps/api`; `apps/web` serve o painel de
+análise e gestão documental e o proxy de mesma origem, sem framework, bundler
+nem etapa de build.
+PostgreSQL/pgvector apoia o perfil local, e os artefatos reais de dados, modelo
+e documentos continuam fora do Git. A factory HTTP não descobre esses
+artefatos: `artifacts` exige o caminho e o SHA-256 de um
+manifesto local aprovado que vincula todas as identidades antes de aceitar uma
+análise.
 
-`.env.example` contém valores obviamente fictícios e exclusivos para
-desenvolvimento local. Copie-o para `.env` apenas quando um fluxo manual
-precisar carregar settings; `.env` permanece ignorado pelo Git. Consulte
-[`apps/api/README.md`](apps/api/README.md) para o contrato completo.
+Os [diagramas lógico, local e AWS](docs/architecture/diagrams.md) marcam
+explicitamente essa separação. O
+[inventário técnico](docs/architecture/README.md) relaciona cada componente ao
+código que o comprova.
 
-## Dados e materiais
+```text
+apps/api       API, domínio, dados, modelo, recuperação, geração e persistência
+apps/web       painel de análise e gestão documental e processo que o serve
+data           manifesto, fixtures sintéticas e derivados públicos permitidos
+docs           arquitetura, cards, decisões, runbooks e evidências
+infra          Compose local e perfil Terraform AWS demo
+scripts        automação exposta pelo Poe
+```
 
-Os oito materiais originais fornecidos para o desafio são locais, ignorados
-pelo Git e não podem ser redistribuídos. O arquivo rastreado
-[`data/source-manifest.json`](data/source-manifest.json) contém somente nomes,
-tamanhos e hashes SHA-256 para verificação de integridade; não contém nem
-concede direitos sobre o conteúdo recebido.
+## Perfis de execução
 
-O repositório publica apenas as fixtures sintéticas em `data/fixtures/`. Dados
-originais devem ficar em `data/raw/original/`, e saídas intermediárias,
-processadas ou geradas permanecem nos caminhos ignorados definidos em
-`.gitignore`. As regras de preparação e conferência estão em
-[`data/README.md`](data/README.md).
+| Perfil | Backend permitido | Uso atual |
+| --- | --- | --- |
+| `offline` | somente `memory` | Smoke, golden set e execução sem dependências externas. |
+| `local` | `memory` ou `postgres` | Desenvolvimento; o Compose seleciona PostgreSQL. |
+| `aws` | `memory` ou `postgres` | Contrato de configuração; o perfil Terraform demo seleciona `memory`. |
+
+`memory` proíbe URL de banco; `postgres` exige
+`PRESCRIPTIVE_MAINTENANCE_DATABASE_URL`. A configuração falha no startup quando
+há campo ausente, extra ou combinação incoerente. `.env.example` usa valores
+fictícios exclusivos de desenvolvimento e `.env` permanece ignorado.
+
+`PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE` também é obrigatório. `synthetic_demo`
+proíbe referências de artefatos. `artifacts` exige
+`PRESCRIPTIVE_MAINTENANCE_ANALYSIS_ARTIFACTS_MANIFEST` e
+`PRESCRIPTIVE_MAINTENANCE_ANALYSIS_ARTIFACTS_MANIFEST_SHA256`; ausência,
+corrupção ou incompatibilidade deixam a readiness e as rotas de análise em 503,
+sem trocar para o demo. Toda resposta HTTP informa somente `X-Analysis-Mode`
+com um dos dois valores fechados. O protocolo e o manifesto estão documentados
+na [validação do runtime](docs/validation/analysis-runtime.md).
+
+## Dados, modelo e RAG
+
+Os materiais fornecidos não são redistribuídos. O repositório contém somente
+identidades públicas de integridade, agregados sanitizados aprovados e fixtures
+inteiramente sintéticas. Fontes, extrações, Parquets, vetores, modelos,
+mapeamentos e relatórios por registro ficam em destinos locais ignorados.
+
+Fontes canônicas para avaliação:
+
+- [data card do pipeline tabular](docs/data/banner-data-card.md);
+- [model card do k-NN temporal v3](docs/model-cards/temporal-knn-v3.md);
+- [RAG card da composição prescritiva](docs/rag/prescriptive-rag-card.md).
+
+Resultados **medidos** incluem 166.796 linhas reconciliadas no pipeline local e
+24.768 linhas no holdout temporal do modelo. No diagnóstico operacional
+pós-hoc, a candidata pré-abstenção atingiu 97,3756% de acurácia bruta, abaixo
+dos 98,6999% da baseline trivial que marca todas as linhas como problema. Entre
+as aceitas, a acurácia de 96,9928% também ficou abaixo dos 97,6938% da mesma
+baseline no recorte. O único sinal acima do trivial está na leitura balanceada
+e nos recalls: a candidata obteve 59,4426% de acurácia balanceada e 20,4969% de
+recall operacional, contra 50% e 0% da baseline constante, mas isso continua
+insuficiente. A cobertura foi 39,7408%; entre as linhas aceitas, o recall
+operacional foi 22,4670%. A acurácia bruta inclui linhas depois abstidas, é
+dominada por problemas e não representa o comportamento final. A
+[avaliação exata histórica](docs/validation/model-evaluation.md) permanece como
+diagnóstico secundário, e a
+[correção da SEN-78](docs/validation/model-evaluation-v2.md) registra fórmulas e
+denominadores. Nenhuma medição é métrica de produção ou aprova automação.
+
+O custo AWS de USD 2,72 com contingência para uma janela de oito horas é uma
+**estimativa**, não gasto observado. As hipóteses, a data de referência e a
+ausência de execução live estão no
+[relatório AWS](docs/validation/aws-demo-evidence.md).
 
 ## Segurança
 
-Credenciais, tokens, chaves, `.env`, dumps, volumes e dados locais nunca devem
-ser versionados. Os valores de `.env.example` e `compose.yaml` são fictícios e
-não podem ser usados em produção.
+O runtime local não possui autenticação nem deve ser exposto publicamente.
+Logs HTTP usam somente campos permitidos e não registram payload, query,
+conteúdo documental, prompt, credencial ou texto de exceção. O ciclo documental
+e a recuperação validam integridade e vigência, mas esses controles não provam
+correção semântica de diagnóstico ou prescrição.
+
+- [Política de segurança](SECURITY.md)
+- [Threat model](docs/security/threat-model.md)
 
 Vulnerabilidades devem ser comunicadas de forma privada conforme
-[`SECURITY.md`](SECURITY.md); não publique detalhes exploráveis em issues ou
-pull requests.
+[`SECURITY.md`](SECURITY.md).
 
-## Contribuição e governança
+## Limitações e trabalho futuro
 
-`develop` é a branch de integração e `main` contém somente baselines e releases
-estáveis. Implementações são feitas em branches curtas, dentro de worktrees
-isoladas criadas a partir do `origin/develop` atualizado, e entram por pull
-request com squash. Releases usam uma branch curta `release/*` criada da
-`origin/develop` validada, que apenas reconcilia a `origin/main` vigente e deve
-preservar exatamente a árvore de `develop`; seu pull request para `main` é
-integrado por merge commit. Hotfixes entram em `main` por squash e são
-sincronizados de volta para `develop` antes da promoção seguinte.
+Não estão implementados:
 
-O gate obrigatório rejeita promoções diretas de `develop`, branches de tarefa e
-forks para `main`. Para uma release, ele exige um merge commit de dois pais
-exatos — `origin/develop` primeiro e `origin/main` segundo —, ancestralidade da
-`main` vigente e equivalência da árvore com a `develop` vigente. A sincronização
-é provada por um merge virtual limpo de `develop` com `main` que preserve a
-árvore de `develop`; a equivalência da árvore de `main` com um commit histórico
-de `develop` existe somente como fallback para a divergência legada causada pelo
-squash anterior. Nenhuma etapa permite alteração direta das branches
-permanentes.
+- regras operacionais completas ou autorização automática de manutenção;
+- ingestão contínua e orquestração do pipeline pela aplicação;
+- upload, armazenamento ou validação de bytes documentais pela API;
+- artefatos operacionais distribuíveis, embedding semântico aprovado, pgvector
+  preenchido e provider de geração real habilitado;
+- autenticação e autorização fora do perfil AWS demo, rate limiting e operação
+  de produção;
+- infraestrutura AWS aplicada, bootstrap OIDC/IAM, deploy ou evidência live.
 
-Nomes de branches, commits Conventional Commits e títulos de pull request são
-escritos em inglês. Documentação, ADRs, apresentações e descrições de pull
-request são escritos em português. O fluxo completo está em
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## Limitações e próximos passos não implementados
-
-As seguintes capacidades pertencem à evolução futura e **não estão
-implementadas**:
-
-- modelo de domínio e regras prescritivas;
-- ingestão, limpeza ou pipeline de dados;
-- persistência da aplicação no PostgreSQL e uso de vetores pelo backend;
-- busca por similaridade, recuperação de contexto, RAG ou integração com LLM;
-- autenticação, autorização, readiness e observabilidade de produção;
-- frontend ou qualquer experiência de usuário;
-- infraestrutura AWS, pipeline de deploy, release publicada ou ambiente de
-  produção.
-
-Cada capacidade deverá entrar por tarefa própria, com critérios verificáveis e
-sem enfraquecer a fronteira dos materiais locais.
+Esses itens são futuro, não compromisso desta versão.
 
 ## Documentação
 
-- [`CONTRIBUTING.md`](CONTRIBUTING.md): GitFlow, papéis e critérios de revisão;
-- [`SECURITY.md`](SECURITY.md): reporte responsável e política de segredos;
-- [`docs/README.md`](docs/README.md): índice e convenções da documentação;
-- [`docs/adr/README.md`](docs/adr/README.md): decisões arquiteturais;
-- [`docs/architecture/README.md`](docs/architecture/README.md): estado técnico
-  implementado.
+O [índice técnico](docs/README.md) organiza arquitetura, API, cards, segurança,
+runbooks, ADRs e relatórios de validação sem duplicar seus detalhes. GitFlow,
+papéis e critérios de revisão estão em [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Acesso e direitos
 
 Este repositório é público exclusivamente para leitura, clone e avaliação pela
 banca. A disponibilidade pública não concede autorização para copiar,
-modificar, redistribuir ou reutilizar o conteúdo.
+modificar, redistribuir ou reutilizar seu conteúdo.
 
 Não há arquivo `LICENSE`, não existe licença implícita de reutilização e todos
 os direitos permanecem reservados a Renan Mocelin.

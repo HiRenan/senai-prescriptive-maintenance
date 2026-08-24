@@ -1,19 +1,20 @@
 # Infraestrutura local
 
-O ambiente local contém somente PostgreSQL 17 com pgvector. Ele não representa
-credenciais nem dados de produção e não inclui serviços de aplicação, filas,
-armazenamento de objetos ou recursos de nuvem.
+O ambiente local usa uma única topologia Compose com PostgreSQL 17/pgvector,
+API e o painel de análise. Ele não representa credenciais nem dados de produção
+e não inicia filas, armazenamento de objetos ou recursos de nuvem. O perfil AWS
+declarativo e não aplicado vive separadamente em `aws/demo`.
 
 ## Pré-requisitos
 
 - Docker Desktop com contêineres Linux;
 - Docker Compose v2;
-- porta `127.0.0.1:5432` livre, ou outra porta local livre escolhida
-  explicitamente.
+- portas `127.0.0.1:5432`, `127.0.0.1:8000` e `127.0.0.1:3000` livres, ou
+  outras portas locais livres escolhidas explicitamente.
 
-Execute os comandos abaixo a partir da raiz do repositório. A interface
-recomendada inicia o banco em modo detached, aguarda o healthcheck e o remove
-preservando os dados:
+Execute os comandos abaixo a partir da raiz do repositório. O fluxo existente
+de banco isolado continua iniciando somente o PostgreSQL em modo detached,
+aguarda o healthcheck e o remove preservando os dados:
 
 ```powershell
 uv run --frozen poe services-up
@@ -64,14 +65,83 @@ porta do contêiner permanece `5432`, e a publicação continua restrita a
 `127.0.0.1`. Ao conectar a aplicação manualmente, ajuste também
 `PRESCRIPTIVE_MAINTENANCE_DATABASE_URL` para a mesma porta host. O comando
 `uv run --frozen poe smoke --with-services` é idêntico nos dois sistemas.
+O serviço da API declara `PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE=synthetic_demo`
+no Compose; não há seleção implícita nem montagem de derivados privados.
 
-## Imagem reproduzível
+## Topologia de aplicação
+
+O ciclo completo constrói as duas imagens, inicia os três serviços, aguarda os
+healthchecks, compara o OpenAPI servido com o snapshot v1 e encerra a topologia
+sem remover o volume:
+
+```powershell
+uv run --frozen poe applications-audit
+uv run --frozen poe applications-build
+uv run --frozen poe applications-up
+uv run --frozen poe smoke --with-services --with-applications
+uv run --frozen poe services-down
+```
+
+O Compose publica somente em loopback. Para escolher outras portas host no
+PowerShell antes de `applications-up` e do smoke:
+
+```powershell
+$env:PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT = "55432"
+$env:PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT = "58000"
+$env:PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT = "53000"
+```
+
+No Ubuntu:
+
+```bash
+export PRESCRIPTIVE_MAINTENANCE_POSTGRES_HOST_PORT=55432
+export PRESCRIPTIVE_MAINTENANCE_API_HOST_PORT=58000
+export PRESCRIPTIVE_MAINTENANCE_WEB_HOST_PORT=53000
+```
+
+As portas internas permanecem `5432`, `8000` e `3000`. A API recebe uma URL
+PostgreSQL exclusivamente local e fictícia apontada ao serviço `postgres`; a
+readiness abre uma conexão curta e executa `SELECT 1`, sem reter a conexão. A
+liveness da API continua restrita ao processo. A web expõe sua liveness, serve
+o painel de análise e encaminha `POST /api/analysis` para `POST /analysis` da
+API, indicada por `API_BASE_URL`.
+
+API e web usam raiz somente leitura, `/tmp` efêmero, todas as capabilities
+removidas e `no-new-privileges`. O healthcheck da API usa readiness e, no perfil
+local do Compose, exige PostgreSQL; a web condiciona sua inicialização à API
+healthy.
+
+## Bases e insumos fixados
 
 O serviço usa pgvector `0.8.6` sobre PostgreSQL `17`, pela referência:
 
 ```text
 pgvector/pgvector:0.8.6-pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
 ```
+
+Os Dockerfiles multi-stage das aplicações usam os índices OCI fixados abaixo:
+
+```text
+python:3.13-slim-bookworm@sha256:00faa2debb87529f9f0764e9491d8ba400a3678976616c3bd7cb193745ac20d1
+ghcr.io/astral-sh/uv:0.9.4@sha256:c4089b0085cf4d38e38d5cdaa5e57752c1878a6f41f2e3a3a234dc5f23942cb4
+node:22-alpine3.22@sha256:cd7807368cf24826297cbad5dca1a44972ccfd770647db52a8c7589eb4599ac8
+```
+
+A API instala somente o grupo de produção por `uv sync --frozen --no-dev`; a
+web confirma o workspace por `pnpm install --frozen-lockfile --prod` e não tem
+dependências de aplicação; sua imagem carrega apenas o processo HTTP e os
+módulos, o estilo e o documento do painel. Cada Dockerfile possui uma allowlist
+específica; a API inclui também o README exigido pelos metadados do pacote. A tarefa
+`applications-audit` exporta o contexto filtrado que o BuildKit recebeu e
+executa auditorias dentro dos builders. `.env`, Git, dados, materiais originais,
+caches, testes, snapshots OpenAPI, READMEs desnecessários e ferramentas de
+desenvolvimento não chegam ao builder nem às imagens finais.
+
+Neste fluxo, reprodutibilidade significa bases imutáveis por digest, ferramentas
+e dependências fixadas, locks congelados e contexto controlado. O image ID local
+pode variar em razão de metadados e proveniência produzidos pelo BuildKit; não há
+promessa de identidade bit a bit, publicação em registry ou attestation nesta
+tarefa.
 
 O digest é o índice OCI multi-arquitetura da tag. O índice oferece
 `linux/amd64`, usado pelo Docker Desktop validado, e `linux/arm64`. Verifique a
@@ -114,9 +184,9 @@ docker compose stop
 docker compose up --wait
 ```
 
-`services-down` executa `docker compose down`: remove o contêiner e a rede deste
-projeto, mas preserva o volume nomeado. O próximo `services-up` recria o serviço
-sobre os dados existentes:
+`services-down` executa `docker compose down`: remove os contêineres e a rede
+deste projeto, mas preserva o volume nomeado. O próximo `services-up` recria o
+banco sobre os dados existentes; `applications-up` recria a topologia completa:
 
 ```powershell
 uv run --frozen poe services-down
@@ -133,3 +203,17 @@ docker compose down --volumes --remove-orphans
 
 Esses comandos atuam somente sobre o projeto Compose executado nesta raiz. Não
 use limpeza global do Docker para administrar este ambiente.
+
+## Perfil AWS demo declarativo
+
+[`aws/demo/README.md`](aws/demo/README.md) documenta o único perfil Terraform da
+demo, sua arquitetura, custo limitado por duração, backend S3 parcial, plano
+offline, auditoria JSON e teardown. Ele reutiliza por digest a imagem OCI real da
+API sem alterar o Dockerfile, mantém compute e storage privados e não cria banco,
+UI, Textract, alta disponibilidade ou multiambiente.
+
+A presença do código não representa um ambiente AWS existente. A SEN-67 não
+executa `apply`, não envia imagens e não cria credenciais, usuários ou conteúdo.
+A automação manual e protegida da SEN-68 está separada em
+[`aws/demo/delivery/README.md`](aws/demo/delivery/README.md); OIDC, roles,
+environments, secrets e qualquer execução real continuam pendências externas.

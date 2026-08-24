@@ -18,13 +18,83 @@ uv run --frozen poe setup
 Inicie a aplicação em uma interface exclusivamente local:
 
 ```powershell
+$env:PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT = "offline"
+$env:PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND = "memory"
+$env:PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE = "synthetic_demo"
 uv run --frozen uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --port 8000
 ```
 
 `GET /health/live` responde com status HTTP `200`, conteúdo
 `application/json` e corpo `{"status":"ok"}`. A liveness verifica apenas que o
 processo está vivo e não acessa banco, arquivos, rede, configurações externas
-ou outros serviços.
+ou outros serviços. `GET /health/ready` responde `{"status":"ready"}` quando
+todas as dependências obrigatórias do perfil e o runtime configurado estão
+disponíveis; no perfil `offline`, não há dependência externa a consultar.
+
+Toda resposta recebe `X-Correlation-ID` e `X-Analysis-Mode`. O segundo contém
+somente `synthetic_demo` ou `artifacts`; caminhos, IDs internos, labels,
+conteúdo, prompt e motivo de falha não são expostos. Um único correlation ID ASCII entre 1 e
+64 caracteres, limitado a letras, números, `.`, `_`, `:` e `-` e delimitado por
+letra ou número, é propagado; valor ausente, vazio, duplicado, longo ou inseguro
+é substituído por um ID novo. O registro da requisição é um objeto JSON com
+evento, correlation ID, método, template conhecido da rota — ou o marcador
+seguro `unmatched` — e status. Payload, query string, caminho dinâmico, prompt,
+conteúdo documental, credencial e texto de exceção não entram nesse registro.
+Erros 422 colapsam detalhes do Pydantic para o issue estável
+`request/invalid`; essa perda deliberada de granularidade impede ecoar chaves
+arbitrárias do payload. Erros 409 e 503 também usam somente códigos e mensagens
+definidos pela aplicação. Uma exceção não tratada recebe 500 genérico na mesma
+fronteira, com correlation ID e sem texto da exceção.
+
+## Contrato HTTP v1
+
+O contrato público congelado está em [`openapi/v1.json`](openapi/v1.json). Ele
+define `POST /analysis` com exatamente 18 features métricas e `top_k` entre 1 e
+10, além da consulta de análise e das operações mínimas de registro, consulta,
+aprovação, rejeição e reprocessamento de documentos PDF. Os cinco resultados de
+análise são `normal`, `documented_fault`, `undocumented_fault`,
+`out_of_distribution` e `degraded`; os sete estados documentais também formam
+uniões discriminadas fechadas para geração de tipos sem cópia manual no
+frontend.
+
+Os vizinhos opacos pertencem exclusivamente à porta do modelo, são preservados
+em qualquer resultado quando disponíveis e expõem somente referência, posição,
+código normalizado da falha e distância padronizada finita não negativa, sem
+limite unitário. Evidências documentais carregam apenas seu suporte documental e
+citações governadas; cada citação identifica documento, versão e chunk por
+referências opacas e uma página positiva, sem título, caminho ou texto bruto.
+`support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
+medida de confiança.
+
+O fluxo HTTP não possui modo implícito. `PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE`
+é obrigatório e aceita exclusivamente `synthetic_demo` ou `artifacts`.
+`synthetic_demo` conserva os fakes determinísticos públicos; `artifacts` usa o
+composition root para carregar k-NN e índice versionado, conferir ranking,
+recuperar apenas chunks de versões aprovadas e vigentes, aplicar guardrails,
+gerar a resposta e persistir metadados pela UoW. Nenhum artefato é descoberto e
+qualquer binding divergente interrompe a composição sem fallback. O ciclo documental usa o adapter escolhido por `Settings`: memória nos
+perfis efêmeros ou PostgreSQL quando esse backend é declarado. `POST /documents`
+é um **registro de metadados**, não um upload, e nunca implica aprovação. Nenhuma
+dessas rotas lê arquivos ou materiais originais. Para regenerar e conferir o
+snapshot:
+
+```powershell
+uv run --frozen python scripts/generate_openapi.py
+uv run --frozen python scripts/generate_openapi.py --check
+```
+
+Os endpoints de health são operacionais. Configuração estrutural ausente ou
+inválida impede o startup. Já um manifesto `artifacts` ausente, corrompido ou
+incompatível mantém o processo vivo para diagnóstico operacional: liveness 200,
+readiness 503 e rotas de análise 503 sanitizado. Essa separação fornece evidência
+de indisponibilidade sem aceitar tráfego nem mascarar a falha com
+`synthetic_demo`. A readiness permanece fora do snapshot OpenAPI v1; os bodies
+de sucesso e o shape sanitizado dos erros 422, 409 e 503 também foram
+preservados. Os dois metadados são devolvidos por headers, sem acrescentar
+campos aos modelos públicos.
+
+O manifesto e a validação local opcional estão detalhados em
+[`../../docs/validation/analysis-runtime.md`](../../docs/validation/analysis-runtime.md).
 
 A verificação canônica inicia o Uvicorn em loopback e porta efêmera, faz a
 requisição HTTP real e encerra o processo ao final, sem exigir banco ou `.env`:
@@ -33,13 +103,117 @@ requisição HTTP real e encerra o processo ao final, sem exigir banco ou `.env`
 uv run --frozen poe smoke
 ```
 
+## Domínio do ciclo documental
+
+`prescriptive_maintenance.document_lifecycle` implementa a fronteira interna de
+governança sem alterar os endpoints ou o snapshot OpenAPI v1. A identidade do
+documento é lógica e estável; cada conteúdo recebe um número inteiro sequencial
+e um SHA-256 distinto. O trio identidade, versão e hash preserva a identidade
+idempotente do registro; um replay também precisa repetir o mesmo ator auditável
+para devolver o snapshot existente sem criar versão, revisão ou evento. O
+reprocessamento exige o mesmo hash da versão solicitada.
+
+| Estado atual | Próximo estado | Condição |
+| --- | --- | --- |
+| `received` | `processing` | início explícito do primeiro processamento |
+| `processing` | `pending_approval` | extração e indexação concluídas com sucesso |
+| `processing` | `failed` | falha sanitizada de uma etapa ainda não concluída |
+| `pending_approval` | `approved` | decisão com ator e motivo após os dois gates íntegros |
+| `pending_approval` | `rejected` | decisão com ator e motivo obrigatório |
+| `rejected` | `processing` | reprocessamento que reinicia os dois gates |
+| `failed` | `processing` | retry que preserva etapas concluídas e reinicia somente a falha |
+| `approved` | `superseded` | aprovação atômica de uma versão mais nova |
+| `superseded` | — | estado terminal |
+
+Uma versão nova em processamento, rejeitada ou com falha não desloca a versão
+aprovada vigente. Somente a aprovação da substituta marca a anterior como
+`superseded`; assim, nunca há promoção parcial. A elegibilidade exige ao mesmo
+tempo estado `approved`, vigência e integridade completa de extração e
+indexação. `rejected`, `failed` e `superseded` são sempre inelegíveis, mas seus
+eventos e versões permanecem no histórico.
+
+Uma etapa `succeeded` não pode regredir para `failed`. O reprocessamento de uma
+falha preserva etapas concluídas e reinicia apenas a etapa que falhou; o
+reprocessamento posterior a uma rejeição inicia uma nova passagem dos dois
+gates. Ator, motivos, código de falha, identidade e todos os demais textos de
+auditoria são validados antes de qualquer retorno idempotente. Controles,
+caracteres Unicode de formato, surrogates, noncharacters e texto que não possa
+ser codificado estritamente em UTF-8 são recusados com erros sanitizados.
+
+O serviço recebe um relógio injetável, normaliza seus valores para UTC e rejeita
+tempo ingênuo ou regressivo. O repositório em memória associa cada agregado a
+uma revisão e grava somente por compare-and-swap; uma revisão perdida produz o
+erro estável `document_concurrency_conflict`. Para comandos de transição, uma
+revisão obsoleta só é idempotente quando a revisão seguinte registra exatamente
+a mesma ação, versão, ator, motivo, hash, etapa e código aplicáveis. O CAS
+reconstrói o comando a partir do novo sufixo de auditoria e exige igualdade do
+agregado inteiro. Assim, não aceita estados fabricados nem uma versão aprovada
+marcada `superseded` sem a
+aprovação atômica da substituta. O prefixo histórico e as identidades das versões
+são append-only.
+
+### Registro documental na API v1
+
+`prescriptive_maintenance.document_registry` adapta as rotas v1 ao agregado de
+governança, sem duplicar sua máquina de estados. O nome ASCII seguro do PDF,
+normalizado sem distinção de caixa, define a identidade lógica; a primeira
+grafia recebida permanece como metadado de exibição. Trocar apenas a caixa de
+letras, inclusive em `.pdf`, não cria versão. Um nome realmente diferente é um
+novo documento lógico.
+
+Cada versão recebe um `document_id` público opaco e determinístico que cabe no
+regex congelado de v1. Repetir exatamente nome canônico, `media_type`,
+`size_bytes` e `sha256` devolve o recibo imutável do primeiro registro sem criar
+versão, revisão ou evento, inclusive sob concorrência e depois de uma transição.
+Esse `ReceivedDocument` confirma o resultado original do comando; não representa
+o estado atual. `GET /documents/{document_id}` é a projeção vigente e continua
+mostrando, por exemplo, `approved` ou `superseded` após o replay. Divergências
+materiais fecham em conflito; aprovar, rejeitar ou reprocessar repete somente o
+comando semântico exato. As decisões usam a identidade técnica fixa
+`api.v1.document_registry`; uma aprovação sem nota recebe uma razão interna
+estável, sem inventar autoria humana.
+
+Os adapters de memória e PostgreSQL implementam a mesma semântica de CAS. O
+adapter PostgreSQL reconstrói e revalida agregado e auditoria em cada leitura,
+grava metadados, versões e eventos na mesma transação e falha fechado diante de
+estado inconsistente. A migração `document_lifecycle_registry`, versão 3, é
+explícita como as demais migrações da aplicação; o startup não altera schema
+automaticamente.
+
+Há uma limitação deliberada do transporte congelado: `RegisterDocumentRequest`
+contém apenas nome, tipo, tamanho declarado e SHA-256 declarado. Não existem
+bytes, stream, assinatura, identidade de versão fornecida pelo cliente nem
+destino de armazenamento. Portanto, a API v1 **não valida o tamanho ou o hash
+contra bytes**, não grava arquivo local ou S3 e não inicia extração, OCR ou
+indexação. Representar essas garantias corretamente exige uma evolução
+explícita do contrato, como uma v2 multipart ou streaming; ela não está
+implementada aqui.
+
+## Execução em contêiner
+
+O Dockerfile multi-stage instala somente as dependências de produção pelo
+`uv.lock`, executa o Uvicorn como UID/GID `65532` e usa
+`GET /health/ready` no healthcheck. O build parte da raiz porque o lock do
+workspace é único;
+`Dockerfile.dockerignore` limita o contexto aos manifests, lock, fontes do
+pacote e ao README exigido pelos metadados Python. Os targets `context-audit` e
+`builder-audit`, executados por `uv run --frozen poe applications-audit`, provam
+o conteúdo do contexto real e a ausência de resíduos no filesystem do builder.
+
+O fluxo completo de build, start, smoke da liveness e do snapshot OpenAPI v1 e
+stop está em [`infra/README.md`](../../infra/README.md).
+
 ## Configuração
 
-`prescriptive_maintenance.settings.Settings` carrega explicitamente dois campos
-obrigatórios: `environment`, restrito a `local`, `test` ou `production`, e
-`database_url`, validado como URL PostgreSQL. As fontes usam o prefixo
-`PRESCRIPTIVE_MAINTENANCE_`; variáveis do processo têm precedência sobre o
-arquivo `.env`, lido opcionalmente em UTF-8.
+`prescriptive_maintenance.settings.Settings` exige `environment`, restrito a
+`local`, `offline` ou `aws`, e `persistence_backend`, restrito a `memory` ou
+`postgres`. O backend `memory` proíbe `database_url`; `postgres` exige essa URL
+validada. `offline` aceita somente memória. `local` e `aws` aceitam ambos os
+backends, sempre de forma explícita; isso permite que uma execução efêmera em
+AWS use os mesmos fakes em memória sem fingir que há um banco. Campos extras,
+aliases não declarados, valores parciais e perfis legados são recusados. As
+fontes usam o prefixo `PRESCRIPTIVE_MAINTENANCE_`; variáveis do processo têm
+precedência sobre o arquivo `.env`, lido opcionalmente em UTF-8.
 
 Copie `.env.example` para `.env` conforme [`infra/README.md`](../../infra/README.md)
 e carregue a configuração somente no ponto que precisar dela:
@@ -50,9 +224,1042 @@ from prescriptive_maintenance.settings import Settings
 settings = Settings()
 ```
 
-Não há valores padrão para os campos obrigatórios. Ausências e valores inválidos
-produzem `pydantic.ValidationError`; a aplicação e a liveness não instanciam
-`Settings` durante a importação ou a criação do app.
+Não há valor padrão para o perfil nem para dependências obrigatórias. A
+configuração é carregada e copiada para o tipo canônico durante o lifespan do
+FastAPI, antes de aceitar tráfego. Ausências e valores inválidos encerram o
+startup com `ApplicationStartupError` genérico, sem repetir valores ou exceções
+de parsing. A URL também é omitida da representação de `Settings`. A importação
+do alvo ASGI continua livre de I/O.
+
+Os três perfis usam a mesma porta de readiness. O backend `postgres` executa um
+probe limitado a um segundo, com conexão curta e `SELECT 1`; `memory` seleciona
+a lista vazia de dependências. O perfil e o backend validados permanecem em
+`app.state` para a composição usar exatamente a mesma decisão. Bedrock continua
+opcional e lazy: falha de geração pode degradar uma análise, mas não participa
+da liveness nem da readiness. Essa separação evita declarar o processo morto
+por uma dependência opcional e evita declarar pronto um backend PostgreSQL sem
+conseguir alcançá-lo.
+
+## Persistência mínima
+
+`prescriptive_maintenance.persistence` define agregados imutáveis, repositórios
+tipados e uma unidade de trabalho explícita. `AnalysisMetadata` registra somente
+`analysis_id`, resultado fechado da API v1, `dataset_id`, `model_id`,
+`prompt_id`, `configuration_id`, instante e referências ordenadas de evidência.
+Documentos registram identidade estável; versões registram SHA-256 e instante;
+chunks registram referência opaca e página positiva. A evidência liga a análise
+ao trio documento–versão–chunk por chaves estrangeiras compostas.
+
+`dataset_id` preserva sem prefixo ou transformação o SHA-256 minúsculo de 64
+caracteres produzido pelo pipeline canônico. `evidence_id` preserva o formato do
+contrato de geração e sua unicidade é local à análise, representada pela chave
+composta `(analysis_id, evidence_id)`; o mesmo identificador pode ser reutilizado
+por outra análise sem perder a origem de cada referência.
+
+As tabelas de metadados de análise e documentos não possuem features, linhas,
+vetores, embeddings, texto, conteúdo bruto, caminho, nome de arquivo,
+diagnóstico ou prescrição. Assim, a recuperação de uma análise devolve todos os
+IDs de versão usados sem persistir os materiais originais ou dados privados. Um
+replay com o mesmo ID e os mesmos metadados é idempotente; reutilizar o ID com
+metadados diferentes gera conflito tipado.
+`DocumentRepository.add_version()` acrescenta de forma idempotente uma versão
+imutável e seus chunks a um documento existente. Ele não reescreve nem remove
+histórico: repetir a mesma versão é uma operação vazia, enquanto associar o mesmo
+ID a outro hash, o mesmo hash a outro ID no documento ou reutilizar um ID de chunk
+gera conflito.
+
+`InMemoryUnitOfWork` é o adapter da suíte padrão e não abre rede. Cada unidade
+publica mudanças somente após `commit()` explícito; exceção, saída sem commit ou
+conflito transacional descarta todo o estado preparado. A entrada é reconstruída
+recursivamente nos tipos mínimos do módulo, de modo que subclasses e campos
+adicionais do chamador não sejam retidos. `PostgresUnitOfWork` oferece a mesma
+fronteira sobre uma conexão psycopg ociosa com autocommit desabilitado; ela não
+assume uma transação externa. Uma violação relacional retorna erro de domínio
+sanitizado e marca a unidade como `rollback-only` até `rollback()` ou a saída.
+
+As migrações `initial_analysis_metadata`, `versioned_similarity_index` e
+`document_lifecycle_registry` são aplicadas por `upgrade()` e revertidas por
+`downgrade()`. As operações são transacionais, verificam o checksum das versões
+aplicadas, serializam concorrência por lock transacional e são idempotentes no
+alvo atual. O bootstrap do Compose continua responsável somente pelo pgvector;
+migrações da aplicação são sempre chamadas explicitamente:
+
+```python
+from psycopg import Connection
+from psycopg.rows import dict_row
+
+from prescriptive_maintenance.persistence import downgrade, upgrade
+from prescriptive_maintenance.persistence.migrations import PostgresRow
+
+connection = Connection[PostgresRow].connect(database_url, row_factory=dict_row)
+upgrade(connection)
+# downgrade(connection)  # retorna o schema ao estado vazio documentado
+connection.close()
+```
+
+O teste PostgreSQL real cria e remove um schema aleatório isolado. Ele é
+opcional e só executa quando
+`PRESCRIPTIVE_MAINTENANCE_TEST_DATABASE_URL` aponta explicitamente para um banco
+de teste; sem essa variável, apenas esses casos de integração são ignorados e a
+suíte padrão permanece integralmente offline.
+
+## Acesso à fonte tabular
+
+`prescriptive_maintenance.data.consume_banner_source()` é a única porta de
+entrada autorizada para `banner.csv`. A chamada exige `input_path`,
+`manifest_path` e um consumidor binário explicitamente; não há descoberta,
+caminho padrão ou busca recursiva.
+
+O componente lê o nome aprovado, o tamanho e o SHA-256 do manifesto público,
+abre a fonte com descritor estritamente read-only e só chama o consumidor após
+validar o fingerprint inicial. Antes de devolver o resultado, calcula novamente
+o fingerprint no mesmo descritor e rejeita qualquer alteração. Os erros tipados
+diferenciam ausência, nome inesperado, tamanho, hash, mutação e permissão sem
+expor caminho absoluto ou conteúdo. Parsing tabular e interface de linha de
+comando não fazem parte deste contrato.
+
+`consume_banner_source_audited()` preserva a mesma fronteira e devolve um recibo
+imutável com o resultado do consumidor e os fingerprints de tamanho e SHA-256
+realmente observados antes e depois da chamada. A API original permanece
+retrocompatível e devolve somente o resultado. O runner de baseline usa os
+recibos para impedir que uma alteração coordenada de manifesto e fonte entre
+rodadas seja declarada sob uma identidade anterior.
+
+## Inventário e extração dos documentos PDF
+
+`extract_source_documents()` processa exclusivamente `Doc1.pdf` a `Doc6.pdf`.
+Os caminhos do diretório de origem, do manifesto e da saída local são
+obrigatórios; não há descoberta recursiva nem acesso aos outros materiais. Cada
+fonte é aberta por descritor binário read-only, validada por tamanho e SHA-256
+antes do parse e verificada novamente no mesmo descritor ao final, inclusive
+quando a integridade inicial diverge ou o parse/processamento falha. Uma mudança
+da fonte tem precedência sobre a falha intermediária.
+
+A extração nativa é preferencial. Texto nativo não vazio que seja apenas curto
+ou tenha baixa proporção alfanumérica é preservado como `native/suspect`, pois
+pode representar títulos, tabelas curtas ou localizadores válidos. Páginas sem
+texto utilizável podem ser encaminhadas a um `PageOcrAdapter`; sem adapter, elas
+permanecem explicitamente em `ocr_required`. Falhas de OCR preservam qualquer
+fallback nativo suspeito e registram um código sanitizado por página.
+Resultados OCR usam dois gates versionados: confiança média mínima de `0.80` e
+confiança pontual mínima de `0.60`. A página fica `suspect` se qualquer um deles
+falhar.
+
+`RapidOcrAdapter` é a implementação local baseada em RapidOCR e ONNX Runtime.
+O motor e seus modelos são inicializados de forma lazy somente na primeira
+página encaminhada ao OCR, com nível de log `error`; nenhuma chamada externa é
+feita. A factory ou o engine podem ser injetados para testes sintéticos.
+
+Se a saída estiver dentro de qualquer worktree Git, o próprio artefato precisa
+ser confirmado como ignorado antes de cada escrita; destino não ignorado ou
+erro nessa verificação falha fechado. Caminhos explícitos fora de repositórios
+continuam permitidos para testes sintéticos isolados, sem aceitar symlinks,
+junctions, outros reparse points ou segmentos de escape.
+
+```python
+from pathlib import Path
+
+from prescriptive_maintenance.data import RapidOcrAdapter, extract_source_documents
+
+result = extract_source_documents(
+    source_directory=Path(r"C:\caminho\local\autorizado"),
+    manifest_path=Path("data/source-manifest.json"),
+    output_directory=Path("data/processed/documents"),
+    ocr_adapter=RapidOcrAdapter(),
+)
+```
+
+O inventário `inventory.v1.json` registra as seis identidades, a versão PDF,
+contagens de método e os estados agregados, incluindo uma avaliação explícita
+do `Doc1.pdf`. Cada `extraction.v1.json` registra texto, método, estado, sinais
+de qualidade e falha sanitizada por página. Reexecuções idênticas preservam os
+mesmos bytes e não substituem os artefatos; falhas continuam visíveis e são
+tentadas novamente na próxima execução. Esses JSON contêm derivados reais e
+devem permanecer somente sob um caminho local ignorado, como `data/processed/`.
+
+## Segmentação e indexação das extrações
+
+`chunk_extracted_document()` aceita somente o mapping estruturado de um
+`extraction.v1.json`; a fronteira não recebe caminho de PDF, não descobre fontes
+e não reabre materiais originais. O parser valida a versão do schema, a
+identidade SHA-256, a ordem das páginas, os métodos e os estados emitidos pela
+SEN-43 antes de segmentar. Página é uma fronteira obrigatória; headings Markdown
+e linhas curtas em caixa alta formam seções conservadoras, sem remover o heading
+do conteúdo.
+
+A configuração padrão `document-chunking.v1` limita cada chunk a 1.600
+caracteres, usa overlap de até 200 caracteres e identifica separadamente as
+versões da limpeza e da detecção de seção. A limpeza normaliza fins de linha,
+remove somente controles técnicos delimitados, apara whitespace ao fim das
+linhas e limita sequências de linhas vazias; Unicode válido, espaços internos e
+significado não são normalizados. O `chunk_id` é o SHA-256 canônico prefixado por
+`chunk_` sobre hash do conteúdo, documento, versão da fonte, página, seção,
+posição e configuração. `document_id` permanece estável pelo nome lógico e
+`document_version` deriva do SHA-256 observado pela extração.
+
+`character_start` e `character_end` usam índices Python baseados em zero e o
+intervalo semiaberto `[start, end)` sobre o valor original de `pages[].text` no
+`extraction.v1.json`, antes da limpeza. Um mapa interno transporta cada limite
+pela remoção de NUL/DEL, normalização de CRLF, descarte de whitespace ao fim da
+linha e colapso de linhas vazias. Por isso o trecho fonte pode ter comprimento e
+bytes diferentes de `content`; reaplicar a limpeza ao trecho apontado produz o
+conteúdo do chunk. Tamanho máximo e overlap continuam medidos no texto limpo.
+
+`index_extracted_document()` usa uma porta de embeddings com resultado por
+chunk e persiste tanto sucessos quanto falhas. `LocalHashEmbeddingProvider`
+produz vetores `fake-local-hash` determinísticos e offline para CI; ele é
+explicitamente não semântico e sua dimensão integra a versão da representação. O
+`InMemoryChunkRepository` é ordenado, idempotente e rejeita colisões.
+`PgVectorChunkRepository` apenas traduz registros para linhas tipadas e exige um
+`PgVectorWriter` injetado: não abre conexão, não executa SQL e não exige serviço
+na suíte padrão.
+
+Os limites são medidos em caracteres, não em tokens, e sempre avançam por um
+limite seguro de grafema. A implementação usa somente a biblioteca padrão para
+manter juntos caractere-base, marcas Unicode, variation selectors, modificadores
+de emoji e cadeias ligadas por ZWJ; um grafema isolado maior que o teto é mantido
+inteiro e pode produzir o único chunk acima desse teto. A detecção de headings é
+heurística; por isso a configuração favorece rastreabilidade e repetibilidade,
+não uma granularidade semanticamente ótima. O overlap padrão de 12,5% aumenta
+proporcionalmente o volume armazenado, e cada registro retém conteúdo e
+proveniência completos. O provider hash comprova a integração offline, mas não
+serve para avaliar qualidade de recuperação.
+
+Quando uma página não produz chunk, seu código `page.*` original tem precedência
+no resultado e acompanha número da página, método, estado, sinais e demais
+proveniências sanitizadas; o código genérico de chunking é usado somente quando
+a extração não forneceu uma falha. Colisões e falhas de provider também
+permanecem explícitas. Chunks sem embedding continuam armazenados com vetor nulo
+e estado `failed`; estados `completed`, `attention_required`, `partial` e
+`failed` descrevem somente a indexação e nunca aprovam, rejeitam ou ocultam um
+documento. Busca vetorial, recuperação governada, lifecycle, API e UI não fazem
+parte desta fronteira.
+
+## Recuperação documental aprovada
+
+`prescriptive_maintenance.knowledge_retrieval` liga o lifecycle e os chunks por
+IDs opacos sem reabrir PDFs nem descobrir arquivos. A configuração
+`fault-knowledge-mapping.v1` contém `schema_version`, uma `mapping_version`
+auditável, `mapping_sha256` e a lista ordenada de classes canônicas com seus
+`document_ids`. O SHA-256 é calculado sobre a semântica normalizada; classes ou
+referências duplicadas, campos extras, referência documental desconhecida e
+alteração sem atualização do hash falham fechado.
+
+O arquivo real não é fornecido pelo pacote porque a associação pode ser derivada
+dos materiais locais. Ele deve ser informado por caminho explícito, por exemplo
+`data/external/knowledge/fault-knowledge-mapping.v1.json`; `data/external/` já é
+ignorado. `load_fault_knowledge_mapping()` apenas lê esse caminho, enquanto
+`fault_knowledge_mapping_json_bytes()` oferece serialização determinística para
+auditoria local. Nenhum mapeamento real é publicado pelo repositório.
+
+`ApprovedKnowledgeRetrievalService` resolve somente a classe exata configurada e
+valida, para cada documento, a versão vigente `approved`, os gates completos de
+extração e indexação e a coerência do registro indexado. Versões `rejected`,
+`failed`, `superseded`, candidatas ainda não aprovadas, versões antigas, páginas
+com falha e embeddings ausentes são removidos antes de qualquer chamada ao
+`KnowledgeChunkScorer`. O serviço não procura outra classe ou documento quando
+o conjunto fica vazio. Estados explícitos de página ou embedding inelegível não
+se confundem com corrupção: qualquer quebra estrutural, de identidade ou de
+SHA-256 em uma versão declarada íntegra pelo lifecycle aborta toda a recuperação
+antes do scorer.
+
+Cada candidato validado é congelado em tipos básicos antes do ranking. O scorer
+recebe uma cópia isolada, e qualquer mutação dessa cópia invalida o ranking; a
+evidência final é materializada somente do snapshot anterior à fronteira.
+`snapshots_are_current()` faz a conferência pontual posterior dos mesmos IDs,
+versões, páginas, seções, texto e SHA-256 contra lifecycle e índice. Essa
+operação não chama o scorer, não refaz ranking e não procura outra evidência.
+
+Os vazios distinguem por enum classe sem mapeamento, ausência de cobertura
+aprovada e ranking sem hits; indisponibilidade, integridade inválida e falha do
+scorer também permanecem tipadas. Scores precisam ser finitos, o desempate usa
+IDs e localização em ordem total e o top-k respeita o limite interno de 10. Cada
+`RankedKnowledgeEvidence` contém exclusivamente `document_id`,
+`document_version`, `chunk_id`, `page_number`, `section_id` e `score`, sem texto,
+título, caminho, nome de fonte ou vetor.
+
+Essa fronteira não implementa scorer semântico, consulta pgvector, provider,
+endpoint, persistência nova, geração ou recuperação RAG integrada. Essas
+integrações permanecem fora da SEN-56.
+
+## Recuperação governada para RAG
+
+`prescriptive_maintenance.governed_retrieval` define a porta interna consumível
+pela futura orquestração RAG. `GovernedKnowledgeRetrievalService` recebe a
+disposição tipada do modelo e encerra `normal` e `out_of_distribution` como
+`no_evidence`, sem consultar a recuperação aprovada. Uma falha sem classe
+documental encerra como `unmapped_fault`; uma classe canônica configurada é
+delegada exclusivamente ao `ApprovedKnowledgeRetrievalService`, sem fallback
+para outra classe ou busca genérica.
+
+A SEN-56 mantém o resultado content-free existente e oferece, para essa porta
+interna, `retrieve_snapshots()`. Os dois resultados derivam da mesma rotina de
+filtro, scoring, ordenação e revalidação final. O snapshot interno acrescenta o
+texto exato e seu `content_sha256` aos IDs de documento, versão, chunk, página e
+seção. Não existe uma segunda leitura depois do ranking: se lifecycle, revisão,
+identidade ou conteúdo mudarem durante o scorer, nada é materializado. O texto
+não entra no contrato HTTP, em logs ou na persistência desta tarefa.
+
+O limiar mínimo é obrigatório em `GovernedRetrievalPolicy`; versão, valor e
+schema formam um SHA-256 semântico, com o `float.hex()` do limiar para identidade
+inequívoca. Evidência com score exatamente igual ao limiar é aceita. O resultado
+preserva a ordem total e o top-k da SEN-56, copia texto e metadados na fronteira
+e aplica os mesmos limites já definidos para geração: quantidade máxima,
+4.000 caracteres por item e 24.000 no total. Conteúdo individual maior não é
+truncado e produz `retrieval_unavailable`; quando apenas o total seria excedido,
+permanece o maior prefixo ranqueado que cabe integralmente no orçamento.
+
+Ausência de cobertura aprovada, ranking vazio e itens abaixo do limiar tornam-se
+`no_evidence`; classe não mapeada torna-se `unmapped_fault`; indisponibilidade,
+corrupção, quebra do contrato do adapter e falha de ranking tornam-se
+`retrieval_unavailable`. Assim, ausência legítima não é confundida com falha
+técnica. Nenhum limiar operacional, mapeamento real ou conteúdo documental é
+versionado. Esta camada não chama geração/LLM por conta própria, não implementa
+guardrails, não altera endpoints e não adiciona banco, consulta pgvector ou
+integração com o fluxo HTTP; a composição prescritiva descrita abaixo a consome
+por sua porta tipada.
+
+## Contrato tabular de `banner`
+
+`prescriptive_maintenance.data.BANNER_COLUMN_CATALOG` é a fonte versionada e
+revisável dos metadados das 26 colunas. Cada entrada declara posição, nome,
+tipo lógico, unidade de origem, unidade canônica, nulabilidade, domínio e
+descrição operacional. A ordem do catálogo é exatamente a ordem pública de
+`data/fixtures/banner.synthetic.csv`.
+
+`BANNER_DATAFRAME_SCHEMA` materializa esse catálogo como um `DataFrameSchema`
+Pandera com `strict=True`, `ordered=True` e `coerce=False`. A função
+`validate_banner_dataframe()` devolve um relatório sanitizado: violações do
+contrato são bloqueantes e têm código estável e severidade `error`, enquanto
+`statistical_findings` permanece separado e vazio nesta etapa. O relatório não
+inclui índices nem valores de células. O validador offline aceita somente os
+códigos de `ContractViolationCode` com essa severidade canônica e exige
+`statistical_finding_count = 0` com a sequência vazia.
+
+O contrato v2 aceita `created_at` somente no perfil ISO 8601 zonado suportado,
+com `T` maiúsculo ou um único espaço ASCII entre a data e a hora completas e
+zona explícita em `Z` ou deslocamento numérico no formato `±HH:MM`. O deslocamento
+`-00:00` é recusado porque representa offset local desconhecido; `+00:00`
+permanece válido. Textos sem zona, offsets fora do intervalo, `t`/`z` minúsculos,
+espaços repetidos ou nas extremidades, segundos intercalares, datas civis
+impossíveis e demais variações são bloqueados.
+O parser preserva toda a fração decimal e normaliza o instante para UTC somente na
+representação interna usada por igualdade, ordenação, período e cadência; o
+texto do `DataFrame` não é alterado. A versão foi incrementada após uma auditoria
+demonstrar que a regra anterior rejeitava uma forma zonada válida, sem registrar
+no repositório nenhum valor observado na fonte.
+
+O contrato preserva cada coluna na unidade em que a fonte a publica;
+por isso, unidade de origem e canônica são iguais. As colunas paralelas em
+`in/s` e `mm/s`, assim como `°F` e `°C`, continuam independentes e nenhuma
+conversão é aplicada. O contrato não faz conferência cruzada; o profiler
+agregado descrito abaixo apenas mede a coerência observada. Alterar nome,
+posição, tipo, unidade, nulabilidade ou domínio exige incrementar
+`BANNER_CONTRACT_VERSION`, editar o catálogo e acrescentar ou ajustar o teste
+correspondente no mesmo pull request.
+
+`fault` é deliberadamente um rótulo bruto não vazio. O contrato não enumera o
+vocabulário real nem normaliza categorias; uma allowlist só é aplicada quando o
+chamador a fornece explicitamente. Para a fixture pública, os únicos rótulos
+autorizados nesse modo são `synthetic_healthy`, `synthetic_imbalance` e
+`synthetic_bearing_warning`. Essa lista é exclusivamente sintética e não
+representa, aproxima ou substitui as categorias da fonte original.
+
+### Factory sintética de testes
+
+`apps/api/tests/synthetic_banner_factory.py` cria tabelas pequenas diretamente
+em memória, sem ler a fixture CSV estática e sem usar aleatoriedade. O relógio,
+os identificadores e os valores são fixos e obviamente fictícios. Os writers
+CSV e Parquet exigem um diretório existente informado explicitamente pelo teste;
+nenhum caminho de saída padrão existe.
+
+| Cenário | Regra exercitada |
+| --- | --- |
+| `valid` | Produz as 26 colunas na ordem, tipos e domínios aceitos pelo contrato. |
+| `missing_column` | Remove somente uma coluna obrigatória. |
+| `extra_column` | Acrescenta somente uma coluna não declarada. |
+| `renamed_column` | Renomeia somente uma coluna declarada. |
+| `reordered_columns` | Troca apenas a ordem das duas primeiras colunas. |
+| `invalid_dtype` | Preserva os valores de rotação, mas troca somente seu tipo lógico. |
+| `null_value` | Introduz somente um rótulo nulo. |
+| `nan_value` | Introduz somente um `NaN` numérico. |
+| `infinite_value` | Introduz somente um valor numérico infinito. |
+| `invalid_timestamp` | Altera somente `created_at` para um texto fora do formato UTC declarado. |
+| `empty_fault` | Altera somente `fault` para um rótulo vazio. |
+| `physical_violation` | Coloca somente uma velocidade abaixo do limite físico inequívoco. |
+| `identical_duplicate` | Repete integralmente uma linha. |
+| `conflicting_duplicate` | Parte da duplicata idêntica e diverge somente na rotação. |
+| `coherent_unit_pairs` | Mantém relações exatas entre `in/s` e `mm/s`, e entre °C e °F. |
+| `incoherent_unit_pairs` | Parte dos pares coerentes e altera somente uma contraparte em `mm/s`. |
+| `irregular_cadence` | Altera somente um instante para produzir intervalos desiguais. |
+| `long_gap` | Altera somente um instante para produzir uma lacuna de oito horas. |
+| `label_transition` | Troca somente o rótulo da linha final. |
+| `boundary_24_hours` | Posiciona instantes exatamente dos dois lados de 24 horas. |
+| `label_unicode_nfkc` | Oferece rótulos distintos que se equivalem sob Unicode NFKC. |
+| `label_case_variants` | Oferece o mesmo texto sintético em caixas distintas. |
+| `label_space_variants` | Oferece espaços externos e internos distintos. |
+| `label_separator_variants` | Oferece hífen, sublinhado e barra como separadores. |
+| `label_collision` | Oferece dois valores brutos distintos com colisão potencial. |
+| `unknown_category` | Oferece uma categoria fora da allowlist sintética explícita. |
+
+`contract.check_failed` não possui cenário: ele é o fallback defensivo interno
+para checks Pandera não declarados e não é reproduzível por uma entrada pública
+do contrato.
+
+A factory apenas constrói entradas intencionais. Ela não faz parsing,
+normalização, limpeza, taxonomia, perfil estatístico ou divisão de dados; essas
+responsabilidades permanecem fora deste escopo.
+
+## Profiler determinístico agregado
+
+`profile_banner_dataframe()` recebe somente um `DataFrame` já carregado. A
+função não abre arquivos, não conhece caminhos locais, não chama a porta de
+acesso à fonte e não altera a tabela. A chave de análise deve ser declarada pelo
+chamador porque o contrato não presume unicidade de `id`; no exemplo abaixo,
+`id` com `created_at` é uma escolha exclusivamente sintética:
+
+```python
+from prescriptive_maintenance.data import (
+    banner_profile_json_bytes,
+    profile_banner_dataframe,
+    render_banner_profile_markdown,
+)
+
+profile = profile_banner_dataframe(
+    dataframe,
+    key_columns=("id", "created_at"),
+    allowed_fault_categories=frozenset({"synthetic_nominal", "synthetic_warning"}),
+)
+json_bytes = banner_profile_json_bytes(profile)
+markdown = render_banner_profile_markdown(profile)
+```
+
+O argumento `allowed_fault_categories` é opcional. Quando ausente, cada categoria
+observada é publicada sem nome (`label = null`) e recebe apenas um
+`unapproved_ordinal` positivo na ordem das contagens. Quando presente, somente esse
+vocabulário explicitamente confiável pode ser nomeado; categorias não aprovadas
+continuam anônimas, e categorias permitidas com contagem zero aparecem na
+distribuição. Empates produzem registros públicos indistinguíveis: o texto bruto
+jamais escolhe nomes, desempata ou reserva ordinais, portanto histogramas iguais
+produzem os mesmos bytes quando os demais indicadores e a configuração são
+mantidos. Cardinalidade, contagens e balanceamento permanecem verificáveis sem
+expor o valor bruto.
+
+O vocabulário confiável aceita somente textos não vazios codificáveis em UTF-8 e
+sem caracteres Unicode de controle, formato ou surrogate. Configuração inválida,
+inclusive item não textual, gera `BannerProfileConfigurationError`; uma célula não
+hashable que impeça a agregação de duplicatas gera `BannerProfileInputError`, sempre
+com mensagem sanitizada. `key_columns` aceita somente uma sequência textual
+ordenada; string única, `set` e `frozenset` são rejeitados por serem ambíguos.
+
+### Inventário de indicadores
+
+| Indicador | Finalidade e definição |
+| --- | --- |
+| Volume e estrutura | Registra linhas, colunas observadas e esperadas, ausências, excedentes e aderência à ordem das 26 colunas sem publicar nomes inesperados. |
+| Período e ordenação | Usa somente timestamps válidos no formato UTC do contrato; publica limites agregados do período e classifica a sequência de entrada como constante, não decrescente, não crescente ou desordenada. |
+| Cadência e lacunas | Ordena instantes UTC distintos, calcula os intervalos positivos e escolhe a moda como cadência nominal; empates escolhem o menor intervalo. Lacuna é cada intervalo estritamente maior que a cadência, e sua duração é somente o excesso agregado. |
+| Qualidade por coluna | Para cada uma das 26 posições, inclusive ausentes ou sem achados, informa presença, aderência de tipo e contagens/percentuais separados de `null`, `NaN`, infinito, domínio e categoria desconhecida. |
+| Duplicatas completas | Conta grupos idênticos e linhas excedentes além da primeira, sem devolver índices, valores ou registros. |
+| Conflitos por chave | Para a chave explicitamente declarada, conta grupos repetidos e aqueles cujos demais campos divergem; linhas com chave incompleta são apenas contabilizadas e excluídas dos grupos. |
+| Estatística numérica | Para medições `float64`, usa somente valores finitos e publica contagem, mínimo, máximo, média, desvio, três quantis, IQR, cercas e quantidade fora das cercas. `id` não recebe estatísticas descritivas para não expor distribuição de identificadores. |
+| Distribuição de rótulos | Nomeia somente categorias da allowlist confiável, representa as demais por `label = null` e ordinal agregado, inclui categorias permitidas ausentes e calcula maioria, minoria, razão maioria/minoria e entropia normalizada sem publicar valores observados não aprovados. |
+| Pares redundantes | Compara agregadamente quatro pares `in/s`–`mm/s` pela relação `mm/s = in/s × 25,4` e o par de temperatura por `°F = °C × 1,8 + 32`, publicando disponibilidade, consistência e erro absoluto máximo. |
+
+### Definições reproduzíveis
+
+- os quantis são `0,25`, `0,50` e `0,75` pelo método linear tipo 7;
+- o desvio é populacional (`ddof = 0`); as cercas são
+  `Q1 - 1,5 × IQR` e `Q3 + 1,5 × IQR`, e somente valores estritamente fora delas
+  contam como outliers;
+- estatísticas incluem valores finitos mesmo quando violam domínio, mantendo
+  observação separada de decisão; `null`, `NaN` e infinito não entram nelas;
+- cálculos de estatísticas, quantis, IQR, desvio e pares de unidade convertem cada
+  `float64` finito para sua representação decimal exata e usam precisão interna
+  suficiente para toda a faixa do tipo, evitando overflow e cancelamento em
+  somas de sinais opostos. Cada operação usa um contexto decimal completo com
+  precisão calculada, arredondamento, expoentes, flags e traps definidos
+  internamente, sem herdar o contexto decimal do processo;
+- `None`, `pd.NA` e `pd.NaT` são `null`; `NaN` IEEE é contado separadamente;
+  infinito e violação de domínio também são dimensões separadas;
+- a tolerância dos pares é o maior valor entre `1e-6` absoluto e `1e-6`
+  relativo ao maior módulo comparado; a comparação ocorre no domínio decimal
+  mesmo quando o valor convertido não caberia em `float64`;
+- todo instante aceito pelo perfil ISO 8601 zonado é normalizado para UTC com a
+  fração decimal completa aceita pelo contrato. Formas equivalentes com offsets diferentes
+  representam o mesmo instante; ordenação, distinção, cadência e lacunas usam
+  essa precisão exata;
+  limites de período usam ISO 8601 canônico com ao menos seis casas e preservam
+  todas as casas significativas adicionais;
+- números derivados e percentuais são arredondados a seis casas pelo modo
+  decimal half-even. Se um derivado finito exceder `float64` ou um valor não zero
+  ficar abaixo dessa resolução pública, o campo recebe `null`, nunca infinito,
+  `NaN` ou zero enganoso; contagens e classificações continuam calculadas com a
+  precisão interna;
+- percentuais por coluna usam células observadas, percentuais de rótulo usam
+  rótulos válidos e percentuais de pares usam comparações disponíveis. Sem
+  denominador válido, inclusive para entropia, a métrica é `null`;
+- colunas seguem o catálogo; categorias confiáveis seguem pontos de código
+  Unicode e categorias não aprovadas seguem contagem decrescente e ordinal
+  sequencial, sem nome nem qualquer ordenação derivada do valor bruto. Chaves JSON
+  seguem a declaração do esquema público.
+
+`PUBLIC_BANNER_PROFILE_SCHEMA` classifica recursivamente cada campo como
+agregado, configuração ou esquema. A mesma proteção é executada antes do JSON e
+do Markdown e recusa qualquer campo classificado como linha, caminho local,
+amostra, identificador individual, timestamp individual ou combinação
+reidentificável. O JSON usa UTF-8, indentação fixa, LF final e ordem declarada,
+de modo que a mesma entrada e configuração produzam exatamente os mesmos bytes.
+Além da classificação estrutural, os publicadores validam os valores, recusam
+texto Unicode inseguro em perfis construídos manualmente e exigem `label = null`
+com ordinal sequencial para toda categoria não aprovada. O Markdown usa uma
+descrição fixa derivada somente do ordinal para categorias anônimas e codifica
+sintaxe ativa, inclusive links e HTML, mesmo para rótulos explicitamente
+confiáveis.
+
+O profiler mede; ele não limpa, remove, imputa, converte unidades, normaliza
+rótulos nem define limiares finais de qualidade.
+
+## Baseline auditada de `banner`
+
+`run_banner_baseline()` faz um único parse por descritor em cada uma de duas
+rodadas independentes. A política CSV é integralmente registrada: UTF-8 estrito,
+linhas malformadas bloqueantes, nenhuma inferência de datas ou chunks, tokens NA
+padrão desativados e somente a célula exatamente vazia reconhecida como ausente.
+`id` é lido como `Int64` anulável para que a ausência alcance contrato e profiler,
+e só é convertido para o `int64` NumPy contratual quando está completo; entradas
+completas mantêm os tipos finais `int64`, `float64` e `string`.
+
+Cada rodada liga contrato, perfil e reconciliações ao recibo pre/post efetivo da
+porta segura. Os dois recibos devem coincidir entre si e com a identidade
+inicial do manifesto. Somente depois de todos os gates, da sanitização e da
+igualdade byte a byte, o runner grava atomicamente `baseline.v1.json` e
+`summary.md` em `data/baselines/banner/<sha256-da-fonte>/`. O Markdown é sempre
+regenerado do JSON sanitizado; o validador offline também exige definições do
+profiler canônicas e coerência entre o resultado contratual e sua contagem de
+violações. O diretório canônico deve conter exclusivamente esses dois arquivos,
+ambos regulares e sem links simbólicos; ausência, entrada extra ou tipo diferente
+é bloqueante inclusive no caminho idempotente de escrita.
+
+## Inventário categórico de rótulos de falha
+
+`normalize_fault_label()` aplica somente transformações textuais, na ordem
+versionada: Unicode NFKC, trim, colapso da allowlist explícita de whitespace,
+`casefold`, normalização dos separadores `-`, `/`, `\` e `_` para espaço e slug
+estável. A versão Unicode é fixada em `15.1.0`. O slug preserva letras e dígitos
+ASCII, representa espaço por hífen e codifica todos os demais bytes UTF-8 como
+`%XX`; nenhum caractere é transliterado ou removido silenciosamente.
+
+Nulo, tipo não textual, vazio, controles, caracteres de formato — inclusive
+bidi e zero-width —, surrogate, noncharacter e texto UTF-8 inválido produzem
+erros tipados com mensagens sanitizadas. A forma normalizada e o slug são
+campos distintos. A API de lookup exige texto válido e compara o `raw_label`
+exato; qualquer valor não inventariado gera `UnknownFaultLabelError`, mesmo
+quando sua normalização coincidiria com uma categoria conhecida.
+
+`run_fault_label_inventory()` usa a porta auditada em duas rodadas independentes.
+Cada consumidor recebe somente o `BinaryIO` não gravável e chama o parser CSV
+uma vez, com projeção explícita exclusiva de `fault`; o DataFrame de uma coluna
+é descartado dentro da rodada. O runner reconcilia a soma das frequências e a
+cardinalidade com a baseline pública, compara os bytes categóricos das rodadas e
+só então grava atomicamente
+`data/inventories/banner/<source-sha>/fault-labels.v1.json`.
+
+Colisões de raws no mesmo `normalized_label` e de formas normalizadas distintas
+no mesmo slug são detectadas antes da escrita. Uma colisão normalizada exige a
+aprovação explícita do fingerprint exato do grupo e fica marcada como
+`approved_textual_equivalence`; colisão de slug permanece bloqueante. A
+aprovação é somente da equivalência textual produzida pelo pipeline e não cria
+taxonomia, classe operacional ou equivalência semântica.
+
+Quando há colisão normalizada ainda não aprovada, o resultado bloqueado oferece
+`FaultLabelCollisionGroup` imutável com `group_id`, versão, destino normalizado
+e membros categóricos, sem frequências ou dados por linha. O `group_id` vincula
+esses quatro elementos; assim, o P.O. pode revisar o grupo exato antes de
+fornecer uma allowlist do tipo `Set`. Sequências ordenadas ou outros tipos são
+recusados por um gate tipado.
+
+O JSON contém exatamente os 151 mapeamentos categóricos autorizados com
+frequência global, versões de schema/normalização/Unicode, marca
+`approved_categorical_only`, `source_sha256` da baseline, recibos pre/post,
+reconciliações, decisões de colisão aprovadas e `inventory_id` por SHA-256 do
+corpo canônico. Cada decisão persistida repete o grupo categórico exato e sua
+resolução; o validador a compara com os grupos recalculados, além de conferir o
+ID. O arquivo não contém linha, ocorrência, identificador, timestamp, sensor,
+medição, caminho local, host ou usuário. `load_fault_label_inventory()` e
+`validate_fault_label_inventory()` verificam chaves duplicadas, campos extras,
+tipos exatos, ordem, serialização canônica, números não finitos, ID, conteúdo e
+localização somente com o inventário, manifesto e baseline públicos; nenhuma
+delas abre `banner.csv`.
+
+## Política de qualidade e outliers
+
+`data/policies/banner_quality_policy.v1.json` é a única fonte canônica das regras
+de qualidade do banner. `load_banner_quality_policy()` carrega e valida o esquema
+estrito contra o contrato v2 e as definições do profiler v1;
+`identify_banner_quality_policy()` calcula o SHA-256 da serialização JSON canônica
+de toda a semântica, sem incluir o próprio identificador. Reordenações
+equivalentes não alteram o ID, mas qualquer mudança semântica exige outro ID.
+
+As enums públicas `ReasonCode` e `Action`, a ordem total dos motivos e o índice
+imutável `rule_id` → motivo + ação permitem consulta sem duplicar regras em
+código. A ação efetiva é única na ordem `reject` > `correct_deterministically` >
+`map` > `flag` > `keep`, enquanto `resolve_quality_rules()` preserva todos os
+motivos e `QualityMatch` concorrentes. Cada match contém somente contexto
+allowlisted de coluna, relação e coluna confiável, sem valores por registro; uma
+correção unitária exige relação conhecida, alvo e contraparte confiável
+compatíveis. Depois da deduplicação exata, cada relação admite no máximo uma
+prova determinística e não pode misturá-la com um match ambíguo. A API revalida
+a política e retorna `effective_action`, sem antecipar uma disposição de ledger
+ou alterar linhas.
+
+`render_banner_quality_policy_markdown()` deriva a
+[visão humana pública](../../docs/data/banner-quality-policy.md) da política e,
+quando fornecidos explicitamente, dos bytes do JSON agregado da baseline
+rastreada. Esses bytes passam pela validação integral da API pública da baseline
+contra a identidade aprovada no manifesto antes da comparação. O módulo não
+descobre nem acessa materiais originais e não implementa limpeza, correção por
+registro, ledger ou remoção de outliers.
+
+## Fronteira de geração prescritiva
+
+`prescriptive_maintenance.generation` define o contrato
+`prescriptive-generation.v1` para o diagnóstico recebido do modelo, evidências
+fornecidas explicitamente, avaliação de suporte documental, prescrições,
+citações e warnings. O diagnóstico de entrada contém um `fault_code` e um resumo
+técnico imutáveis; o provider só pode avaliar seu suporte documental e deve ecoar
+o código exatamente, sem substituir ou reinventar o diagnóstico.
+
+Citações carregam somente o `evidence_id`; origem e localizador permanecem nos
+metadados confiáveis da evidência de entrada e não podem ser inventados pelo
+provider. Avaliações suportadas e prescrições exigem citações conhecidas,
+enquanto evidência insuficiente ou conflitante proíbe prescrições. A requisição
+aceita no máximo 12 evidências, limita cada conteúdo a 4.000 caracteres e o
+conjunto a 24.000 caracteres; a serialização ordena os itens por `evidence_id`.
+
+O prompt `prescriptive-generation-system.v2` é um recurso versionado do pacote.
+Cada conteúdo aparece somente em um envelope JSON
+`untrusted-document-envelope.v1`, marcado como não confiável, com SHA-256 e
+sentinels escolhidos deterministicamente sem colisão com o próprio texto. O JSON
+faz o escaping; controles inseguros, caracteres de formatação, substitutos
+Unicode isolados e pontos de código reservados são recusados pelo gate, enquanto
+tabulações e quebras de linha permanecem dados escapados. Frases como “ignore
+instruções” não são classificadas por blacklist: continuam confinadas ao campo
+documental e não alteram a estrutura da requisição.
+
+`RagGuardrailService` aceita somente o tipo exato do diagnóstico imutável e um
+`GovernedRetrievalResult` válido com estado `evidence`. Ausência, classe não
+mapeada, indisponibilidade, texto em branco, identidade de citação ambígua,
+conteúdo estruturalmente inseguro ou divergência entre diagnóstico e classe
+recusam antes do provider. Toda recusa contém código, motivo e próxima ação
+fixos, sem texto documental. Evidência válida é convertida sem lookup adicional:
+`chunk_id` torna-se o identificador citável e documento, versão, página, seção e
+chunk formam o localizador confiável.
+
+O mesmo resultado é conferido por `snapshots_are_current()` imediatamente antes
+e depois da chamada. A porta governada verifica primeiro a identidade da política
+e então delega os mesmos snapshots à recuperação aprovada, que consulta lifecycle
+e índice sem executar busca, scorer ou ranking. Mudança de política, versão,
+status, identidade, texto ou hash fecha a execução; indisponibilidade da
+conferência retorna `currentness_unavailable`, enquanto divergência comprovada
+retorna `stale_evidence`; ambas recusam sem expor o detalhe interno.
+Isso reduz a janela TOCTOU, mas não cria transação ou lease: uma alteração depois
+da segunda conferência e antes do consumo ainda exige coordenação operacional da
+orquestração futura.
+
+O gate posterior rejeita campos extras, chaves JSON duplicadas, números não
+finitos, versão incompatível, estrutura inválida, código de falha alterado e
+citações ausentes, repetidas ou fora do conjunto recuperado. Prescrição só é
+aceita quando o schema declara suporte e cada citação pertence exatamente aos
+snapshots fornecidos e ainda atuais. Narrativas validadas continuam acessíveis
+ao domínio, mas texto documental, prompt montado e output bruto ficam fora de
+`repr`; erros de provider, caminhos e detalhes sensíveis são substituídos por
+recusas sanitizadas.
+
+`FakeGenerationProvider` produz resposta sintética determinística sem ler
+arquivos, rede, ambiente ou credenciais. `BedrockGenerationProvider` implementa
+a mesma porta por uma fábrica de cliente injetada pelo chamador; sua configuração
+é desabilitada por padrão e a fábrica só é usada durante uma chamada explícita a
+`generate_prescription()`. O adaptador não importa SDK AWS, não descobre
+credenciais e publica somente contagens de tokens inteiras e não negativas;
+erros, envelopes inválidos e metadados extras são substituídos por resultados
+genéricos e sanitizados.
+
+Os gates comprovam estrutura, identidade, atualidade e pertencimento das
+citações; não comprovam semanticamente que uma frase é sustentada pelo trecho e
+não detectam contradição textual geral. O conflito bloqueado antes do provider é
+somente a colisão estrutural de identidades; uma saída de insuficiência ou
+`evidence_conflict` é tratada como recusa segura, não como prova semântica. A
+resposta determinística do provider fake valida contratos e repetibilidade, mas
+não demonstra resistência semântica universal a prompt injection. A
+fronteira isolada não persiste resultados nem configura infraestrutura AWS. A
+composição explícita da SEN-46 a reutiliza sem mover essas responsabilidades para
+o guardrail.
+
+## Orquestração prescritiva interna
+
+`PrescriptionOrchestrationService` compõe a porta de recuperação governada e o
+`RagGuardrailService` sem duplicar filtro documental, schema, citações ou
+revalidação de vigência. A entrada é um `ModelPrediction` validado e copiado:
+diagnóstico público, suporte heurístico, identidade do modelo e vizinhos opacos
+são preservados nos resultados. A chave canônica de recuperação identifica a
+classe documental usada somente pelo contrato de geração; ela não substitui o
+código público do diagnóstico.
+
+Somente `FAULT` com chave documental e resultado governado `evidence` alcança os
+guardrails. `NORMAL`, `OUT_OF_DISTRIBUTION`, falha sem chave, `no_evidence` e
+`unmapped_fault` encerram como `skipped`, sem provider. Indisponibilidade de
+recuperação, currentness ou provider encerra como `degraded`; saída sem citação,
+schema inválido, evidência obsoleta e demais violações determinísticas encerram
+como `refused`. Todos esses estados carregam código, mensagem e próxima ação
+allowlisted. Nenhum resultado carrega snapshot, conteúdo, prompt ou output raw.
+
+A chamada síncrona ao provider usa um slot por instância, adquirido
+atomicamente antes de criar a thread daemon. Não existe fila ou retry. O caller
+espera no máximo o timeout explícito, estritamente positivo e limitado a 120
+segundos. Se a chamada ultrapassa o limite, o slot continua retido até a própria
+execução tardia sair pelo `finally`; novas tentativas recebem `provider_busy` sem
+criar thread ou nova chamada. A conclusão tardia é descartada e não consegue
+alterar o resultado já devolvido.
+
+Essa fronteira não torna um provider síncrono cancelável. Se ele nunca retornar,
+o único slot da instância permanece ocupado; a recuperação operacional é
+substituir a instância depois de tratar a dependência. O timeout cobre a chamada
+ao provider, enquanto recuperação e currentness dependem de timeouts próprios
+nos adapters. Essa escolha limita crescimento de chamadas órfãs sem inventar
+cancelamento cooperativo ou um executor global.
+
+Os metadados contêm somente o ID real
+`prescriptive-generation-system.v2`, um `provider_id` estável configurado,
+latência medida por relógio monotônico injetado e `ProviderUsage` validado. Essa
+latência cobre a fase completa entre o gate inicial de currentness e a
+revalidação final, incluindo provider; não é uma métrica isolada da rede ou do
+modelo. Uso de uma `ProviderResponse` válida permanece auditável mesmo quando o
+conteúdo é insuficiente ou falha no gate posterior; erro, timeout e envelope
+inválido não inventam contadores. Relógio hostil, não finito, regressivo ou cujo
+delta transborda fecha como `timing_unavailable` e descarta a geração.
+
+A composição é pura em relação ao domínio: não persiste, não mantém cache
+global, não repete a chamada e não produz efeito além do provider explicitamente
+injetado. A suíte padrão usa o `FakeGenerationProvider` e doubles sintéticos;
+nenhuma chamada Bedrock live ocorre. `IntegratedAnalysisService` executa o
+modelo antes desta camada e a injeta na rota somente por composição explícita;
+o modo `artifacts` realiza essa composição após validar o manifesto. A segunda revalidação de vigência não
+elimina uma alteração posterior. Suporte estrutural e citações válidas também
+não provam, por si sós, a correção semântica de uma prescrição.
+
+## Integração explícita da análise
+
+`IntegratedAnalysisService` fecha a jornada de `POST /analysis` sem alterar o
+OpenAPI v1. Uma autorização imutável liga exatamente dataset, modelo, índice,
+policy de recuperação, mapeamento documental, prompt, provider, timeout e a
+política sem fallback que projeta falha para prioridade pública. O binding da
+recuperação vem da policy interna e da `FaultKnowledgeMapping` realmente
+carregada, sendo conferido no construtor e novamente por resultado.
+
+Modelo e índice devem devolver o mesmo ranking por identidade, posição, classe
+e distância finita dentro de `1e-6`. Citações públicas incluem somente a união
+das evidências usadas pela geração aceita; a auditoria persiste todas as
+referências recuperadas sem conteúdo. Projeção e cópias defensivas precedem o
+commit, e o cache process-local só é publicado depois dele. O relatório com a
+matriz dos cinco estados, decisões, testes e riscos está em
+[`docs/validation/analysis-integration.md`](../../docs/validation/analysis-integration.md).
+
+## Benchmark local da análise
+
+`prescriptive_maintenance.analysis_benchmark` monta a integração por injeção
+explícita e exercita o `POST /analysis` real com duas jornadas inteiramente
+sintéticas: geração aceita e falha de provider projetada como `degraded`.
+Wrappers nas próprias portas medem modelo com paridade do índice, recuperação e
+provider, enquanto o timer HTTP cobre somente o `client.post()` com o payload já
+preparado. A serialização da resposta e o logging operacional da aplicação,
+incluindo serialização JSON e I/O dos handlers de
+`prescriptive_maintenance.requests`, acontecem dentro de `client.post()` e,
+portanto, entram em `http_total`. A validação da resposta e a emissão dos eventos
+de camada do próprio benchmark ocorrem depois dos timers, de modo que um sink
+lento desses eventos não altera as distribuições. Aquecimento e amostras medidas
+permanecem separados, e falhas não entram nos percentis válidos de geração.
+
+O pico de `tracemalloc` vem de uma segunda passagem exclusiva de memória, com
+serviço, aplicação e provider sintético novos. Nenhum timer, percentil, contagem
+de erro ou uso de provider dessa passagem alimenta as métricas temporizadas. A
+janela de memória ainda cobre a serialização da resposta e o logging operacional
+da aplicação; somente preparação da requisição, validação pelo harness e eventos
+de camada do benchmark ficam fora dela.
+
+O resultado liga commit, digest canônico sanitizado da árvore, lock, runtime,
+configuração, seed e bindings sintéticos, revalidando commit, estado e conteúdo
+tracked/untracked dirty e `uv.lock` ao final sem publicar caminhos. A visão
+principal é por cenário; o agregado secundário chama-se
+`synthetic_scenario_mix` e explicita que percentis usam sucessos, enquanto a taxa
+de erro inclui a mistura deliberada. Contadores do fake são `simulated`, custo
+fica `not_available` e o maior pico de `tracemalloc` por requisição representa
+somente alocações Python rastreadas, não RSS ou memória nativa. Nenhum material
+original, artefato local, rede, AWS ou provider pago é acessado. A captura falha
+de forma tipada se o índice contiver `assume-unchanged` ou `skip-worktree`, pois
+essas flags poderiam ocultar bytes rastreados do status:
+
+```powershell
+uv run --frozen python -m scripts.analysis_benchmark
+uv run --frozen python -m scripts.analysis_benchmark --format markdown
+```
+
+O protocolo, a interpretação dos campos e os limites estão em
+[`docs/validation/analysis-benchmark.md`](../../docs/validation/analysis-benchmark.md).
+
+## Golden set ponta a ponta
+
+`prescriptive_maintenance.product_golden` carrega exclusivamente a fixture
+versionada `apps/api/tests/golden/product_journeys.v1.json` e reproduz os cinco
+estados públicos pelo `POST /analysis`. A mesma execução registra metadados
+documentais por HTTP, conclui os gates de processamento pela aplicação e decide
+aprovação e rejeição novamente por HTTP, sempre com repositórios em memória.
+
+O provider oficial `FakeGenerationProvider` é usado atrás dos guardrails reais.
+O relatório prova zero chamadas para ausência e rejeição documental, uma chamada
+recusada para citação inventada e chamadas distintas de sucesso e falha nos
+estados `documented_fault` e `degraded`. As métricas são contagens determinísticas
+e separadas de modelo, recuperação e geração; incluem versões, hashes de policy e
+configuração, sem features, conteúdo documental, prompt ou output bruto.
+
+```powershell
+uv run --frozen poe golden-e2e
+```
+
+O JSON sanitizado é escrito em stdout. A suíte funcional confere o hash da
+fixture, os resultados, os deltas de chamadas, a correspondência da citação com
+a evidência aprovada e a estabilidade do relatório. O desenho e os limites estão
+em
+[`docs/validation/product-golden-e2e.md`](../../docs/validation/product-golden-e2e.md).
+
+## Pipeline canônico local
+
+`load_canonical_pipeline_config()` valida a configuração versionada que mapeia
+as 26 colunas de origem para metadados, target, exclusões justificadas e 18
+features `float64` disponíveis no instante do evento. As representações
+redundantes em °F e `in/s` não entram nas features; quando divergem das colunas
+canônicas confiáveis, a política registra uma correção determinística no ledger
+sem alterar a fonte.
+
+`build_banner_dataset()` carrega primeiro o inventário categórico validado e abre
+`banner.csv` uma única vez pela porta auditada e estritamente read-only. Cada
+linha recebe uma disposição de qualidade e exatamente um destino entre `train`,
+`validation`, `test`, `purge` e `rejected`. O target textual é mapeado exatamente
+para o slug aprovado, mas não participa de ordenação, ajuste, agrupamento ou
+split: ocorrências usam somente ordem temporal estável, gap e duração. O limiar
+de gap converge com ajuste exclusivo nas ocorrências da partição final de
+treino; o manifesto registra a quantidade e o hash de pertencimento desse fit.
+Uma nova ocorrência começa quando o gap é estritamente maior que o limiar ou
+quando sua duração alcança exatamente 86.400 segundos, portanto toda ocorrência
+tem duração estritamente menor que 24 horas. A divisão 70/15/15 preserva
+ocorrências inteiras, purga as fronteiras pelo mesmo gap e ajusta cercas IQR
+somente em treino. Apenas depois da partição o target entra nos três artefatos de
+modelagem, sob o nome `y`.
+
+O destino contém exatamente `canonical.parquet`, `dispositions.parquet`,
+`train.parquet`, `validation.parquet`, `test.parquet` e `manifest.json`. O
+manifesto vincula fonte, configuração, schemas, política, inventário e
+`uv.lock`; também reconcilia linhas, ocorrências, disposições, destinos,
+partições, hashes físicos/lógicos e gates de leakage. `check_banner_dataset()`
+carrega as identidades públicas aprovadas e refaz essas provas offline com
+schema estrito, referências cruzadas e cobertura exata de destinos, sem
+reescrever arquivos.
+
+Os comandos exigem todos os caminhos explicitamente. Antes de qualquer escrita,
+o próprio build exige que um destino dentro de uma worktree Git esteja realmente
+ignorado; erros de consulta, escapes e componentes que sejam links ou junctions
+bloqueiam a operação. Temporários externos a worktrees Git continuam permitidos.
+Nunca copie a fonte para a worktree:
+
+```powershell
+git check-ignore data/processed/banner/run-local
+uv run --frozen poe data-build `
+  --input C:/caminho/autorizado/banner.csv `
+  --manifest data/source-manifest.json `
+  --inventory data/inventories/banner/<source-sha>/fault-labels.v1.json `
+  --baseline-json data/baselines/banner/<source-sha>/baseline.v1.json `
+  --baseline-markdown data/baselines/banner/<source-sha>/summary.md `
+  --lock uv.lock `
+  --output data/processed/banner/run-local
+uv run --frozen poe data-check `
+  --manifest data/source-manifest.json `
+  --inventory data/inventories/banner/<source-sha>/fault-labels.v1.json `
+  --baseline-json data/baselines/banner/<source-sha>/baseline.v1.json `
+  --baseline-markdown data/baselines/banner/<source-sha>/summary.md `
+  --lock uv.lock `
+  --output data/processed/banner/run-local
+```
+
+As saídas do CLI são somente agregados sanitizados. Testes e CI exercitam o
+pipeline exclusivamente com dados sintéticos; derivados reais permanecem
+locais e ignorados.
+
+## Busca k-NN local
+
+`prescriptive_maintenance.modeling` implementa a busca determinística de
+históricos semelhantes evoluída da baseline da SEN-42 e da política de
+abstenção da SEN-51. `fit_knn_model()` aceita a partição
+de treino com as 18 features na ordem canônica e `y`, seu hash SHA-256 e,
+opcionalmente, a validação acompanhada do próprio hash. Qualquer coluna, ordem,
+tipo ou número não finito divergente é recusado. O contrato canônico não admite
+ausências, portanto a baseline não imputa. `StandardScaler` é ajustado
+exclusivamente no treino; validação nunca refaz seu estado.
+
+A busca exata em memória usa apenas distância euclidiana no espaço padronizado.
+O `default_top_k` versionado define o conjunto decisório calibrado. O `top_k`
+público, entre 1 e 10, controla somente quantos vizinhos opacos são devolvidos
+como evidência; alterar esse valor não muda target, suporte, margem, disposição
+ou motivo de abstenção. A busca calcula o maior dos dois limites, decide com os
+primeiros `default_top_k` disponíveis e recorta apenas a evidência solicitada.
+Distâncias empatadas usam a referência opaca e votos empatados usam soma de
+distâncias e depois o target canônico. O suporte heurístico combina a proporção
+de votos da classe vencedora e a menor distância em relação ao limiar; não é
+probabilidade ou autorização para agir. A margem de voto registra a diferença
+normalizada entre a primeira e a segunda classe.
+
+Os limiares são congelados com até 512 posições determinísticas de validação.
+Sem validação, cenários locais e sintéticos com pelo menos duas linhas usam
+somente leave-one-out real do treino; uma linha isolada falha em vez de ser
+rotulada como leave-one-out. O teste não faz parte da assinatura do fit.
+Distância estritamente acima
+do limiar, condição candidata com suporte raro ou margem menor ou igual ao limiar geram,
+respectivamente, `distance_out_of_distribution`, `rare_class_support` ou
+`inconclusive_vote`. A política, os quantis, os limites e os hashes das
+partições fazem parte do `model_id`.
+
+O núcleo preserva `target_slug` internamente e liga o artefato schema/model 3 à
+política `operating-states.v1`. Ela reconhece somente os valores inteiros
+`normal`, `baseline`, `teste`, `acelerando` e `motor_desligado`, normalizando
+caixa, acentos e hífen para underscore. Não existe busca por substring, alias de
+dataset ou allowlist configurável por classes observadas; uma quase colisão continua
+problemática e duas classes que normalizem para o mesmo estado bloqueiam o fit.
+
+`KnnModelPortAdapter` interpreta o voto apenas como condição candidata baseada
+em históricos. Uma candidata operacional aceita produz `NORMAL`, preserva o
+shape OpenAPI v1 com um `Diagnosis` que informa o estado canônico e mantém
+`retrieval_key=null`; o campo público congelado `fault_code` dos seus vizinhos
+também usa `operating_state_<estado-canônico>`, sem expor o hash interno de
+falha. Ela nunca aciona RAG ou prescrição. Uma candidata
+problemática aceita produz `FAULT` com chave documental possível. Uma abstenção
+produz `OUT_OF_DISTRIBUTION`, sem diagnóstico ou chave. `support_score` permanece
+heurística, não probabilidade ou autorização para agir.
+
+`save_knn_model()` grava somente `manifest.json` e três arrays `.npy`, sempre em
+destino ignorado quando está dentro de uma worktree. O manifesto fixa schema,
+compatibilidade, configuração, labels, estado completo do `StandardScaler`,
+política de abstenção, hashes e `model_id`. `load_knn_model()` usa
+`allow_pickle=False`, rejeita arquivo ausente ou extra, bytes alterados, campos
+duplicados, thresholds inválidos, versões incompatíveis, arrays inválidos e
+identidade divergente. O loader aceita somente schema/model 3; artefatos v2
+falham fechados e precisam de rebuild, sem rebind silencioso. A carga também
+exige que leave-one-out use o hash do
+treino e a contagem determinística esperada, enquanto validação deve possuir
+hash distinto. Os arrays reais contêm derivados por registro e nunca
+devem ser versionados ou publicados.
+
+A factory HTTP exige um modo explícito. `synthetic_demo` injeta os fakes;
+`artifacts` só conecta o adapter real quando a autorização também vincula o
+índice equivalente. Nenhum artefato privado é aprovado pelo repositório.
+As evidências históricas permanecem em
+[`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md) e
+[`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).
+O estado atual está no
+[`model card v3`](../../docs/model-cards/temporal-knn-v3.md).
+
+## Índice de similaridade versionado
+
+`save_similarity_index_from_knn_artifact()` recebe somente um artefato k-NN v3
+que passou integralmente por
+`load_knn_model()`. A saída local contém
+`manifest.json`, estado do pré-processador em JSON, metadados opacos dos
+registros em JSON e `vectors.npy` `float32`. O manifesto fixa `dataset_id`,
+`schema_id`, versões de feature, pré-processador, índice e configuração,
+dimensão 18, métrica euclidiana, quantidade de registros, identidade do modelo
+de origem e hashes físicos e lógicos.
+
+`load_similarity_index()` exige o conjunto exato de arquivos e serialização JSON
+canônica. Compatibilidade e hashes físicos são validados antes de abrir o array;
+a carga NumPy usa sempre `allow_pickle=False`, e os hashes lógicos e a identidade
+de conteúdo são recalculados antes de devolver o índice imutável. Dimensão
+divergente, números não finitos, versão, configuração, hash ou identidade
+incompatível bloqueiam a operação.
+
+`SimilarityIndexPort` congela a mesma consulta para os dois adapters. O seletor
+carrega o `index_id`, o `model_id` de origem e toda a compatibilidade de dataset,
+schema, versões e configuração; qualquer divergência falha antes da busca. A
+consulta usa features cruas na ordem canônica, aplica apenas o estado JSON
+verificado, filtra opcionalmente por `fault_code` e ordena por distância
+crescente seguida de ID opaco crescente. `top_k` permanece entre 1 e 10. O
+adapter em memória faz varredura exata; o adapter PostgreSQL usa o operador
+euclidiano do pgvector com o mesmo desempate. A construção do adapter valida
+integralmente os vetores instalados. Em cada consulta, manifesto, quantidade e
+top-k do banco são lidos no mesmo snapshot `READ ONLY`/`REPEATABLE READ`;
+cardinalidade, IDs, ordem, metadados e distâncias são comparados ao top-k
+canônico vetorizado do artefato imutável em memória antes da resposta.
+
+A migração `versioned_similarity_index`, versão 2, acrescenta somente o
+manifesto instalado e seus registros opacos com `public.vector(18)`. Não há
+índice aproximado nesta versão: o contrato `exact-flat.v1` prioriza paridade e
+reprodutibilidade para a baseline. `install_similarity_index()` é transacional,
+idempotente para replay byte a byte e rejeita colisões ou conteúdo divergente;
+a conexão continua pertencendo ao chamador. Migrações 1 e 2 compartilham o
+mesmo runner, checksum e advisory lock.
+
+Os testes PostgreSQL usam schema aleatório descartável e comprovam
+`up/down/up`, replay concorrente, rollback de escrita parcial e paridade exata
+com empates, filtros e conjunto vazio. Sem
+`PRESCRIPTIVE_MAINTENANCE_TEST_DATABASE_URL`, eles são ignorados e a suíte
+padrão permanece offline. Nenhum artefato real é instalado pelos testes. A
+justificativa e os limites estão em
+[`docs/validation/similarity-index.md`](../../docs/validation/similarity-index.md).
+
+## Avaliação temporal reproduzível
+
+`prescriptive_maintenance.modeling.evaluation` congela identidades, hashes,
+política, métricas e metodologia antes de abrir um holdout. O plano é
+serializado canonicamente e seu SHA-256 é verificado antes do opener. O cálculo
+usa distância euclidiana exata em lotes com memória de trabalho limitada, aplica
+a mesma decisão do modelo e audita uma amostra contra `predict_candidate()`.
+
+O relatório schema 2 separa o objetivo operacional primário em `candidate_*`
+antes da abstenção, `selective_*` somente entre aceitas, cobertura e
+`abstained` com motivos. Os dois recortes incluem uma baseline tipada de
+candidata constante problema, com fórmula, numerador e denominador explícitos.
+O diagnóstico exato anterior permanece secundário para todas as linhas e para
+classes que existem no treino: top-1, Hit/Recall@K, MRR, baseline majoritária,
+cobertura, abstenção e acurácia seletiva. Latência é medida após warmup e com
+cache aquecido. O pico primário usa working set do processo no Windows ou
+`ru_maxrss` no Unix; `tracemalloc` aparece apenas como complemento. Plataforma
+sem suporte declara a métrica indisponível.
+
+O CLI exige derivados já aprovados, não oferece flags de tuning e nunca
+sobrescreve um relatório existente:
+
+```powershell
+uv run --frozen python -m prescriptive_maintenance.modeling.evaluation `
+  --dataset-manifest "<derivado>/manifest.json" `
+  --holdout "<derivado>/test.parquet" `
+  --model-artifact "<artefato-knn-v3>" `
+  --index-artifact "<indice-versionado>" `
+  --report-output "data/processed/sen-78-evaluation/evaluation-report.v2.json"
+```
+
+Artefatos e relatórios reais permanecem ignorados. O índice é validado como
+âncora de identidade e compatibilidade; o benchmark avalia o k-NN exato em
+memória, não PostgreSQL/pgvector. No holdout já observado, a candidata binária
+pré-abstenção obteve 97,3756% de acurácia bruta, abaixo da baseline
+sempre-problema de 24.446/24.768 (98,6999%). Entre aceitas, 9.547/9.843
+(96,9928%) também ficou abaixo da baseline de 9.616/9.843 (97,6938%). O sinal
+acima do trivial se limita à acurácia balanceada e aos recalls: 59,4426% e
+20,4969% de recall operacional antes da abstenção, contra 50% e 0% da baseline
+constante. A cobertura foi 39,7408%; entre aceitas, o recall operacional foi
+22,4670%. Esses resultados continuam insuficientes, e a acurácia bruta inclui
+linhas depois abstidas, portanto não representa o comportamento final. Nenhum
+threshold foi alterado pelo holdout, que não constitui estimativa independente.
+O [relatório histórico](../../docs/validation/model-evaluation.md), a
+[correção v2](../../docs/validation/model-evaluation-v2.md) e o
+[model card v3](../../docs/model-cards/temporal-knn-v3.md) registram os
+denominadores e a decisão de não aprovar automação.
 
 ## Verificações
 
