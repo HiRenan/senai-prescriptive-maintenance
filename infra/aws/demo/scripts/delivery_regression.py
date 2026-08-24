@@ -2050,6 +2050,37 @@ def prove_inventory_is_fail_closed() -> int:
         OrphanInventoryError,
     )
 
+    blank_output_query = InventoryQuery(
+        name="synthetic optional blank",
+        arguments=("synthetic",),
+        collection_path=("Items",),
+        predicate=lambda item: item == "residual",
+        allow_missing_collection=True,
+        allow_empty_output=True,
+    )
+
+    def blank_output_runner(arguments: tuple[str, ...]) -> CommandResult:
+        del arguments
+        return CommandResult(0, " \n", "")
+
+    scan_inventory((blank_output_query,), blank_output_runner)
+    expect_failure(
+        lambda: scan_inventory((query,), blank_output_runner),
+        OrphanInventoryError,
+    )
+
+    invalid_blank_query = InventoryQuery(
+        name="synthetic invalid blank",
+        arguments=("synthetic",),
+        collection_path=("Items",),
+        predicate=lambda item: item == "residual",
+        allow_empty_output=True,
+    )
+    expect_failure(
+        lambda: scan_inventory((invalid_blank_query,), blank_output_runner),
+        OrphanInventoryError,
+    )
+
     def residual_runner(arguments: tuple[str, ...]) -> CommandResult:
         del arguments
         return CommandResult(0, '{"Items":["residual"]}', SENSITIVE_MARKER)
@@ -2091,6 +2122,37 @@ def prove_inventory_is_fail_closed() -> int:
     )
     if len(bucket_queries) != 1:
         raise DeliveryRegressionError("Inventário não fixa scan de buckets S3.")
+
+    blank_list_names = {
+        "SQS queues",
+        "AWS Budgets",
+        "CloudFront distributions",
+        "CloudFront origin access controls",
+    }
+    blank_list_queries = tuple(
+        candidate for candidate in actual_queries if candidate.allow_empty_output
+    )
+    if {
+        candidate.name for candidate in blank_list_queries
+    } != blank_list_names or not all(
+        candidate.allow_missing_collection and candidate.allow_empty_output
+        for candidate in blank_list_queries
+    ):
+        raise DeliveryRegressionError(
+            "Inventário não limita respostas vazias às listas AWS aprovadas."
+        )
+    origin_access_queries = tuple(
+        candidate
+        for candidate in actual_queries
+        if candidate.name == "CloudFront origin access controls"
+    )
+    if len(origin_access_queries) != 1 or origin_access_queries[0].arguments != (
+        "cloudfront",
+        "list-origin-access-controls",
+    ):
+        raise DeliveryRegressionError(
+            "Inventário não usa a operação CloudFront canônica."
+        )
 
     domain_queries = tuple(
         candidate

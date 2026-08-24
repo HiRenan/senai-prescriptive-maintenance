@@ -125,6 +125,7 @@ class InventoryQuery:
     allow_missing_collection: bool = False
     single_object: bool = False
     allow_not_found: bool = False
+    allow_empty_output: bool = False
 
 
 def safe_environment(host_environment: Mapping[str, str]) -> InventoryEnvironment:
@@ -445,6 +446,7 @@ def inventory_queries(
             ("QueueUrls",),
             final_segment(queue_names),
             allow_missing_collection=True,
+            allow_empty_output=True,
         ),
         InventoryQuery(
             "IAM roles",
@@ -498,6 +500,8 @@ def inventory_queries(
             ("budgets", "describe-budgets", "--account-id", account_id),
             ("Budgets",),
             exact_name("BudgetName", {f"{name}-monthly-cost"}),
+            allow_missing_collection=True,
+            allow_empty_output=True,
         ),
         InventoryQuery(
             "CloudFront distributions",
@@ -505,13 +509,15 @@ def inventory_queries(
             ("DistributionList", "Items"),
             distribution_matches(frontend_domain),
             allow_missing_collection=True,
+            allow_empty_output=True,
         ),
         InventoryQuery(
             "CloudFront origin access controls",
-            ("cloudfront", "list-cloud-front-origin-access-controls"),
+            ("cloudfront", "list-origin-access-controls"),
             ("OriginAccessControlList", "Items"),
             exact_name("Name", {f"{name}-frontend"}),
             allow_missing_collection=True,
+            allow_empty_output=True,
         ),
         InventoryQuery(
             "CloudFront cache policies",
@@ -613,7 +619,12 @@ def scan_inventory(queries: Sequence[InventoryQuery], runner: Runner) -> int:
             fail("Uma consulta obrigatória do inventário AWS falhou.")
         if result.missing:
             fail("Consulta bem-sucedida não pode declarar recurso ausente.")
-        document = parse_json(result.stdout)
+        if not result.stdout.strip():
+            if not query.allow_empty_output or not query.allow_missing_collection:
+                fail("AWS CLI não devolveu JSON válido.")
+            document: Mapping[str, Any] = {}
+        else:
+            document = parse_json(result.stdout)
         if query.single_object:
             item = nested_object(
                 document,
