@@ -820,6 +820,12 @@ do escopo reprova a operação. O inventário não afirma ausência de recursos 
 da conta/região/nomes/tags aprovados e continua sujeito à consistência eventual
 dos serviços AWS.
 
+As listagens de distribuições e de controles de acesso do CloudFront podem
+responder com um objeto JSON vazio quando não há recursos. Somente essas duas
+consultas aceitam a ausência do contêiner externo, e apenas quando o objeto no
+nível ausente está vazio; qualquer campo inesperado preserva a reprovação
+fail-closed. As demais coleções continuam obrigatórias conforme seu contrato.
+
 ## Validação sem AWS
 
 Os gates locais não usam credencial, endpoint ou subprocesso AWS:
