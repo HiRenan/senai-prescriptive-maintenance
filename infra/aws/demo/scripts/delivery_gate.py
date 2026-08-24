@@ -962,13 +962,17 @@ def validate_state_instance_identity(
             re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key) is None
             or type(value) is not str
             or not value
-            or attributes.get(key) != value
         ):
-            fail("Identidade da instância diverge dos atributos do state.")
+            fail("Identidade da instância possui formato inválido.")
     if resource_identity.get("account_id", scope["account_id"]) != scope["account_id"]:
         fail("Identidade da instância pertence a outra conta.")
     if resource_identity.get("region", scope["region"]) != scope["region"]:
         fail("Identidade da instância pertence a outra região.")
+    if any(
+        key != "account_id" and attributes.get(key) != value
+        for key, value in resource_identity.items()
+    ):
+        fail("Identidade da instância diverge dos atributos do state.")
 
 
 def state_managed_values(

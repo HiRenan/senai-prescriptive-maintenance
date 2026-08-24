@@ -1682,12 +1682,11 @@ def prove_plan_and_state_gates() -> int:
     vpc_attributes = cast(dict[str, Any], vpc_instance["attributes"])
     vpc_attributes.update(
         {
-            "account_id": SYNTHETIC_IDENTITY["account_id"],
             "region": SYNTHETIC_IDENTITY["region"],
         }
     )
     vpc_instance["identity"] = {
-        "account_id": vpc_attributes["account_id"],
+        "account_id": SYNTHETIC_IDENTITY["account_id"],
         "id": vpc_attributes["id"],
         "region": vpc_attributes["region"],
     }
@@ -1812,9 +1811,6 @@ def prove_plan_and_state_gates() -> int:
     )
     foreign_resource_identity = copy.deepcopy(complete_snapshot)
     foreign_vpc_instance = state_instance(foreign_resource_identity, "aws_vpc.demo")
-    cast(dict[str, Any], foreign_vpc_instance["attributes"])["account_id"] = (
-        "111111111111"
-    )
     cast(dict[str, Any], foreign_vpc_instance["identity"])["account_id"] = (
         "111111111111"
     )
