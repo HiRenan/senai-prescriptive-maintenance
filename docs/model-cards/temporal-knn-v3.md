@@ -122,6 +122,11 @@ como objetivo principal da jornada prescritiva. Fórmulas, identidades e
 denominadores estão na
 [correção de avaliação da SEN-78](../validation/model-evaluation-v2.md).
 
+A [avaliação open-set v3](../validation/model-evaluation-v3.md) acrescenta
+Wilson 95%, Precision@K, Recall@K, ganho incremental de k=2..5 e um gate de
+promoção restrito à validação. O gate real não passou; por isso nenhum challenger
+ou novo artefato substituiu esta baseline.
+
 ## Limitações e trabalho futuro
 
 - O holdout já havia sido observado; uma decisão operacional exige nova janela

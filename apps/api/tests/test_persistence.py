@@ -92,6 +92,8 @@ def test_metadata_shape_excludes_private_and_raw_payload_fields() -> None:
             "configuration_id",
             "created_at",
             "evidence_references",
+            "index_id",
+            "neighbor_refs",
         },
         "DocumentMetadata": {"document_id", "created_at", "versions"},
         "DocumentVersionMetadata": {
@@ -171,6 +173,28 @@ def test_analysis_rejects_noncanonical_dataset_and_duplicate_local_evidence() ->
             evidence_references=(
                 first,
                 replace(second, evidence_id=first.evidence_id),
+            ),
+        )
+
+
+def test_analysis_rejects_invalid_or_unbound_neighbor_references() -> None:
+    with pytest.raises(ValueError, match="require one similarity index"):
+        replace(SYNTHETIC_ANALYSIS, index_id=None)
+
+    with pytest.raises(ValueError, match="index_id"):
+        replace(SYNTHETIC_ANALYSIS, index_id="similarity_index_invalid")
+
+    with pytest.raises(ValueError, match="neighbor references are invalid"):
+        replace(
+            SYNTHETIC_ANALYSIS,
+            neighbor_refs=("neighbor_synthetic_duplicate",) * 2,
+        )
+
+    with pytest.raises(ValueError, match="neighbor references are invalid"):
+        replace(
+            SYNTHETIC_ANALYSIS,
+            neighbor_refs=tuple(
+                f"neighbor_synthetic_trace_{position:02d}" for position in range(11)
             ),
         )
 

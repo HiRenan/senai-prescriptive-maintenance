@@ -16,6 +16,8 @@ _CHUNK_REF: Final = re.compile(r"^chunk_[a-z0-9_]{3,64}$")
 _EVIDENCE_ID: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _DATASET_ID: Final = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_ID: Final = re.compile(r"^model_[a-z0-9_.-]{3,64}$")
+_INDEX_ID: Final = re.compile(r"^similarity_index_v1_[0-9a-f]{32}$")
+_NEIGHBOR_REF: Final = re.compile(r"^neighbor_[a-z0-9_]{3,64}$")
 _PROMPT_ID: Final = re.compile(r"^prompt_[a-z0-9_.-]{3,64}$")
 _CONFIGURATION_ID: Final = re.compile(r"^config_[a-z0-9_.-]{3,64}$")
 _SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -23,6 +25,7 @@ _DATETIME_REDUCTION_PROTOCOL: Final = 4
 _DATETIME_STATE_SIZE: Final = 10
 _DATETIME_FOLD_MASK: Final = 0x80
 _DATETIME_MONTH_MASK: Final = 0x7F
+_MAX_NEIGHBOR_REFS: Final = 10
 
 
 def _validate_identifier(value: str, pattern: re.Pattern[str], label: str) -> None:
@@ -298,6 +301,8 @@ class AnalysisMetadata:
     configuration_id: str
     created_at: datetime
     evidence_references: tuple[EvidenceReference, ...] = ()
+    index_id: str | None = None
+    neighbor_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_identifier(self.analysis_id, _ANALYSIS_ID, "analysis_id")
@@ -312,6 +317,22 @@ class AnalysisMetadata:
             "configuration_id",
         )
         _validate_aware_datetime(self.created_at, "created_at")
+
+        if self.index_id is None:
+            if self.neighbor_refs:
+                raise ValueError("Neighbor references require one similarity index.")
+        else:
+            _validate_identifier(self.index_id, _INDEX_ID, "index_id")
+        neighbor_refs = tuple(self.neighbor_refs)
+        if len(neighbor_refs) > _MAX_NEIGHBOR_REFS or any(
+            not isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]
+            or _NEIGHBOR_REF.fullmatch(value) is None
+            for value in neighbor_refs
+        ):
+            raise ValueError("Analysis neighbor references are invalid.")
+        if len(neighbor_refs) != len(set(neighbor_refs)):
+            raise ValueError("Analysis neighbor references are invalid.")
+        object.__setattr__(self, "neighbor_refs", neighbor_refs)
 
         references = tuple(
             sorted(self.evidence_references, key=lambda reference: reference.ordinal)
@@ -395,4 +416,6 @@ def canonical_analysis(analysis: AnalysisMetadata) -> AnalysisMetadata:
             _canonical_evidence_reference(reference)
             for reference in analysis.evidence_references
         ),
+        index_id=(None if analysis.index_id is None else _base_text(analysis.index_id)),
+        neighbor_refs=tuple(_base_text(value) for value in analysis.neighbor_refs),
     )

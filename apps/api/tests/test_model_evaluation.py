@@ -22,6 +22,7 @@ from prescriptive_maintenance.modeling.evaluation import (
     FrozenEvaluationContext,
     ModelEvaluationError,
     OperationalObjectiveMetrics,
+    ScopeMetrics,
     evaluate_frozen_holdout,
     freeze_evaluation_plan,
     run_evaluation,
@@ -212,7 +213,7 @@ def test_plan_freezes_without_opening_or_requiring_holdout_bytes(
 
     context = _freeze(artifacts)
 
-    assert context.plan.plan_id.startswith("evaluation_plan_v2_")
+    assert context.plan.plan_id.startswith("evaluation_plan_v3_")
     assert context.plan.dataset_id == DATASET_ID
     assert context.plan.model_id == artifacts.fitted_model.model_id
     assert context.plan.calibration_partition == "validation"
@@ -256,6 +257,7 @@ def test_real_method_options_are_frozen_and_not_cli_tunable(tmp_path: Path) -> N
             "secondary_exact_label_diagnostics": [
                 "all_rows",
                 "known_train_classes",
+                "unknown_train_classes",
             ],
         },
         "metrics": [
@@ -274,9 +276,16 @@ def test_real_method_options_are_frozen_and_not_cli_tunable(tmp_path: Path) -> N
             "candidate_top1_accuracy",
             "neighbor_hit_at_1",
             "neighbor_hit_at_k",
+            "neighbor_precision_at_k",
+            "neighbor_recall_at_k",
+            "neighbor_incremental_hit_at_positions_2_to_k",
             "neighbor_mrr_at_k",
             "majority_class_accuracy",
             "selective_candidate_accuracy",
+            "open_set_known_coverage",
+            "open_set_known_selective_accuracy",
+            "open_set_unknown_false_acceptance_rate",
+            "open_set_unknown_rejection_rate",
         ],
         "baseline_definitions": {
             "always_problem": {
@@ -384,10 +393,12 @@ def test_evaluation_reports_all_and_known_scopes_without_private_values(
     report = evaluate_frozen_holdout(_freeze(artifacts), holdout_path=artifacts.holdout)
     all_rows = report.all_rows.to_payload()
     known = report.known_train_classes.to_payload()
+    unknown = report.unknown_train_classes.to_payload()
 
     assert report.all_rows.row_count == 4
     assert report.known_train_classes.row_count == 2
     assert report.unknown_class_row_count == 2
+    assert report.unknown_train_classes.row_count == 2
     assert all_rows["neighbor_hit_at_k"] == {
         "numerator": 2,
         "denominator": 4,
@@ -400,6 +411,38 @@ def test_evaluation_reports_all_and_known_scopes_without_private_values(
     }
     known_mrr = cast(dict[str, object], known["neighbor_mrr_at_k"])
     assert known_mrr["value"] == 1.0
+    known_ranking = cast(dict[str, object], known["neighbor_ranking"])
+    known_by_k = cast(list[dict[str, object]], known_ranking["by_k"])
+    assert known_by_k[0]["hit"] == {
+        "numerator": 2,
+        "denominator": 2,
+        "value": 1.0,
+    }
+    assert known_by_k[-1]["precision"] == {
+        "numerator": 6,
+        "denominator": 10,
+        "value": 0.6,
+    }
+    assert known_ranking["unit"] == "training_rows"
+    assert unknown["neighbor_hit_at_k"] == {
+        "numerator": 0,
+        "denominator": 2,
+        "value": 0.0,
+    }
+    payload = report.to_payload()
+    metrics = cast(dict[str, object], payload["metrics"])
+    open_set = cast(dict[str, object], metrics["open_set"])
+    unknown_open_set = cast(
+        dict[str, object],
+        open_set["unknown_train_classes"],
+    )
+    false_acceptance = cast(
+        dict[str, object],
+        unknown_open_set["false_acceptance_rate"],
+    )
+    interval = cast(dict[str, float], false_acceptance["wilson_95"])
+    assert false_acceptance["denominator"] == 2
+    assert 0.0 <= interval["lower"] <= interval["upper"] <= 1.0
     assert report.parity_audit_count == 4
     assert len(report.latency_milliseconds) == 4
     assert report.peak_traced_allocation_bytes >= 0
@@ -422,6 +465,120 @@ def test_evaluation_reports_all_and_known_scopes_without_private_values(
     with pytest.raises(ModelEvaluationError, match="destination"):
         save_evaluation_report(report, report_path)
     assert report_path.read_text("utf-8") == serialized
+
+
+def test_ranking_metrics_use_exact_formulas_and_incremental_positions() -> None:
+    row_factory = cast(
+        Callable[..., object],
+        vars(evaluation_module)["_RowEvaluation"],
+    )
+    scope_metrics = cast(
+        Callable[..., object],
+        vars(evaluation_module)["_scope_metrics"],
+    )
+    outcomes = (
+        row_factory(
+            truth="synthetic-a",
+            candidate="synthetic-a",
+            neighbor_targets=(
+                "synthetic-b",
+                "synthetic-a",
+                "synthetic-a",
+                "synthetic-c",
+                "synthetic-a",
+            ),
+            abstention_reason=None,
+        ),
+        row_factory(
+            truth="synthetic-a",
+            candidate="synthetic-a",
+            neighbor_targets=(
+                "synthetic-a",
+                "synthetic-b",
+                "synthetic-b",
+                "synthetic-b",
+                "synthetic-b",
+            ),
+            abstention_reason=None,
+        ),
+    )
+
+    metrics = cast(
+        ScopeMetrics,
+        scope_metrics(
+            outcomes,
+            (True, True),
+            "synthetic-a",
+            {"synthetic-a": 4},
+        ),
+    ).to_payload()
+    ranking = cast(dict[str, object], metrics["neighbor_ranking"])
+    by_k = cast(list[dict[str, object]], ranking["by_k"])
+    increments = cast(
+        list[dict[str, object]],
+        ranking["incremental_first_hits_at_positions_2_to_k"],
+    )
+
+    assert by_k[0]["hit"] == {"numerator": 1, "denominator": 2, "value": 0.5}
+    assert by_k[1]["precision"] == {
+        "numerator": 2,
+        "denominator": 4,
+        "value": 0.5,
+    }
+    assert by_k[-1]["precision"] == {
+        "numerator": 4,
+        "denominator": 10,
+        "value": 0.4,
+    }
+    assert by_k[-1]["recall"] == {
+        "numerator": 4,
+        "denominator": 8,
+        "value": 0.5,
+    }
+    assert ranking["relevant_available_count"] == 8
+    assert ranking["absent_relevance_row_count"] == 0
+    assert increments[0] == {
+        "position": 2,
+        "first_hit": {"numerator": 1, "denominator": 2, "value": 0.5},
+    }
+    assert cast(dict[str, object], ranking["mrr_at_k"])["value"] == 0.75
+
+
+def test_ranking_metrics_count_absent_classes_without_fake_recall() -> None:
+    row_factory = cast(
+        Callable[..., object],
+        vars(evaluation_module)["_RowEvaluation"],
+    )
+    scope_metrics = cast(
+        Callable[..., object],
+        vars(evaluation_module)["_scope_metrics"],
+    )
+    outcome = row_factory(
+        truth="synthetic-unseen",
+        candidate="synthetic-a",
+        neighbor_targets=("synthetic-a",) * MODEL_EVALUATION_TOP_K,
+        abstention_reason=None,
+    )
+
+    metrics = cast(
+        ScopeMetrics,
+        scope_metrics(
+            (outcome,),
+            (True,),
+            "synthetic-a",
+            {"synthetic-a": 4},
+        ),
+    ).to_payload()
+    ranking = cast(dict[str, object], metrics["neighbor_ranking"])
+    by_k = cast(list[dict[str, object]], ranking["by_k"])
+
+    assert ranking["absent_relevance_row_count"] == 1
+    assert by_k[-1]["hit"] == {"numerator": 0, "denominator": 1, "value": 0.0}
+    assert by_k[-1]["recall"] == {
+        "numerator": 0,
+        "denominator": 0,
+        "value": None,
+    }
 
 
 @pytest.mark.parametrize("operation", ("write", "zero_write", "fsync", "close"))
