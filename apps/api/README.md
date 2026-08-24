@@ -1082,10 +1082,11 @@ As saídas do CLI são somente agregados sanitizados. Testes e CI exercitam o
 pipeline exclusivamente com dados sintéticos; derivados reais permanecem
 locais e ignorados.
 
-## Baseline k-NN local
+## Busca k-NN local
 
-`prescriptive_maintenance.modeling` implementa a baseline determinística da
-SEN-42 e a política de abstenção da SEN-51. `fit_knn_model()` aceita a partição
+`prescriptive_maintenance.modeling` implementa a busca determinística de
+históricos semelhantes evoluída da baseline da SEN-42 e da política de
+abstenção da SEN-51. `fit_knn_model()` aceita a partição
 de treino com as 18 features na ordem canônica e `y`, seu hash SHA-256 e,
 opcionalmente, a validação acompanhada do próprio hash. Qualquer coluna, ordem,
 tipo ou número não finito divergente é recusado. O contrato canônico não admite
@@ -1109,18 +1110,27 @@ Sem validação, cenários locais e sintéticos com pelo menos duas linhas usam
 somente leave-one-out real do treino; uma linha isolada falha em vez de ser
 rotulada como leave-one-out. O teste não faz parte da assinatura do fit.
 Distância estritamente acima
-do limiar, classe candidata rara ou margem menor ou igual ao limiar geram,
+do limiar, condição candidata com suporte raro ou margem menor ou igual ao limiar geram,
 respectivamente, `distance_out_of_distribution`, `rare_class_support` ou
 `inconclusive_vote`. A política, os quantis, os limites e os hashes das
 partições fazem parte do `model_id`.
 
-O núcleo preserva `target_slug` internamente. `KnnModelPortAdapter` traduz cada
-classe por uma tabela bijetiva de `fault_code` seguro, construída no fit,
-validada contra colisões e serializada. `normal_target_labels` é configuração
-explícita e deve ser subconjunto das classes de treino. Um candidato aceito
-produz `NORMAL` ou `FAULT`. Uma abstenção produz `OUT_OF_DISTRIBUTION`, sem
-diagnóstico e sem chave de recuperação: disponibilidade documental não altera a
-decisão do modelo.
+O núcleo preserva `target_slug` internamente e liga o artefato schema/model 3 à
+política `operating-states.v1`. Ela reconhece somente os valores inteiros
+`normal`, `baseline`, `teste`, `acelerando` e `motor_desligado`, normalizando
+caixa, acentos e hífen para underscore. Não existe busca por substring, alias de
+dataset ou allowlist configurável por classes observadas; uma quase colisão continua
+problemática e duas classes que normalizem para o mesmo estado bloqueiam o fit.
+
+`KnnModelPortAdapter` interpreta o voto apenas como condição candidata baseada
+em históricos. Uma candidata operacional aceita produz `NORMAL`, preserva o
+shape OpenAPI v1 com um `Diagnosis` que informa o estado canônico e mantém
+`retrieval_key=null`; o campo público congelado `fault_code` dos seus vizinhos
+também usa `operating_state_<estado-canônico>`, sem expor o hash interno de
+falha. Ela nunca aciona RAG ou prescrição. Uma candidata
+problemática aceita produz `FAULT` com chave documental possível. Uma abstenção
+produz `OUT_OF_DISTRIBUTION`, sem diagnóstico ou chave. `support_score` permanece
+heurística, não probabilidade ou autorização para agir.
 
 `save_knn_model()` grava somente `manifest.json` e três arrays `.npy`, sempre em
 destino ignorado quando está dentro de uma worktree. O manifesto fixa schema,
@@ -1128,7 +1138,9 @@ compatibilidade, configuração, labels, estado completo do `StandardScaler`,
 política de abstenção, hashes e `model_id`. `load_knn_model()` usa
 `allow_pickle=False`, rejeita arquivo ausente ou extra, bytes alterados, campos
 duplicados, thresholds inválidos, versões incompatíveis, arrays inválidos e
-identidade divergente. A carga também exige que leave-one-out use o hash do
+identidade divergente. O loader aceita somente schema/model 3; artefatos v2
+falham fechados e precisam de rebuild, sem rebind silencioso. A carga também
+exige que leave-one-out use o hash do
 treino e a contagem determinística esperada, enquanto validação deve possuir
 hash distinto. Os arrays reais contêm derivados por registro e nunca
 devem ser versionados ou publicados.
@@ -1136,14 +1148,16 @@ devem ser versionados ou publicados.
 A factory HTTP padrão continua injetando fakes sintéticos. O adapter real pode
 participar apenas de uma composição explícita cuja autorização também vincule o
 índice equivalente; nenhum artefato real está aprovado ou conectado por padrão.
-As decisões e métricas temporais
-sanitizadas estão em [`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md)
-e [`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).
+As evidências históricas permanecem em
+[`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md) e
+[`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).
+O estado atual está no
+[`model card v3`](../../docs/model-cards/temporal-knn-v3.md).
 
 ## Índice de similaridade versionado
 
-`save_similarity_index_from_knn_artifact()` recebe somente o artefato k-NN v2
-(baseline SEN-42 com a política SEN-51) que passou integralmente por
+`save_similarity_index_from_knn_artifact()` recebe somente um artefato k-NN v3
+que passou integralmente por
 `load_knn_model()`. A saída local contém
 `manifest.json`, estado do pré-processador em JSON, metadados opacos dos
 registros em JSON e `vectors.npy` `float32`. O manifesto fixa `dataset_id`,
@@ -1195,10 +1209,14 @@ serializado canonicamente e seu SHA-256 é verificado antes do opener. O cálcul
 usa distância euclidiana exata em lotes com memória de trabalho limitada, aplica
 a mesma decisão do modelo e audita uma amostra contra `predict_candidate()`.
 
-O relatório contém somente agregados para todas as linhas e para classes que
-existem no treino: top-1, Hit/Recall@K, MRR, baseline majoritária, cobertura,
-abstenção e acurácia seletiva. Latência é medida após warmup e com cache
-aquecido. O pico primário usa working set do processo no Windows ou
+O relatório schema 2 separa o objetivo operacional primário em `candidate_*`
+antes da abstenção, `selective_*` somente entre aceitas, cobertura e
+`abstained` com motivos. Os dois recortes incluem uma baseline tipada de
+candidata constante problema, com fórmula, numerador e denominador explícitos.
+O diagnóstico exato anterior permanece secundário para todas as linhas e para
+classes que existem no treino: top-1, Hit/Recall@K, MRR, baseline majoritária,
+cobertura, abstenção e acurácia seletiva. Latência é medida após warmup e com
+cache aquecido. O pico primário usa working set do processo no Windows ou
 `ru_maxrss` no Unix; `tracemalloc` aparece apenas como complemento. Plataforma
 sem suporte declara a métrica indisponível.
 
@@ -1209,19 +1227,27 @@ sobrescreve um relatório existente:
 uv run --frozen python -m prescriptive_maintenance.modeling.evaluation `
   --dataset-manifest "<derivado>/manifest.json" `
   --holdout "<derivado>/test.parquet" `
-  --model-artifact "<artefato-knn-v2>" `
+  --model-artifact "<artefato-knn-v3>" `
   --index-artifact "<indice-versionado>" `
-  --report-output "data/processed/sen-53-evaluation/evaluation-report.json"
+  --report-output "data/processed/sen-78-evaluation/evaluation-report.v2.json"
 ```
 
 Artefatos e relatórios reais permanecem ignorados. O índice é validado como
 âncora de identidade e compatibilidade; o benchmark avalia o k-NN exato em
-memória, não PostgreSQL/pgvector. A execução da SEN-53 não alterou parâmetros
-após observar o teste, mas o mesmo holdout já tinha agregados publicados por uma
-tarefa anterior e, portanto, não constitui estimativa independente. O
-[relatório](../../docs/validation/model-evaluation.md) e o
-[model card](../../docs/model-cards/temporal-knn-v2.md) registram o limite e a
-decisão de não aprovar o modelo para automação.
+memória, não PostgreSQL/pgvector. No holdout já observado, a candidata binária
+pré-abstenção obteve 97,3756% de acurácia bruta, abaixo da baseline
+sempre-problema de 24.446/24.768 (98,6999%). Entre aceitas, 9.547/9.843
+(96,9928%) também ficou abaixo da baseline de 9.616/9.843 (97,6938%). O sinal
+acima do trivial se limita à acurácia balanceada e aos recalls: 59,4426% e
+20,4969% de recall operacional antes da abstenção, contra 50% e 0% da baseline
+constante. A cobertura foi 39,7408%; entre aceitas, o recall operacional foi
+22,4670%. Esses resultados continuam insuficientes, e a acurácia bruta inclui
+linhas depois abstidas, portanto não representa o comportamento final. Nenhum
+threshold foi alterado pelo holdout, que não constitui estimativa independente.
+O [relatório histórico](../../docs/validation/model-evaluation.md), a
+[correção v2](../../docs/validation/model-evaluation-v2.md) e o
+[model card v3](../../docs/model-cards/temporal-knn-v3.md) registram os
+denominadores e a decisão de não aprovar automação.
 
 ## Verificações
 

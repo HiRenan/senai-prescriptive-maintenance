@@ -18,9 +18,11 @@ from prescriptive_maintenance.contracts import (
 from prescriptive_maintenance.modeling import (
     KNN_ABSTENTION_POLICY_VERSION,
     KNN_ARTIFACT_FILENAMES,
+    KNN_ARTIFACT_SCHEMA_VERSION,
     KNN_CALIBRATION_SAMPLE_LIMIT,
     KNN_DISTANCE_QUANTILE,
     KNN_METRIC,
+    KNN_MODEL_VERSION,
     KNN_SUPPORT_HEURISTIC,
     KNN_VOTE_MARGIN_QUANTILE,
     InMemoryKnnModel,
@@ -34,6 +36,7 @@ from prescriptive_maintenance.modeling import (
     load_knn_model,
     save_knn_model,
 )
+from prescriptive_maintenance.operating_states import operating_state_policy_payload
 from prescriptive_maintenance.ports import ModelAbstentionReason, ModelDisposition
 
 DATASET_ID = "a" * 64
@@ -65,8 +68,7 @@ def _training_frame(
 def _model(
     *,
     first_values: tuple[float, ...] = (0.0, 2.0),
-    labels: tuple[str, ...] = ("synthetic-normal", "synthetic-fault"),
-    normal_target_labels: tuple[str, ...] = ("synthetic-normal",),
+    labels: tuple[str, ...] = ("normal", "synthetic-problem"),
     validation_values: tuple[float, ...] | None = None,
     minimum_class_count: int = 1,
     distance_quantile: float = KNN_DISTANCE_QUANTILE,
@@ -89,7 +91,6 @@ def _model(
         validation_partition_sha256=(
             None if validation is None else VALIDATION_PARTITION_SHA256
         ),
-        normal_target_labels=normal_target_labels,
         minimum_class_count=minimum_class_count,
         distance_quantile=distance_quantile,
         vote_margin_quantile=vote_margin_quantile,
@@ -119,15 +120,14 @@ def _write_manifest(path: Path, manifest: object) -> None:
 def test_scaler_is_fit_only_on_the_supplied_train_partition() -> None:
     training = _training_frame(
         (0.0, 2.0, 4.0),
-        ("synthetic-normal", "synthetic-fault", "synthetic-fault"),
+        ("normal", "synthetic-problem", "synthetic-problem"),
     )
-    holdout = _training_frame((1000.0,), ("synthetic-fault",))
+    holdout = _training_frame((1000.0,), ("synthetic-problem",))
 
     model = fit_knn_model(
         training,
         dataset_id=DATASET_ID,
         training_partition_sha256=TRAINING_PARTITION_SHA256,
-        normal_target_labels=("synthetic-normal",),
         minimum_class_count=1,
     )
 
@@ -379,7 +379,7 @@ def test_inference_rejects_non_finite_values(value: float) -> None:
 
 
 def test_euclidean_distances_are_computed_after_train_scaling() -> None:
-    model = _model(labels=("synthetic-a", "synthetic-b"), normal_target_labels=())
+    model = _model(labels=("synthetic-a", "synthetic-b"))
 
     prediction = model.predict_candidate(_features(0.0), top_k=2)
 
@@ -408,7 +408,6 @@ def test_top_k_is_limited_by_available_training_rows() -> None:
 def test_distance_and_class_ties_have_stable_total_order() -> None:
     model = _model(
         labels=("synthetic-zeta", "synthetic-alpha"),
-        normal_target_labels=(),
     )
 
     first = model.predict_candidate(_features(1.0), top_k=2)
@@ -454,7 +453,6 @@ def test_rare_candidate_class_has_a_typed_abstention_reason() -> None:
     model = _model(
         first_values=(0.0, 1.0, 2.0),
         labels=("synthetic-rare", "synthetic-common", "synthetic-common"),
-        normal_target_labels=(),
         validation_values=(0.0,),
         minimum_class_count=2,
         default_top_k=1,
@@ -469,7 +467,6 @@ def test_rare_candidate_class_has_a_typed_abstention_reason() -> None:
 def test_support_heuristic_decreases_with_distance_for_the_same_vote_share() -> None:
     model = _model(
         labels=("synthetic-a", "synthetic-a"),
-        normal_target_labels=(),
         validation_values=(4.0,),
     )
 
@@ -489,7 +486,6 @@ def test_abstention_priority_is_distance_then_rarity_then_vote() -> None:
     rare_model = _model(
         first_values=(0.0, 2.0, 4.0),
         labels=("synthetic-rare", "synthetic-common", "synthetic-common"),
-        normal_target_labels=(),
         validation_values=(0.0,),
         minimum_class_count=2,
         default_top_k=1,
@@ -514,12 +510,91 @@ def test_label_translation_is_bijective_and_collision_fails_closed(
     monkeypatch.setattr(knn_module, "_fault_code", colliding_fault_code)
 
     with pytest.raises(KnnTrainingError, match="bijective"):
-        _model(labels=("synthetic-a", "synthetic-b"), normal_target_labels=())
+        _model(labels=("synthetic-a", "synthetic-b"))
 
 
-def test_normal_labels_must_be_explicit_training_classes() -> None:
-    with pytest.raises(KnnTrainingError, match="training classes"):
-        _model(normal_target_labels=("synthetic-absent",))
+@pytest.mark.parametrize(
+    ("operating_label", "canonical_state"),
+    (
+        ("normal", "normal"),
+        ("NÓRMAL", "normal"),
+        ("baseline", "baseline"),
+        ("BÁSELÍNE", "baseline"),
+        ("teste", "teste"),
+        ("TÉSTE", "teste"),
+        ("acelerando", "acelerando"),
+        ("ACELERÁNDO", "acelerando"),
+        ("motor_desligado", "motor_desligado"),
+        ("MÓTOR-DESLIGÁDO", "motor_desligado"),
+    ),
+)
+def test_model_port_maps_every_operating_state_with_explainable_diagnosis(
+    operating_label: str,
+    canonical_state: str,
+) -> None:
+    model = _model(
+        labels=(operating_label, "synthetic-problem"),
+        default_top_k=1,
+    )
+    adapter = KnnModelPortAdapter(model)
+
+    candidate = model.predict_candidate(_features(0.0), top_k=1)
+    prediction = adapter.predict(_analysis_features(0.0), top_k=1)
+    repeated = adapter.predict(_analysis_features(0.0), top_k=1)
+
+    assert prediction == repeated
+    assert prediction.disposition is ModelDisposition.NORMAL
+    assert prediction.abstention_reason is None
+    assert prediction.diagnosis is not None
+    assert prediction.diagnosis.code == f"operating_state_{canonical_state}"
+    assert not prediction.diagnosis.code.startswith("fault_")
+    assert canonical_state in prediction.diagnosis.summary
+    assert prediction.retrieval_key is None
+    assert tuple(
+        (neighbor.neighbor_ref, neighbor.rank, neighbor.distance)
+        for neighbor in prediction.neighbors
+    ) == tuple(
+        (neighbor.neighbor_ref, neighbor.rank, neighbor.distance)
+        for neighbor in candidate.neighbors
+    )
+    assert tuple(neighbor.fault_code for neighbor in prediction.neighbors) == (
+        f"operating_state_{canonical_state}",
+    )
+    assert all(
+        not neighbor.fault_code.startswith("fault_")
+        for neighbor in prediction.neighbors
+    )
+
+
+def test_multiple_labels_for_one_operating_state_fail_closed() -> None:
+    with pytest.raises(KnnTrainingError, match="bijective"):
+        _model(labels=("normal", "NÓRMAL"))
+
+
+def test_model_port_near_collision_remains_a_problem() -> None:
+    model = _model(
+        labels=("synthetic_teste_condition", "normal"),
+        default_top_k=1,
+    )
+    adapter = KnnModelPortAdapter(model)
+
+    candidate = model.predict_candidate(_features(0.0), top_k=1)
+    prediction = adapter.predict(_analysis_features(0.0), top_k=1)
+
+    assert prediction.disposition is ModelDisposition.FAULT
+    assert prediction.diagnosis is not None
+    assert prediction.diagnosis.code.startswith("fault_")
+    assert prediction.retrieval_key == "synthetic_teste_condition"
+    assert tuple(
+        (neighbor.neighbor_ref, neighbor.rank, neighbor.distance)
+        for neighbor in prediction.neighbors
+    ) == tuple(
+        (neighbor.neighbor_ref, neighbor.rank, neighbor.distance)
+        for neighbor in candidate.neighbors
+    )
+    assert all(
+        neighbor.fault_code.startswith("fault_") for neighbor in prediction.neighbors
+    )
 
 
 def test_model_port_adapter_maps_normal_and_fault_without_abstention() -> None:
@@ -533,10 +608,11 @@ def test_model_port_adapter_maps_normal_and_fault_without_abstention() -> None:
     assert normal.retrieval_key is None
     assert fault.disposition is ModelDisposition.FAULT
     assert fault.abstention_reason is None
-    assert fault.retrieval_key == "synthetic-fault"
+    assert fault.retrieval_key == "synthetic-problem"
     assert normal.diagnosis is not None
     assert fault.diagnosis is not None
-    assert normal.diagnosis.code.startswith("fault_")
+    assert normal.diagnosis.code == "operating_state_normal"
+    assert "normal" in normal.diagnosis.summary
     assert fault.diagnosis.code.startswith("fault_")
     assert 0.0 <= normal.support_score <= 1.0
     assert 0.0 <= fault.support_score <= 1.0
@@ -593,14 +669,14 @@ def test_model_port_exposes_only_opaque_neighbor_contract() -> None:
 
 def test_model_port_exposes_exact_unicode_diagnosis_summary() -> None:
     prediction = KnnModelPortAdapter(_model(default_top_k=1)).predict(
-        _analysis_features(1.0),
+        _analysis_features(2.0),
         top_k=1,
     )
 
     assert prediction.diagnosis is not None
     assert prediction.diagnosis.summary == (
-        "Classe candidata da baseline k-NN; o suporte combina "
-        "votos e distância como heurística, não probabilidade."
+        "Condição problemática candidata baseada em históricos semelhantes; "
+        "o suporte combina votos e distância como heurística, não probabilidade."
     )
 
 
@@ -611,7 +687,6 @@ def test_requested_top_k_changes_only_returned_evidence() -> None:
             "synthetic-a" if index % 2 == 0 else "synthetic-b"
             for index in range(MAX_TOP_K)
         ),
-        normal_target_labels=(),
         validation_values=(0.25,),
         minimum_class_count=1,
     )
@@ -775,7 +850,7 @@ def test_threshold_configuration_and_partition_hash_change_model_identity() -> N
     changed_training_hash = fit_knn_model(
         _training_frame(
             (0.0, 2.0),
-            ("synthetic-normal", "synthetic-fault"),
+            ("normal", "synthetic-problem"),
         ),
         validation_frame=_training_frame(
             (1.0, 3.0),
@@ -784,7 +859,6 @@ def test_threshold_configuration_and_partition_hash_change_model_identity() -> N
         dataset_id=DATASET_ID,
         training_partition_sha256="d" * 64,
         validation_partition_sha256=VALIDATION_PARTITION_SHA256,
-        normal_target_labels=("synthetic-normal",),
         minimum_class_count=1,
     )
 
@@ -811,7 +885,7 @@ def test_safe_artifact_is_byte_stable_and_round_trips(tmp_path: Path) -> None:
     loaded = load_knn_model(first_path, expected_model_id=model.model_id)
     assert loaded.model_id == model.model_id
     assert loaded.labels == model.labels
-    assert loaded.normal_target_labels == model.normal_target_labels
+    assert loaded.operational_target_labels == model.operational_target_labels
     assert loaded.preprocessor_state == model.preprocessor_state
     assert loaded.abstention_policy == model.abstention_policy
     assert loaded.training_partition_sha256 == model.training_partition_sha256
@@ -845,8 +919,24 @@ def test_safe_artifact_is_byte_stable_and_round_trips(tmp_path: Path) -> None:
         "preprocessor": "sklearn.preprocessing.StandardScaler",
         "preprocessor_fit_partition": "train",
         "imputation": "not_applied",
-        "normal_target_labels": ["synthetic-normal"],
+        "operating_state_policy": operating_state_policy_payload(),
+        "operational_target_labels": ["normal"],
     }
+    assert manifest["artifact_schema_version"] == KNN_ARTIFACT_SCHEMA_VERSION == 3
+    assert manifest["model_version"] == KNN_MODEL_VERSION == 3
+    assert manifest["model_id"].startswith("model_knn_v3_")
+    assert manifest["labels"] == [
+        {
+            "target_slug": "normal",
+            "fault_code": model.label_for_target("normal").fault_code,
+            "operating_state": "normal",
+        },
+        {
+            "target_slug": "synthetic-problem",
+            "fault_code": model.label_for_target("synthetic-problem").fault_code,
+            "operating_state": None,
+        },
+    ]
     assert manifest["abstention_policy"] == {
         "version": KNN_ABSTENTION_POLICY_VERSION,
         "distance_threshold": 2.0,
@@ -889,7 +979,26 @@ def test_load_rejects_wrong_expected_model_id(tmp_path: Path) -> None:
     directory = save_knn_model(_model(), tmp_path / "model")
 
     with pytest.raises(KnnArtifactError, match="identity"):
-        load_knn_model(directory, expected_model_id="model_knn_v2_wrong")
+        load_knn_model(directory, expected_model_id="model_knn_v3_wrong")
+
+
+@pytest.mark.parametrize(
+    ("field", "legacy_value"),
+    (("artifact_schema_version", 2), ("model_version", 2)),
+)
+def test_load_rejects_legacy_v2_artifact_without_rebuild(
+    tmp_path: Path,
+    field: str,
+    legacy_value: int,
+) -> None:
+    directory = save_knn_model(_model(), tmp_path / "model")
+    manifest_path = directory / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[field] = legacy_value
+    _write_manifest(manifest_path, manifest)
+
+    with pytest.raises(KnnArtifactError, match="version is unsupported"):
+        load_knn_model(directory)
 
 
 def test_load_rejects_invalid_abstention_threshold(tmp_path: Path) -> None:

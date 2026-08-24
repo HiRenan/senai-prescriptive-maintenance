@@ -43,14 +43,19 @@ from prescriptive_maintenance.data import (
     CANONICAL_FEATURE_CONTRACT_VERSION,
     load_canonical_pipeline_config,
 )
+from prescriptive_maintenance.operating_states import (
+    OperatingState,
+    operating_state_policy_payload,
+    resolve_operating_state,
+)
 from prescriptive_maintenance.ports import (
     ModelAbstentionReason,
     ModelDisposition,
     ModelPrediction,
 )
 
-KNN_ARTIFACT_SCHEMA_VERSION: Final = 2
-KNN_MODEL_VERSION: Final = 2
+KNN_ARTIFACT_SCHEMA_VERSION: Final = 3
+KNN_MODEL_VERSION: Final = 3
 KNN_METRIC: Final = "euclidean"
 KNN_SUPPORT_HEURISTIC: Final = "vote_share_times_inverse_distance_ratio"
 KNN_ABSTENTION_POLICY_VERSION: Final = 1
@@ -72,7 +77,7 @@ _DISTANCE_TIE_BREAK: Final = "neighbor_ref_ascending"
 _CLASS_TIE_BREAK: Final = (
     "vote_count_descending_then_distance_sum_ascending_then_target_slug_ascending"
 )
-_MODEL_ID_PREFIX: Final = "model_knn_v2_"
+_MODEL_ID_PREFIX: Final = "model_knn_v3_"
 _CALIBRATION_SAMPLING: Final = "evenly_spaced_input_order"
 _FAULT_CODE_PREFIX: Final = "fault_"
 _NEIGHBOR_REF_PREFIX: Final = "neighbor_"
@@ -124,11 +129,11 @@ class KnnArtifactError(KnnError):
 
 @dataclass(frozen=True, slots=True)
 class KnnLabel:
-    """Bijective internal target to public fault-code mapping."""
+    """Bijective target mapping with an optional canonical operating state."""
 
     target_slug: str
     fault_code: str
-    is_normal: bool
+    operating_state: OperatingState | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +204,6 @@ class InMemoryKnnModel:
         *,
         dataset_id: str,
         labels: tuple[KnnLabel, ...],
-        normal_target_labels: tuple[str, ...],
         default_top_k: int,
         training_partition_sha256: str,
         abstention_policy: KnnAbstentionPolicy,
@@ -215,7 +219,7 @@ class InMemoryKnnModel:
             raise KnnConfigurationError("Abstention policy type is incompatible.")
         safe_policy = replace(abstention_policy)
         _validate_abstention_policy(safe_policy, KnnConfigurationError)
-        _validate_label_table(labels, normal_target_labels, KnnConfigurationError)
+        _validate_label_table(labels, KnnConfigurationError)
         state = _preprocessor_state(preprocessor, len(training_vectors))
         _validate_training_arrays(
             training_vectors,
@@ -245,7 +249,9 @@ class InMemoryKnnModel:
 
         self._dataset_id = dataset_id
         self._labels = labels
-        self._normal_target_labels = normal_target_labels
+        self._operational_target_labels = tuple(
+            label.target_slug for label in labels if label.operating_state is not None
+        )
         self._default_top_k = default_top_k
         self._training_partition_sha256 = training_partition_sha256
         self._abstention_policy = safe_policy
@@ -282,8 +288,8 @@ class InMemoryKnnModel:
         return self._labels
 
     @property
-    def normal_target_labels(self) -> tuple[str, ...]:
-        return self._normal_target_labels
+    def operational_target_labels(self) -> tuple[str, ...]:
+        return self._operational_target_labels
 
     @property
     def default_top_k(self) -> int:
@@ -454,7 +460,7 @@ class InMemoryKnnModel:
 
 
 class KnnModelPortAdapter:
-    """Translate canonical target slugs to the frozen public ``ModelPort``."""
+    """Translate probable conditions to the frozen public ``ModelPort``."""
 
     def __init__(self, model: InMemoryKnnModel) -> None:
         self._model = model
@@ -474,21 +480,22 @@ class KnnModelPortAdapter:
             OpaqueNeighbor(
                 neighbor_ref=neighbor.neighbor_ref,
                 rank=neighbor.rank,
-                fault_code=self._model.label_for_target(
-                    neighbor.target_slug
-                ).fault_code,
+                fault_code=_public_condition_code(
+                    self._model.label_for_target(neighbor.target_slug)
+                ),
                 distance=neighbor.distance,
             )
             for neighbor in candidate.neighbors
         )
-        is_normal = candidate_label.is_normal
+        operating_state = candidate_label.operating_state
+        is_operational = operating_state is not None
         is_abstained = candidate.abstention_reason is not None
         return ModelPrediction(
             disposition=(
                 ModelDisposition.OUT_OF_DISTRIBUTION
                 if is_abstained
                 else ModelDisposition.NORMAL
-                if is_normal
+                if is_operational
                 else ModelDisposition.FAULT
             ),
             abstention_reason=candidate.abstention_reason,
@@ -496,10 +503,16 @@ class KnnModelPortAdapter:
                 None
                 if is_abstained
                 else Diagnosis(
-                    code=candidate_label.fault_code,
+                    code=_public_condition_code(candidate_label),
                     summary=(
-                        "Classe candidata da baseline k-NN; o suporte combina "
-                        "votos e distância como heurística, não probabilidade."
+                        "Condição operacional candidata baseada em históricos "
+                        f"semelhantes: {operating_state.value}. "
+                        "O suporte combina votos e distância como heurística, "
+                        "não probabilidade."
+                        if operating_state is not None
+                        else "Condição problemática candidata baseada em "
+                        "históricos semelhantes; o suporte combina votos e "
+                        "distância como heurística, não probabilidade."
                     ),
                 )
             ),
@@ -507,9 +520,15 @@ class KnnModelPortAdapter:
             model_id=self._model.model_id,
             neighbors=public_neighbors,
             retrieval_key=(
-                None if is_abstained or is_normal else candidate.target_slug
+                None if is_abstained or is_operational else candidate.target_slug
             ),
         )
+
+
+def _public_condition_code(label: KnnLabel) -> str:
+    if label.operating_state is not None:
+        return f"operating_state_{label.operating_state.value}"
+    return label.fault_code
 
 
 def fit_knn_model(
@@ -519,7 +538,6 @@ def fit_knn_model(
     training_partition_sha256: str,
     validation_frame: pd.DataFrame | None = None,
     validation_partition_sha256: str | None = None,
-    normal_target_labels: Sequence[str] = (),
     default_top_k: int = DEFAULT_TOP_K,
     distance_quantile: float = KNN_DISTANCE_QUANTILE,
     vote_margin_quantile: float = KNN_VOTE_MARGIN_QUANTILE,
@@ -578,8 +596,7 @@ def fit_knn_model(
         )
 
     targets = _training_targets(training_frame["y"])
-    normal = _normal_target_labels(normal_target_labels)
-    labels, target_indices = _build_label_table(targets, normal)
+    labels, target_indices = _build_label_table(targets)
     neighbor_refs = _build_neighbor_refs(dataset_id, targets)
 
     preprocessor = cast(
@@ -636,7 +653,6 @@ def fit_knn_model(
     return InMemoryKnnModel(
         dataset_id=dataset_id,
         labels=labels,
-        normal_target_labels=normal,
         default_top_k=default_top_k,
         training_partition_sha256=training_partition_sha256,
         abstention_policy=abstention_policy,
@@ -748,7 +764,7 @@ def load_knn_model(
         KnnLabel(
             target_slug=_text(item["target_slug"], "label.target_slug"),
             fault_code=_text(item["fault_code"], "label.fault_code"),
-            is_normal=_boolean(item["is_normal"], "label.is_normal"),
+            operating_state=_operating_state_from_manifest(item["operating_state"]),
         )
         for item in (
             _mapping(value, "label")
@@ -759,10 +775,11 @@ def load_knn_model(
     abstention_policy = _policy_from_manifest(
         _mapping(manifest["abstention_policy"], "abstention_policy")
     )
-    normal = tuple(
-        _text(item, "normal_target_labels")
+    declared_operational = tuple(
+        _text(item, "operational_target_labels")
         for item in _sequence(
-            configuration["normal_target_labels"], "normal_target_labels"
+            configuration["operational_target_labels"],
+            "operational_target_labels",
         )
     )
     state = _state_from_manifest(_mapping(manifest["preprocessor"], "preprocessor"))
@@ -770,7 +787,6 @@ def load_knn_model(
     model = InMemoryKnnModel(
         dataset_id=_require_sha256(manifest["dataset_id"], KnnArtifactError),
         labels=labels,
-        normal_target_labels=normal,
         default_top_k=_integer(configuration["default_top_k"], "default_top_k"),
         training_partition_sha256=_require_sha256(
             _mapping(manifest["training"], "training")["partition_sha256"],
@@ -782,6 +798,8 @@ def load_knn_model(
         target_indices=target_indices,
         neighbor_refs=neighbor_refs,
     )
+    if model.operational_target_labels != declared_operational:
+        raise KnnArtifactError("Model operating-state policy binding is invalid.")
     declared_model_id = _text(manifest["model_id"], "model_id")
     declared_content = _require_sha256(manifest["content_sha256"], KnnArtifactError)
     if (
@@ -964,32 +982,19 @@ def _training_targets(series: pd.Series) -> tuple[str, ...]:
     return tuple(targets)
 
 
-def _normal_target_labels(value: Sequence[str]) -> tuple[str, ...]:
-    if isinstance(value, (str, bytes)):
-        raise KnnTrainingError("Normal target labels require an ordered sequence.")
-    labels = tuple(value)
-    if len(labels) != len(set(labels)):
-        raise KnnTrainingError("Normal target labels must be unique.")
-    for label in labels:
-        _validate_target_slug(label, KnnTrainingError)
-    return tuple(sorted(labels))
-
-
 def _build_label_table(
-    targets: tuple[str, ...], normal: tuple[str, ...]
+    targets: tuple[str, ...],
 ) -> tuple[tuple[KnnLabel, ...], TargetIndexVector]:
     target_labels = tuple(sorted(set(targets)))
-    if not set(normal).issubset(target_labels):
-        raise KnnTrainingError("Normal target labels must be training classes.")
     labels = tuple(
         KnnLabel(
             target_slug=target,
             fault_code=_fault_code(target),
-            is_normal=target in normal,
+            operating_state=resolve_operating_state(target),
         )
         for target in target_labels
     )
-    _validate_label_table(labels, normal, KnnTrainingError)
+    _validate_label_table(labels, KnnTrainingError)
     positions = {label.target_slug: index for index, label in enumerate(labels)}
     indices = np.asarray(
         [positions[target] for target in targets],
@@ -1073,18 +1078,15 @@ def _support_score(
 
 def _validate_label_table(
     labels: tuple[KnnLabel, ...],
-    normal: tuple[str, ...],
     error_type: type[KnnError],
 ) -> None:
-    if (
-        not labels
-        or normal != tuple(sorted(set(normal)))
-        or tuple(label.target_slug for label in labels)
-        != tuple(sorted(label.target_slug for label in labels))
+    if not labels or tuple(label.target_slug for label in labels) != tuple(
+        sorted(label.target_slug for label in labels)
     ):
         raise error_type("Model label table is invalid.")
     targets: set[str] = set()
     codes: set[str] = set()
+    operating_states: set[OperatingState] = set()
     for label in labels:
         _validate_target_slug(label.target_slug, error_type)
         if (
@@ -1092,13 +1094,17 @@ def _validate_label_table(
             or label.fault_code in codes
             or label.fault_code != _fault_code(label.target_slug)
             or not _FAULT_CODE_PATTERN.fullmatch(label.fault_code)
-            or label.is_normal != (label.target_slug in normal)
+            or label.operating_state is not resolve_operating_state(label.target_slug)
+            or (
+                label.operating_state is not None
+                and label.operating_state in operating_states
+            )
         ):
             raise error_type("Model label table is not bijective.")
         targets.add(label.target_slug)
         codes.add(label.fault_code)
-    if set(normal) - targets:
-        raise error_type("Normal target labels are not model classes.")
+        if label.operating_state is not None:
+            operating_states.add(label.operating_state)
 
 
 def _validate_target_slug(value: object, error_type: type[KnnError]) -> str:
@@ -1339,7 +1345,8 @@ def _configuration(model: InMemoryKnnModel) -> dict[str, object]:
         "preprocessor": _PREPROCESSOR,
         "preprocessor_fit_partition": "train",
         "imputation": _IMPUTATION,
-        "normal_target_labels": list(model.normal_target_labels),
+        "operating_state_policy": operating_state_policy_payload(),
+        "operational_target_labels": list(model.operational_target_labels),
     }
 
 
@@ -1372,7 +1379,9 @@ def _label_payload(labels: tuple[KnnLabel, ...]) -> list[dict[str, object]]:
         {
             "target_slug": label.target_slug,
             "fault_code": label.fault_code,
-            "is_normal": label.is_normal,
+            "operating_state": (
+                None if label.operating_state is None else label.operating_state.value
+            ),
         }
         for label in labels
     ]
@@ -1586,7 +1595,8 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
             "preprocessor",
             "preprocessor_fit_partition",
             "imputation",
-            "normal_target_labels",
+            "operating_state_policy",
+            "operational_target_labels",
         ),
     )
     if (
@@ -1610,9 +1620,23 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
         or configuration["preprocessor"] != _PREPROCESSOR
         or configuration["preprocessor_fit_partition"] != "train"
         or configuration["imputation"] != _IMPUTATION
+        or configuration["operating_state_policy"] != operating_state_policy_payload()
     ):
         raise KnnArtifactError("Model configuration is incompatible.")
     _validate_top_k(configuration["default_top_k"], KnnArtifactError)
+    operational_targets = _sequence(
+        configuration["operational_target_labels"],
+        "operational_target_labels",
+    )
+    if (
+        any(not isinstance(item, str) for item in operational_targets)
+        or operational_targets != sorted(set(cast(list[str], operational_targets)))
+        or any(
+            resolve_operating_state(item) is None
+            for item in cast(list[str], operational_targets)
+        )
+    ):
+        raise KnnArtifactError("Model operating-state policy binding is invalid.")
     policy = _policy_from_manifest(
         _mapping(manifest["abstention_policy"], "abstention_policy")
     )
@@ -1622,7 +1646,10 @@ def _validate_manifest_shape(manifest: Mapping[str, object]) -> None:
         raise KnnArtifactError("Model label table is incomplete.")
     for raw_label in labels:
         label = _mapping(raw_label, "label")
-        _exact_keys(label, ("target_slug", "fault_code", "is_normal"))
+        _exact_keys(
+            label,
+            ("target_slug", "fault_code", "operating_state"),
+        )
 
     training = _mapping(manifest["training"], "training")
     _exact_keys(
@@ -1918,14 +1945,19 @@ def _text(value: object, context: str) -> str:
     return value
 
 
+def _operating_state_from_manifest(value: object) -> OperatingState | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise KnnArtifactError("Model manifest operating_state is invalid.")
+    try:
+        return OperatingState(value)
+    except ValueError:
+        raise KnnArtifactError("Model manifest operating_state is invalid.") from None
+
+
 def _integer(value: object, context: str) -> int:
     if type(value) is not int:
-        raise KnnArtifactError(f"Model manifest {context} is invalid.")
-    return value
-
-
-def _boolean(value: object, context: str) -> bool:
-    if type(value) is not bool:
         raise KnnArtifactError(f"Model manifest {context} is invalid.")
     return value
 

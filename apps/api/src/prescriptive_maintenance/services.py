@@ -197,6 +197,10 @@ class AnalysisService:
             )
 
         if prediction.disposition is ModelDisposition.NORMAL:
+            if prediction.retrieval_key is not None:
+                raise AnalysisUnavailableError(
+                    "The analysis model returned a contradictory operating state."
+                )
             return NormalAnalysisResult(
                 analysis_id="ana_synthetic_normal",
                 outcome=AnalysisOutcome.NORMAL,

@@ -30,9 +30,11 @@ ModelPrediction
 ```
 
 Somente `FAULT` com chave documental, mapping válido e evidência elegível pode
-alcançar o provider. `NORMAL`, `OUT_OF_DISTRIBUTION`, falta de mapping e ausência
-de evidência encerram sem chamada. O diagnóstico do modelo não pode ser
-substituído pelo texto recuperado.
+alcançar o provider. Uma condição operacional candidata preserva seu
+`Diagnosis` explicável em `NORMAL`, mas mantém `retrieval_key=null` e encerra
+sem recuperação ou prescrição. `OUT_OF_DISTRIBUTION`, falta de mapping e
+ausência de evidência também encerram sem chamada. O diagnóstico do modelo não
+pode ser substituído pelo texto recuperado.
 
 ## Contratos e limites
 
@@ -102,4 +104,4 @@ incidentes.
 - [pipeline documental](../validation/document-pipeline.md);
 - [prova dinâmica de chunk e recuperação](../validation/dynamic-rag-e2e.md);
 - [golden set](../validation/product-golden-e2e.md);
-- [model card](../model-cards/temporal-knn-v2.md).
+- [model card atual](../model-cards/temporal-knn-v3.md).

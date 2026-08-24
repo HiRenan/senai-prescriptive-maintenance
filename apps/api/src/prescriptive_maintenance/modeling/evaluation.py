@@ -51,10 +51,14 @@ from prescriptive_maintenance.modeling.similarity_index import (
     SimilarityIndexError,
     load_similarity_index,
 )
+from prescriptive_maintenance.operating_states import (
+    operating_state_policy_payload,
+    resolve_operating_state,
+)
 from prescriptive_maintenance.ports import ModelAbstentionReason
 
-MODEL_EVALUATION_SCHEMA_VERSION: Final = 1
-MODEL_EVALUATION_PROTOCOL_VERSION: Final = "temporal-knn-exact.v1"
+MODEL_EVALUATION_SCHEMA_VERSION: Final = 2
+MODEL_EVALUATION_PROTOCOL_VERSION: Final = "temporal-knn-exact.v2"
 MODEL_EVALUATION_TOP_K: Final = 5
 MODEL_EVALUATION_WORKING_MEMORY_MIB: Final = 64
 MODEL_EVALUATION_PARITY_SAMPLE_COUNT: Final = 16
@@ -62,7 +66,7 @@ MODEL_EVALUATION_LATENCY_WARMUP_COUNT: Final = 5
 MODEL_EVALUATION_LATENCY_SAMPLE_COUNT: Final = 64
 MODEL_EVALUATION_HOLDOUT_PARTITION: Final = "test"
 
-_PLAN_ID_PREFIX: Final = "evaluation_plan_v1_"
+_PLAN_ID_PREFIX: Final = "evaluation_plan_v2_"
 _HOLDOUT_FILENAME: Final = "test.parquet"
 _MANIFEST_MAXIMUM_BYTES: Final = 2 * 1024 * 1024
 _HOLDOUT_MAXIMUM_BYTES: Final = 128 * 1024 * 1024
@@ -72,15 +76,28 @@ _INDEX_ID_PATTERN: Final = re.compile(r"^similarity_index_[a-z0-9_.-]{3,64}$")
 _EVALUATED_ENGINE: Final = "in_memory_knn_exact"
 _INDEX_EVALUATION_ROLE: Final = "identity_and_compatibility_binding_only"
 _METRIC_NAMES: Final[tuple[str, ...]] = (
+    "candidate_operational_objective_accuracy",
+    "candidate_always_problem_baseline_accuracy",
+    "candidate_operational_objective_balanced_accuracy",
+    "candidate_operational_recall",
+    "candidate_problem_recall",
+    "selective_operational_objective_accuracy",
+    "selective_always_problem_baseline_accuracy",
+    "selective_operational_objective_balanced_accuracy",
+    "selective_operational_recall",
+    "selective_problem_recall",
+    "coverage",
+    "abstention_rate",
     "candidate_top1_accuracy",
     "neighbor_hit_at_1",
     "neighbor_hit_at_k",
     "neighbor_mrr_at_k",
     "majority_class_accuracy",
-    "coverage",
-    "abstention_rate",
     "selective_candidate_accuracy",
 )
+_ALWAYS_PROBLEM_BASELINE_TYPE: Final = "constant_class_accuracy"
+_ALWAYS_PROBLEM_BASELINE_STRATEGY: Final = "always_problem"
+_ALWAYS_PROBLEM_BASELINE_FORMULA: Final = "actual_problem_count / scope_row_count"
 
 type FloatMatrix = NDArray[np.float64]
 type FloatVector = NDArray[np.float64]
@@ -158,8 +175,19 @@ class FrozenEvaluationPlan:
                     "then_target_slug_ascending"
                 ),
                 "working_memory_mib": MODEL_EVALUATION_WORKING_MEMORY_MIB,
-                "metric_scopes": ["all_rows", "known_train_classes"],
+                "metric_scopes": {
+                    "primary": (
+                        "candidate_all_rows_and_selective_accepted_"
+                        "operational_vs_problem"
+                    ),
+                    "secondary_exact_label_diagnostics": [
+                        "all_rows",
+                        "known_train_classes",
+                    ],
+                },
                 "metrics": list(_METRIC_NAMES),
+                "baseline_definitions": _baseline_definitions_payload(),
+                "operating_state_policy": operating_state_policy_payload(),
             },
             "abstention_policy": {
                 "version": self.policy.version,
@@ -265,12 +293,79 @@ class ScopeMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class AlwaysProblemBaselineAccuracy:
+    """Accuracy of the constant problem candidate in one explicit scope."""
+
+    actual_problem_count: int
+    scope_row_count: int
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "metric_type": _ALWAYS_PROBLEM_BASELINE_TYPE,
+            "strategy": _ALWAYS_PROBLEM_BASELINE_STRATEGY,
+            "formula": _ALWAYS_PROBLEM_BASELINE_FORMULA,
+            **_rate_payload(self.actual_problem_count, self.scope_row_count),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalObjectiveMetrics:
+    """Candidate and selective operating-state versus problem metrics."""
+
+    candidate_operational_as_operational_count: int
+    candidate_operational_as_problem_count: int
+    candidate_problem_as_operational_count: int
+    candidate_problem_as_problem_count: int
+    selective_operational_as_operational_count: int
+    selective_operational_as_problem_count: int
+    selective_problem_as_operational_count: int
+    selective_problem_as_problem_count: int
+    abstention_counts: tuple[tuple[str, int], ...]
+
+    def to_payload(self) -> dict[str, object]:
+        candidate = _operational_candidate_scope_payload(
+            prefix="candidate",
+            baseline_metric_name="candidate_always_problem_baseline_accuracy",
+            operational_as_operational=(
+                self.candidate_operational_as_operational_count
+            ),
+            operational_as_problem=self.candidate_operational_as_problem_count,
+            problem_as_operational=self.candidate_problem_as_operational_count,
+            problem_as_problem=self.candidate_problem_as_problem_count,
+        )
+        selective = _operational_candidate_scope_payload(
+            prefix="selective_candidate",
+            baseline_metric_name="selective_always_problem_baseline_accuracy",
+            operational_as_operational=(
+                self.selective_operational_as_operational_count
+            ),
+            operational_as_problem=self.selective_operational_as_problem_count,
+            problem_as_operational=self.selective_problem_as_operational_count,
+            problem_as_problem=self.selective_problem_as_problem_count,
+        )
+        row_count = cast(int, candidate["row_count"])
+        accepted_count = cast(int, selective["row_count"])
+        abstained_count = row_count - accepted_count
+        return {
+            "candidate_all_rows": candidate,
+            "selective_accepted": selective,
+            "coverage": _rate_payload(accepted_count, row_count),
+            "abstained": {
+                "count": abstained_count,
+                "rate": _rate_payload(abstained_count, row_count),
+                "reasons": {reason: count for reason, count in self.abstention_counts},
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationReport:
     """Sanitized aggregate report; no labels, rows, features, or paths."""
 
     plan: FrozenEvaluationPlan
     materialized_plan_sha256: str
     hardware: Mapping[str, object]
+    operational_objective: OperationalObjectiveMetrics
     all_rows: ScopeMetrics
     known_train_classes: ScopeMetrics
     unknown_class_row_count: int
@@ -295,8 +390,13 @@ class EvaluationReport:
             },
             "metrics": {
                 "definitions": _metric_definitions(),
-                "all_rows": self.all_rows.to_payload(),
-                "known_train_classes": self.known_train_classes.to_payload(),
+                "primary_operational_objective": (
+                    self.operational_objective.to_payload()
+                ),
+                "secondary_exact_label_diagnostics": {
+                    "all_rows": self.all_rows.to_payload(),
+                    "known_train_classes": self.known_train_classes.to_payload(),
+                },
             },
             "execution": {
                 "full_distance_rows": self.all_rows.row_count,
@@ -338,6 +438,14 @@ class EvaluationReport:
             "limitations": [
                 "O suporte é heurístico e não representa probabilidade.",
                 "O protocolo não ajusta hiperparâmetros ou limiares no teste.",
+                (
+                    "O objetivo operacional versus problema é pós-hoc no mesmo "
+                    "holdout já observado e não constitui validação independente."
+                ),
+                (
+                    "A correspondência exata de labels permanece apenas como "
+                    "diagnóstico secundário."
+                ),
                 "Classes ausentes do treino não podem ser previstas pelo candidato.",
                 "A busca é exata e O(N); o lote reduz overhead sem mudar o ranking.",
                 (
@@ -551,6 +659,7 @@ def evaluate_frozen_holdout(
     )
     all_metrics = _scope_metrics(outcomes, all_mask, majority_label)
     known_metrics = _scope_metrics(outcomes, known_mask, majority_label)
+    operational_metrics = _operational_objective_metrics(outcomes)
     latency = _benchmark_latency(
         holdout,
         model=context.model,
@@ -560,6 +669,7 @@ def evaluate_frozen_holdout(
         plan=context.plan,
         materialized_plan_sha256=context.materialized_plan_sha256,
         hardware=_hardware_profile(),
+        operational_objective=operational_metrics,
         all_rows=all_metrics,
         known_train_classes=known_metrics,
         unknown_class_row_count=len(outcomes) - known_metrics.row_count,
@@ -825,6 +935,45 @@ def _scope_metrics(
     )
 
 
+def _operational_objective_metrics(
+    outcomes: tuple[_RowEvaluation, ...],
+) -> OperationalObjectiveMetrics:
+    candidate_counts = [0, 0, 0, 0]
+    selective_counts = [0, 0, 0, 0]
+    for item in outcomes:
+        truth_is_operational = resolve_operating_state(item.truth) is not None
+        candidate_is_operational = resolve_operating_state(item.candidate) is not None
+        if truth_is_operational and candidate_is_operational:
+            position = 0
+        elif truth_is_operational:
+            position = 1
+        elif candidate_is_operational:
+            position = 2
+        else:
+            position = 3
+        candidate_counts[position] += 1
+        if item.abstention_reason is None:
+            selective_counts[position] += 1
+    reasons = tuple(
+        (
+            reason.value,
+            sum(item.abstention_reason is reason for item in outcomes),
+        )
+        for reason in ModelAbstentionReason
+    )
+    return OperationalObjectiveMetrics(
+        candidate_operational_as_operational_count=candidate_counts[0],
+        candidate_operational_as_problem_count=candidate_counts[1],
+        candidate_problem_as_operational_count=candidate_counts[2],
+        candidate_problem_as_problem_count=candidate_counts[3],
+        selective_operational_as_operational_count=selective_counts[0],
+        selective_operational_as_problem_count=selective_counts[1],
+        selective_problem_as_operational_count=selective_counts[2],
+        selective_problem_as_problem_count=selective_counts[3],
+        abstention_counts=reasons,
+    )
+
+
 def _benchmark_latency(
     holdout: pd.DataFrame,
     *,
@@ -1054,6 +1203,8 @@ def _plan_identity_fields(
         "latency_warmup_count": MODEL_EVALUATION_LATENCY_WARMUP_COUNT,
         "latency_sample_count": MODEL_EVALUATION_LATENCY_SAMPLE_COUNT,
         "metric_names": list(_METRIC_NAMES),
+        "baseline_definitions": _baseline_definitions_payload(),
+        "operating_state_policy": operating_state_policy_payload(),
         "calibration_partition": calibration_partition,
         "calibration_partition_sha256": calibration_partition_sha256,
         "policy": {
@@ -1068,11 +1219,62 @@ def _plan_identity_fields(
     }
 
 
+def _baseline_definitions_payload() -> dict[str, object]:
+    return {
+        "always_problem": {
+            "metric_type": _ALWAYS_PROBLEM_BASELINE_TYPE,
+            "strategy": _ALWAYS_PROBLEM_BASELINE_STRATEGY,
+            "formula": _ALWAYS_PROBLEM_BASELINE_FORMULA,
+            "scopes": ["candidate_all_rows", "selective_accepted"],
+        }
+    }
+
+
 def _metric_definitions() -> dict[str, str]:
     return {
+        "candidate_operational_objective_accuracy": (
+            "Candidato k-NN e verdade concordam no recorte binário estado "
+            "operacional versus problema antes da abstenção; não representa "
+            "a condição emitida pelo sistema."
+        ),
+        "candidate_always_problem_baseline_accuracy": (
+            "Acurácia da candidata constante problema em todas as linhas: "
+            "quantidade real de problemas dividida pelo total do holdout."
+        ),
+        "candidate_operational_objective_balanced_accuracy": (
+            "Média não ponderada dos recalls do candidato pré-abstenção."
+        ),
+        "candidate_operational_recall": (
+            "Estados operacionais candidatos divididos pelos estados "
+            "operacionais verdadeiros antes da abstenção."
+        ),
+        "candidate_problem_recall": (
+            "Problemas candidatos divididos pelos problemas verdadeiros antes "
+            "da abstenção."
+        ),
+        "selective_operational_objective_accuracy": (
+            "Candidato e verdade concordam entre as linhas aceitas; denominador: "
+            "linhas sem abstenção."
+        ),
+        "selective_always_problem_baseline_accuracy": (
+            "Acurácia da candidata constante problema entre aceitas: quantidade "
+            "real de problemas aceita dividida pelo total de linhas aceitas."
+        ),
+        "selective_operational_objective_balanced_accuracy": (
+            "Média não ponderada dos recalls operacional e de problema somente "
+            "entre as linhas aceitas."
+        ),
+        "selective_operational_recall": (
+            "Estados operacionais aceitos como operacionais divididos pelos "
+            "estados operacionais verdadeiros aceitos."
+        ),
+        "selective_problem_recall": (
+            "Problemas aceitos como problemas divididos pelos problemas "
+            "verdadeiros aceitos."
+        ),
         "candidate_top1_accuracy": (
-            "Candidata escolhida por votos, soma de distâncias e slug igual ao "
-            "target; denominador: linhas do escopo."
+            "Diagnóstico secundário exato: candidata escolhida por votos, soma "
+            "de distâncias e slug igual ao target; denominador: linhas do escopo."
         ),
         "neighbor_hit_at_1": (
             "Target do primeiro vizinho igual ao target consultado; denominador: "
@@ -1095,6 +1297,58 @@ def _metric_definitions() -> dict[str, str]:
         "selective_candidate_accuracy": (
             "Candidatas corretas entre linhas aceitas; denominador: aceitas."
         ),
+    }
+
+
+def _operational_candidate_scope_payload(
+    *,
+    prefix: str,
+    baseline_metric_name: str,
+    operational_as_operational: int,
+    operational_as_problem: int,
+    problem_as_operational: int,
+    problem_as_problem: int,
+) -> dict[str, object]:
+    operational_count = operational_as_operational + operational_as_problem
+    problem_count = problem_as_operational + problem_as_problem
+    row_count = operational_count + problem_count
+    operational_recall = _rate_payload(
+        operational_as_operational,
+        operational_count,
+    )
+    problem_recall = _rate_payload(problem_as_problem, problem_count)
+    operational_value = cast(float | None, operational_recall["value"])
+    problem_value = cast(float | None, problem_recall["value"])
+    balanced_accuracy = (
+        None
+        if operational_value is None or problem_value is None
+        else round((operational_value + problem_value) / 2.0, 12)
+    )
+    return {
+        "row_count": row_count,
+        "counts": {
+            "actual_operational": operational_count,
+            "actual_problem": problem_count,
+            f"{prefix}_operational": (
+                operational_as_operational + problem_as_operational
+            ),
+            f"{prefix}_problem": operational_as_problem + problem_as_problem,
+            "operational_as_operational": operational_as_operational,
+            "operational_as_problem": operational_as_problem,
+            "problem_as_operational": problem_as_operational,
+            "problem_as_problem": problem_as_problem,
+        },
+        f"{prefix}_accuracy": _rate_payload(
+            operational_as_operational + problem_as_problem,
+            row_count,
+        ),
+        baseline_metric_name: AlwaysProblemBaselineAccuracy(
+            actual_problem_count=problem_count,
+            scope_row_count=row_count,
+        ).to_payload(),
+        f"{prefix}_balanced_accuracy": {"value": balanced_accuracy},
+        f"{prefix}_operational_recall": operational_recall,
+        f"{prefix}_problem_recall": problem_recall,
     }
 
 

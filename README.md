@@ -27,7 +27,7 @@ autorização explícitas.
 | --- | --- | --- |
 | API | FastAPI, contrato OpenAPI v1, cinco estados de análise, health checks, correlation ID e erros sanitizados. | A factory padrão usa fakes sintéticos; não há autenticação nem artefatos reais autorizados. |
 | Dados | Pipeline local auditado, contrato de 18 features, split temporal e checker determinístico. | A fonte e os derivados por registro permanecem locais e ignorados; a CI usa somente fixtures sintéticas. |
-| Modelo | Baseline k-NN v2 determinística, índice exato e política de abstenção. | A avaliação temporal não aprovou o modelo para classificação ou automação. |
+| Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
 | Web | Processo Node e imagem OCI com liveness. | Não existe interface, componente visual ou experiência de usuário implementada. |
@@ -157,15 +157,24 @@ mapeamentos e relatórios por registro ficam em destinos locais ignorados.
 Fontes canônicas para avaliação:
 
 - [data card do pipeline tabular](docs/data/banner-data-card.md);
-- [model card do k-NN temporal v2](docs/model-cards/temporal-knn-v2.md);
+- [model card do k-NN temporal v3](docs/model-cards/temporal-knn-v3.md);
 - [RAG card da composição prescritiva](docs/rag/prescriptive-rag-card.md).
 
-Resultados **medidos** nas execuções históricas aprovadas incluem 166.796 linhas
-reconciliadas no pipeline local e 24.768 linhas no holdout temporal do modelo.
-Nesse holdout, a candidata top-1 acertou 49 linhas e a cobertura após abstenção
-foi 39,7408%; o resultado sustenta a decisão de não aprovar automação. Esses
-números não foram remensurados por esta consolidação e não são métricas de
-produção.
+Resultados **medidos** incluem 166.796 linhas reconciliadas no pipeline local e
+24.768 linhas no holdout temporal do modelo. No diagnóstico operacional
+pós-hoc, a candidata pré-abstenção atingiu 97,3756% de acurácia bruta, abaixo
+dos 98,6999% da baseline trivial que marca todas as linhas como problema. Entre
+as aceitas, a acurácia de 96,9928% também ficou abaixo dos 97,6938% da mesma
+baseline no recorte. O único sinal acima do trivial está na leitura balanceada
+e nos recalls: a candidata obteve 59,4426% de acurácia balanceada e 20,4969% de
+recall operacional, contra 50% e 0% da baseline constante, mas isso continua
+insuficiente. A cobertura foi 39,7408%; entre as linhas aceitas, o recall
+operacional foi 22,4670%. A acurácia bruta inclui linhas depois abstidas, é
+dominada por problemas e não representa o comportamento final. A
+[avaliação exata histórica](docs/validation/model-evaluation.md) permanece como
+diagnóstico secundário, e a
+[correção da SEN-78](docs/validation/model-evaluation-v2.md) registra fórmulas e
+denominadores. Nenhuma medição é métrica de produção ou aprova automação.
 
 O custo AWS de USD 2,72 com contingência para uma janela de oito horas é uma
 **estimativa**, não gasto observado. As hipóteses, a data de referência e a

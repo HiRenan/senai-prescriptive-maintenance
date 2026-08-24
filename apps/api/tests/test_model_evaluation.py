@@ -16,10 +16,12 @@ import pytest
 from prescriptive_maintenance.contracts import ANALYSIS_FEATURE_NAMES
 from prescriptive_maintenance.modeling.evaluation import (
     MODEL_EVALUATION_PROTOCOL_VERSION,
+    MODEL_EVALUATION_SCHEMA_VERSION,
     MODEL_EVALUATION_TOP_K,
     EvaluationReport,
     FrozenEvaluationContext,
     ModelEvaluationError,
+    OperationalObjectiveMetrics,
     evaluate_frozen_holdout,
     freeze_evaluation_plan,
     run_evaluation,
@@ -34,6 +36,7 @@ from prescriptive_maintenance.modeling.knn import (
 from prescriptive_maintenance.modeling.similarity_index import (
     save_similarity_index_from_knn_artifact,
 )
+from prescriptive_maintenance.operating_states import operating_state_policy_payload
 
 DATASET_ID = "a" * 64
 SCHEMA_ID = "b" * 64
@@ -90,12 +93,12 @@ def _build_artifacts(
     training = _frame(
         training_values,
         (
-            "synthetic-alpha",
-            "synthetic-alpha",
-            "synthetic-alpha",
-            "synthetic-beta",
-            "synthetic-beta",
-            "synthetic-beta",
+            "normal",
+            "normal",
+            "normal",
+            "synthetic-problem",
+            "synthetic-problem",
+            "synthetic-problem",
         ),
     )
     validation = _frame(
@@ -109,8 +112,8 @@ def _build_artifacts(
     test = _frame(
         (0.1, 10.1, 30.0, 0.0),
         (
-            "synthetic-alpha",
-            "synthetic-beta",
+            "normal",
+            "synthetic-problem",
             "synthetic-unseen-a",
             "synthetic-unseen-b",
         ),
@@ -132,7 +135,6 @@ def _build_artifacts(
         training_partition_sha256=train_hash,
         validation_frame=validation,
         validation_partition_sha256=validation_hash,
-        normal_target_labels=("synthetic-alpha",),
         minimum_class_count=1,
     )
     model_directory = save_knn_model(fitted, tmp_path / "model")
@@ -210,7 +212,7 @@ def test_plan_freezes_without_opening_or_requiring_holdout_bytes(
 
     context = _freeze(artifacts)
 
-    assert context.plan.plan_id.startswith("evaluation_plan_v1_")
+    assert context.plan.plan_id.startswith("evaluation_plan_v2_")
     assert context.plan.dataset_id == DATASET_ID
     assert context.plan.model_id == artifacts.fitted_model.model_id
     assert context.plan.calibration_partition == "validation"
@@ -220,6 +222,9 @@ def test_plan_freezes_without_opening_or_requiring_holdout_bytes(
     )
     assert context.plan.to_payload()["protocol_version"] == (
         MODEL_EVALUATION_PROTOCOL_VERSION
+    )
+    assert context.plan.to_payload()["schema_version"] == (
+        MODEL_EVALUATION_SCHEMA_VERSION
     )
     assert sha256(context.materialized_plan).hexdigest() == (
         context.materialized_plan_sha256
@@ -244,18 +249,132 @@ def test_real_method_options_are_frozen_and_not_cli_tunable(tmp_path: Path) -> N
             "then_target_slug_ascending"
         ),
         "working_memory_mib": 64,
-        "metric_scopes": ["all_rows", "known_train_classes"],
+        "metric_scopes": {
+            "primary": (
+                "candidate_all_rows_and_selective_accepted_operational_vs_problem"
+            ),
+            "secondary_exact_label_diagnostics": [
+                "all_rows",
+                "known_train_classes",
+            ],
+        },
         "metrics": [
+            "candidate_operational_objective_accuracy",
+            "candidate_always_problem_baseline_accuracy",
+            "candidate_operational_objective_balanced_accuracy",
+            "candidate_operational_recall",
+            "candidate_problem_recall",
+            "selective_operational_objective_accuracy",
+            "selective_always_problem_baseline_accuracy",
+            "selective_operational_objective_balanced_accuracy",
+            "selective_operational_recall",
+            "selective_problem_recall",
+            "coverage",
+            "abstention_rate",
             "candidate_top1_accuracy",
             "neighbor_hit_at_1",
             "neighbor_hit_at_k",
             "neighbor_mrr_at_k",
             "majority_class_accuracy",
-            "coverage",
-            "abstention_rate",
             "selective_candidate_accuracy",
         ],
+        "baseline_definitions": {
+            "always_problem": {
+                "metric_type": "constant_class_accuracy",
+                "strategy": "always_problem",
+                "formula": "actual_problem_count / scope_row_count",
+                "scopes": ["candidate_all_rows", "selective_accepted"],
+            }
+        },
+        "operating_state_policy": operating_state_policy_payload(),
     }
+
+
+def test_operational_objective_separates_candidates_selective_and_abstained() -> None:
+    payload = OperationalObjectiveMetrics(
+        candidate_operational_as_operational_count=1,
+        candidate_operational_as_problem_count=2,
+        candidate_problem_as_operational_count=2,
+        candidate_problem_as_problem_count=3,
+        selective_operational_as_operational_count=0,
+        selective_operational_as_problem_count=1,
+        selective_problem_as_operational_count=1,
+        selective_problem_as_problem_count=1,
+        abstention_counts=(
+            ("distance_out_of_distribution", 2),
+            ("inconclusive_vote", 2),
+            ("rare_class_support", 1),
+        ),
+    ).to_payload()
+
+    candidate = cast(dict[str, object], payload["candidate_all_rows"])
+    selective = cast(dict[str, object], payload["selective_accepted"])
+    assert candidate["candidate_accuracy"] == {
+        "numerator": 4,
+        "denominator": 8,
+        "value": 0.5,
+    }
+    assert candidate["candidate_always_problem_baseline_accuracy"] == {
+        "metric_type": "constant_class_accuracy",
+        "strategy": "always_problem",
+        "formula": "actual_problem_count / scope_row_count",
+        "numerator": 5,
+        "denominator": 8,
+        "value": 0.625,
+    }
+    assert candidate["candidate_operational_recall"] == {
+        "numerator": 1,
+        "denominator": 3,
+        "value": 0.333333333333,
+    }
+    assert selective["selective_candidate_accuracy"] == {
+        "numerator": 1,
+        "denominator": 3,
+        "value": 0.333333333333,
+    }
+    assert selective["selective_always_problem_baseline_accuracy"] == {
+        "metric_type": "constant_class_accuracy",
+        "strategy": "always_problem",
+        "formula": "actual_problem_count / scope_row_count",
+        "numerator": 2,
+        "denominator": 3,
+        "value": 0.666666666667,
+    }
+    candidate_accuracy = cast(dict[str, object], candidate["candidate_accuracy"])[
+        "value"
+    ]
+    candidate_baseline = cast(
+        dict[str, object],
+        candidate["candidate_always_problem_baseline_accuracy"],
+    )["value"]
+    selective_accuracy = cast(
+        dict[str, object], selective["selective_candidate_accuracy"]
+    )["value"]
+    selective_baseline = cast(
+        dict[str, object],
+        selective["selective_always_problem_baseline_accuracy"],
+    )["value"]
+    assert isinstance(candidate_accuracy, float)
+    assert isinstance(candidate_baseline, float)
+    assert isinstance(selective_accuracy, float)
+    assert isinstance(selective_baseline, float)
+    assert candidate_accuracy < candidate_baseline
+    assert selective_accuracy < selective_baseline
+    assert payload["coverage"] == {
+        "numerator": 3,
+        "denominator": 8,
+        "value": 0.375,
+    }
+    assert payload["abstained"] == {
+        "count": 5,
+        "rate": {"numerator": 5, "denominator": 8, "value": 0.625},
+        "reasons": {
+            "distance_out_of_distribution": 2,
+            "inconclusive_vote": 2,
+            "rare_class_support": 1,
+        },
+    }
+    assert "predicted_" not in json.dumps(payload)
 
 
 def test_evaluation_reports_all_and_known_scopes_without_private_values(
@@ -294,8 +413,7 @@ def test_evaluation_reports_all_and_known_scopes_without_private_values(
         "unavailable",
     }
     serialized = report.to_json()
-    assert "synthetic-alpha" not in serialized
-    assert "synthetic-beta" not in serialized
+    assert "synthetic-problem" not in serialized
     assert "synthetic-unseen" not in serialized
     assert str(tmp_path) not in serialized
     report_path = tmp_path / "evaluation-report.json"

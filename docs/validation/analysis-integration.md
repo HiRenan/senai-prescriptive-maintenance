@@ -42,14 +42,17 @@ indisponível; não há fallback para um ranking diferente.
 
 | Estado público | Condição segura | Provider | Citações públicas |
 | --- | --- | --- | --- |
-| `normal` | decisão normal autorizada | não chamado | vazias |
+| `normal` | condição operacional candidata baseada em históricos, com `Diagnosis` explicável e sem chave documental | não chamado | vazias |
 | `documented_fault` | falha, evidência vigente, geração aceita e prioridade explicitamente mapeada | uma chamada limitada | somente a união das evidências citadas pelo diagnóstico gerado e pelas prescrições incluídas |
 | `undocumented_fault` | falha sem chave, classe não mapeada ou ausência de evidência elegível | não chamado | vazias |
 | `out_of_distribution` | abstenção do modelo | não chamado | vazias |
 | `degraded` | dependência opcional, geração ou projeção não produz resultado seguro | zero ou uma chamada | vazias, exceto quando uma geração aceita usou evidência mas a projeção pública de prioridade falhou |
 
-Diagnóstico e vizinhos permanecem disponíveis em `degraded` quando o modelo os
-produziu de forma válida. A prioridade não é inferida: uma falha ausente da
+O `Diagnosis` de `normal` explica a condição operacional candidata e não
+representa falha, probabilidade ou autorização. `retrieval_key` permanece nulo,
+logo RAG e prescrição não são executados. Diagnóstico e vizinhos permanecem
+disponíveis em `degraded` quando o modelo os produziu de forma válida. A
+prioridade não é inferida: uma falha ausente da
 `PrescriptionProjectionPolicy` degrada sem fallback. Resumo e ações vêm apenas
 dos campos validados da geração, sem truncar texto para fazê-lo caber no contrato.
 

@@ -181,8 +181,8 @@ def test_artifact_manifest_is_complete_safe_and_byte_stable(tmp_path: Path) -> N
     assert manifest["record_count"] == 3
     assert manifest["vector_dtype"] == SIMILARITY_VECTOR_DTYPE.str
     assert manifest["distance_tie_break"] == "opaque_id_ascending"
-    assert source_model["artifact_schema_version"] == KNN_ARTIFACT_SCHEMA_VERSION == 2
-    assert source_model["model_version"] == KNN_MODEL_VERSION == 2
+    assert source_model["artifact_schema_version"] == KNN_ARTIFACT_SCHEMA_VERSION == 3
+    assert source_model["model_version"] == KNN_MODEL_VERSION == 3
 
 
 def test_artifact_round_trip_preserves_preprocessor_records_and_ranking(
