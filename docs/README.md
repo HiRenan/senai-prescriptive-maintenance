@@ -22,6 +22,7 @@ sem repetir extensamente a mesma orientação.
 | [`validation/foundation-clean-room.md`](validation/foundation-clean-room.md) | Evidências históricas da validação da Foundation em clone público limpo e adendo sobre o fluxo de promoção. |
 | [`validation/data-pipeline.md`](validation/data-pipeline.md) | Encerramento da EPIC 2: decisões, gates e evidências sanitizadas do pipeline canônico SEN-41. |
 | [`validation/document-pipeline.md`](validation/document-pipeline.md) | Encerramento do recorte MVP da SEN-4: extração, indexação, ciclo de vida e recuperação documental governada. |
+| [`validation/dynamic-rag-e2e.md`](validation/dynamic-rag-e2e.md) | Roteiro e evidência sintética da jornada dinâmica de chunk, aprovação, ranking e citação SEN-77. |
 | [`validation/knn-baseline.md`](validation/knn-baseline.md) | Decisões, integridade e avaliação temporal sanitizada da baseline k-NN SEN-42. |
 | [`validation/knn-abstention.md`](validation/knn-abstention.md) | Política versionada de suporte, novidade e abstenção do k-NN SEN-51, com avaliação temporal agregada. |
 | [`model-cards/temporal-knn-v2.md`](model-cards/temporal-knn-v2.md) | Condições de uso, resultado, riscos e decisão do motor temporal k-NN v2. |

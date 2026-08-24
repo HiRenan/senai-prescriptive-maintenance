@@ -69,7 +69,8 @@ de finalidade, região, retenção e contrato antes de qualquer habilitação.
 
 - **implementado:** contratos estritos, recuperação governada, guardrails,
   timeout limitado, integração e cinco estados públicos;
-- **validado sinteticamente:** golden set com os cinco estados, bloqueio
+- **validado sinteticamente:** golden set com os cinco estados e prova dinâmica
+  de chunk, indexação, lifecycle, ranking e citação; também há bloqueio
   pré-provider, citação inventada, evidência rejeitada/obsoleta, timeout,
   ocupação e falhas sanitizadas;
 - **medido localmente:** benchmark sintético da API, separado por cenário e
@@ -99,5 +100,6 @@ incidentes.
 - [integração da análise](../validation/analysis-integration.md);
 - [orquestração prescritiva](../validation/prescription-orchestration.md);
 - [pipeline documental](../validation/document-pipeline.md);
+- [prova dinâmica de chunk e recuperação](../validation/dynamic-rag-e2e.md);
 - [golden set](../validation/product-golden-e2e.md);
 - [model card](../model-cards/temporal-knn-v2.md).
