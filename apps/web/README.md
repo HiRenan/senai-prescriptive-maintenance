@@ -4,23 +4,31 @@ Este diretório contém os dois fluxos da demonstração: informar as 18 feature
 executar `POST /analysis` e ler o resultado de forma auditável; e operar o ciclo
 documental mínimo publicado pela API v1.
 
-O painel não tem framework, bundler nem dependência de execução. São módulos ESM
-servidos diretamente ao navegador por um processo Node mínimo.
+O painel é React com TypeScript estrito, empacotado pelo Vite e servido por um
+processo Node mínimo. A CSP publicada não admite script nem estilo inline, então
+o bundle não embute asset algum e o tema é resolvido antes da pintura por um
+arquivo separado em `public/`.
 
 ## Estrutura
 
 ```text
 apps/web/
+├── index.html        # documento de entrada do Vite e marcos de acessibilidade
+├── vite.config.ts    # build, proxy de desenvolvimento e configuração do Vitest
 ├── server.mjs        # liveness, arquivos estáticos e proxy de mesma origem
+├── public/           # favicon e o script de tema aplicado antes da pintura
 ├── src/
-│   ├── index.html    # documento e marcos de acessibilidade
-│   ├── styles.css    # tokens, tons dos desfechos e layout
-│   ├── main.js       # ponto de entrada e ligação do fluxo
+│   ├── main.tsx      # leitura do callback OAuth e montagem da aplicação
+│   ├── App.tsx       # perfis offline, local e publicado com PKCE
+│   ├── styles/       # tokens, base, primitivos, shell e as três áreas
+│   ├── components/   # primitivos de interface e a moldura da aplicação
+│   ├── features/     # console, laudo e ciclo documental
 │   ├── api/          # clientes da análise e do ciclo documental
+│   ├── auth/         # PKCE, sessão em memória e Hosted UI Cognito
 │   ├── core/         # regras puras: entrada, decodificação e apresentação
-│   ├── generated/    # contrato derivado do OpenAPI v1, não editar à mão
-│   └── ui/           # construção de DOM do console e do laudo
-└── tests/            # testes essenciais do fluxo com o runner do Node
+│   └── generated/    # contrato derivado do OpenAPI v1, não editar à mão
+├── tests/            # suítes do Vitest e o fluxo real no Chromium
+└── dist/             # bundle de produção, não versionado
 ```
 
 ## Contrato
@@ -160,7 +168,7 @@ causa, gravidade nem relação com o desfecho.
 | Rota | Comportamento |
 | --- | --- |
 | `GET /health/live` | `{"status":"ok"}` para o healthcheck do contêiner |
-| `GET` de `src/` | `index.html`, CSS e módulos, com allowlist de extensão |
+| `GET` de `dist/` | `index.html`, bundles e assets, com allowlist de extensão |
 | `POST /api/analysis` | encaminha para `POST /analysis` da API |
 | `GET`, `POST /api/documents` | lista ou registra metadados em `/documents` |
 | `GET /api/documents/{document_id}` | consulta exatamente um documento |
@@ -173,6 +181,11 @@ precise de exceção de CORS. A allowlist documental é gerada das seis operaç�
 do OpenAPI; só substitui um `document_id` que corresponda integralmente ao padrão
 publicado. Path arbitrário, query, método ou corpo fora da operação são recusados
 sem chegar à API. Caminhos fora da raiz estática também são recusados.
+
+A raiz estática é `dist/`; `WEB_STATIC_DIR` a redireciona para as fixtures dos
+testes. Sem `dist/index.html` o servidor recusa iniciar em vez de responder 404
+em toda página. Só `assets/` recebe cache imutável, porque só ali o nome carrega
+o hash do conteúdo; o documento e os arquivos de nome estável usam `no-store`.
 
 Os dois sentidos são limitados e temporizados:
 
@@ -195,9 +208,17 @@ Compose usa `http://api:8000`. `WEB_REQUEST_TIMEOUT_MS` e
 
 ## Execução local
 
-Com a API em execução:
+Durante o desenvolvimento, com a API em execução, o Vite serve em
+`127.0.0.1:5173` e encaminha `/api` para `127.0.0.1:8000`:
 
 ```powershell
+corepack pnpm --filter @senai-prescriptive-maintenance/web dev
+```
+
+Para exercitar o caminho de produção, construa antes de servir:
+
+```powershell
+uv run --frozen poe web-build
 corepack pnpm --filter @senai-prescriptive-maintenance/web start
 ```
 
@@ -215,18 +236,20 @@ O painel fica em `127.0.0.1:3000`.
 uv run --frozen poe web-contract-check
 uv run --frozen poe web-typecheck
 uv run --frozen poe web-test
+uv run --frozen poe web-build
 corepack pnpm exec playwright install chromium
 uv run --frozen poe web-browser-test
 ```
 
-A verificação de tipos usa TypeScript sobre JavaScript anotado com JSDoc, sem
-etapa de build: os mesmos arquivos que rodam no navegador são os verificados. Os
-testes usam o runner do Node e tomam os exemplos do próprio snapshot OpenAPI, de
-modo que nenhum material original participa da suíte. Eles cobrem as seis
-operações do proxy e do cliente, os sete estados, teclado, bloqueio de duplo
-envio, sucesso com falha da atualização, rejeição inválida com foco e a
-distinção entre carregamento e lista vazia. As três tarefas também fazem parte
-de `uv run --frozen poe check`.
+A verificação de tipos roda dois projetos TypeScript em modo estrito: as fontes
+da aplicação, sem tipos de Node, e os testes com eles. Os testes usam o Vitest e
+tomam os exemplos do próprio snapshot OpenAPI, de modo que nenhum material
+original participa da suíte. Eles cobrem as seis operações do proxy e do
+cliente, os sete estados, teclado, bloqueio de duplo envio, sucesso com falha da
+atualização, rejeição inválida com foco e a distinção entre carregamento e lista
+vazia. `web-build` fecha o gate porque a regressão de publicação prova a
+gramática do bundle real. As quatro tarefas fazem parte de
+`uv run --frozen poe check`.
 
 `web-browser-test` é uma tarefa separada: usa somente Playwright/Chromium para
 provar zero chamadas à API no modo offline, cinco outcomes, retry, resposta

@@ -31,7 +31,7 @@ local integralmente identificado e autorizado.
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
-| Web | Painel responsivo de análise e gestão documental em módulos ESM, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Node/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
+| Web | Painel responsivo de análise e gestão documental em React/TypeScript, temas claro e escuro, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Vitest/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
 | AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline; preflight e OIDC do workflow de deploy em modo foundation passaram no run `32725423445`. | O controlador parou antes do Terraform; state e Budget permaneceram ausentes, sem recursos gerenciados pelo perfil, plan remoto, `apply`, deploy, smoke ou teardown. |
 
 Nos environments AWS, região, AZ e domínio são variáveis (`vars`); account ID,
@@ -105,6 +105,7 @@ Todos os comandos partem da raiz. Somente `format` reescreve código.
 | `uv run --frozen poe hooks` | Executa todos os hooks em todos os arquivos. |
 | `uv run --frozen poe web-contract` | Gera o contrato web a partir do snapshot OpenAPI v1. |
 | `uv run --frozen poe web-test` | Executa os testes essenciais do fluxo do painel. |
+| `uv run --frozen poe web-build` | Constrói o bundle de produção do painel com o Vite. |
 | `uv run --frozen poe web-browser-test` | Valida offline, teclado, foco e reflow em Chromium. |
 | `uv run --frozen poe failure-matrix` | Exercita falhas P0/P1 e audita o histórico público. |
 | `uv run --frozen poe smoke` | Valida a aplicação offline e o Compose, sem iniciar serviços. |
@@ -135,9 +136,9 @@ descreve os fluxos, os contratos gerados e os estados apresentados.
 
 ## Arquitetura
 
-O backend é um monólito modular em `apps/api`; `apps/web` serve o painel de
-análise e gestão documental e o proxy de mesma origem, sem framework, bundler
-nem etapa de build.
+O backend é um monólito modular em `apps/api`; `apps/web` é um painel React com
+TypeScript estrito, empacotado pelo Vite e servido junto do proxy de mesma
+origem por um processo Node mínimo.
 PostgreSQL/pgvector apoia o perfil local, e os artefatos reais de dados, modelo
 e documentos continuam fora do Git. A factory HTTP não descobre esses
 artefatos: `artifacts` exige o caminho e o SHA-256 de um
