@@ -1,0 +1,303 @@
+/* Governed document management: registration, the cycle list, per-state
+   cards, and the explicit confirmation of every command. */
+
+.documents {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.documents-lede {
+  max-width: 78ch;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.documents-grid {
+  display: grid;
+  grid-template-columns: minmax(20rem, 23rem) minmax(0, 1fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+@media (max-width: 71.99rem) {
+  .documents-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Registration ------------------------------------------------------------ */
+
+.register {
+  position: sticky;
+  top: calc(3.5rem + var(--space-sm));
+}
+
+@media (max-width: 71.99rem) {
+  .register {
+    position: static;
+  }
+}
+
+.register form {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.documents-note {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--text-tertiary);
+}
+
+.document-fields {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.register .run-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* Toolbar ----------------------------------------------------------------- */
+
+.documents-main {
+  display: grid;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.documents-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-sm);
+}
+
+.documents-count {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Feedback ---------------------------------------------------------------- */
+
+.document-feedback {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--tone-bg);
+  border: 1px solid var(--tone-border);
+  border-radius: var(--radius-md);
+}
+
+.document-feedback-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-heading);
+  color: var(--tone-fg);
+}
+
+.document-feedback-text,
+.document-feedback-detail,
+.document-feedback-next {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 75ch;
+}
+
+.document-feedback-status {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.document-feedback-next {
+  font-weight: var(--weight-label);
+  color: var(--text-primary);
+}
+
+/* List and cards ---------------------------------------------------------- */
+
+.document-list {
+  display: grid;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.documents-loading,
+.documents-empty {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-lg) var(--space-sm);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.loading-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-heading);
+  color: var(--text-primary);
+}
+
+.documents-empty-next {
+  font-weight: var(--weight-label);
+  color: var(--text-primary);
+}
+
+.document-card {
+  display: grid;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.document-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.document-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-full);
+  background: var(--tone-bg);
+  border: 1px solid var(--tone-border);
+  color: var(--tone-fg);
+}
+
+.document-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-state {
+  flex: none;
+}
+
+.document-statement {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 75ch;
+}
+
+.document-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space-2xs) var(--space-sm);
+  margin: 0;
+  padding: var(--space-2xs) 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.document-fact {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.document-fact dt {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-label);
+  color: var(--text-tertiary);
+}
+
+.document-fact dd {
+  margin: 0;
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.document-fact-note {
+  font-family: var(--font-sans);
+  color: var(--text-tertiary);
+}
+
+.document-decision,
+.document-failure {
+  display: grid;
+  gap: 0.125rem;
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--text-sm);
+}
+
+.document-failure {
+  background: var(--tone-bg);
+  border: 1px solid var(--tone-border);
+}
+
+.document-failure .block-label {
+  color: var(--tone-fg);
+}
+
+.document-commands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2xs);
+  position: relative;
+}
+
+.document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  margin-left: auto;
+}
+
+.document-actions-note {
+  flex: 1 1 14rem;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* Confirmation ------------------------------------------------------------ */
+
+.document-confirm {
+  flex: 1 1 100%;
+  display: grid;
+  gap: var(--space-2xs);
+  margin-top: var(--space-2xs);
+  padding: var(--space-xs);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  animation: confirm-enter var(--motion-2) var(--ease-out);
+}
+
+@keyframes confirm-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+}
+
+.document-confirm-text {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-label);
+  max-width: 70ch;
+}
+
+.document-confirm .run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
+.documents-stale {
+  font-size: var(--text-xs);
+}

@@ -7,12 +7,16 @@ import { useHashWorkspace } from "./useHashWorkspace";
 interface AppShellProps {
   mode: DemoMode;
   modeDescription?: string;
+  /** "API AWS autenticada" on the published origin. */
+  onlineLabel?: string;
   contractVersion: string;
   documentContractVersion: string;
   authSlot?: ReactNode;
   /** Overflow caveat (e.g. the published-profile token revocation note). */
   overflowNote?: string;
   footerNote?: string;
+  /** Global notice above the workspaces (e.g. the auth panel). */
+  notice?: ReactNode;
   analysis: ReactNode;
   documents: ReactNode;
 }
@@ -26,11 +30,13 @@ interface AppShellProps {
 export function AppShell({
   mode,
   modeDescription,
+  onlineLabel,
   contractVersion,
   documentContractVersion,
   authSlot,
   overflowNote,
   footerNote,
+  notice,
   analysis,
   documents,
 }: AppShellProps) {
@@ -44,12 +50,14 @@ export function AppShell({
         activeWorkspace={activeWorkspace}
         mode={mode}
         modeDescription={modeDescription}
+        onlineLabel={onlineLabel}
         contractVersion={contractVersion}
         documentContractVersion={documentContractVersion}
         authSlot={authSlot}
         note={overflowNote}
       />
       <main id="workspace-content" tabIndex={-1}>
+        {notice}
         <section
           className="workspace-page"
           id="analysis"

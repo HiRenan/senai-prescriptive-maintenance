@@ -11,6 +11,8 @@ interface TopBarProps {
   activeWorkspace: WorkspaceName;
   mode: DemoMode;
   modeDescription?: string;
+  /** "API AWS autenticada" on the published origin. */
+  onlineLabel?: string;
   contractVersion: string;
   documentContractVersion: string;
   /** Authentication chip / actions (published profile only). */
@@ -28,6 +30,7 @@ export function TopBar({
   activeWorkspace,
   mode,
   modeDescription = DEFAULT_MODE_DESCRIPTION,
+  onlineLabel,
   contractVersion,
   documentContractVersion,
   authSlot,
@@ -40,7 +43,11 @@ export function TopBar({
           <Wordmark />
         </div>
         <WorkspaceNav active={activeWorkspace} />
-        <ModeSwitch mode={mode} description={modeDescription} />
+        <ModeSwitch
+          mode={mode}
+          description={modeDescription}
+          onlineLabel={onlineLabel}
+        />
         <div className="topbar-tools">
           {authSlot}
           <ThemeToggle />

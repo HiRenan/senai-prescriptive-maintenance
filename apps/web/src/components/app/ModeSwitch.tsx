@@ -12,9 +12,12 @@ export const DEFAULT_MODE_DESCRIPTION =
 export function ModeSwitch({
   mode,
   description = DEFAULT_MODE_DESCRIPTION,
+  onlineLabel = "API local",
 }: {
   mode: DemoMode;
   description?: string;
+  /** "API AWS autenticada" on the published origin. */
+  onlineLabel?: string;
 }) {
   return (
     <nav className="mode-switch" aria-label="Modo da demonstração">
@@ -26,7 +29,7 @@ export function ModeSwitch({
           aria-current={mode === "online" ? "page" : undefined}
           aria-describedby="mode-description"
         >
-          API local
+          {onlineLabel}
         </a>
         <a
           className="mode-link"
