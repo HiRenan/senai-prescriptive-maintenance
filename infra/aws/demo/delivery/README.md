@@ -1,14 +1,15 @@
 # Entrega protegida do perfil AWS demo
 
 Este diretório registra o contrato de segurança e a operação automatizada das
-SEN-68 e SEN-82. No run `32725423445`, o preflight protegido e a assunção OIDC
-passaram, mas o controlador recusou a expiração serializada como JSON-string
-antes de iniciar o Terraform. State e Budget permaneceram ausentes; não houve
+SEN-68 e SEN-82. No run `32725423445`, o preflight protegido do workflow de deploy
+e a assunção OIDC da role de deploy passaram no modo foundation, mas o controlador
+recusou a expiração serializada como JSON-string antes de iniciar o Terraform.
+State e Budget permaneceram ausentes; não houve recurso gerenciado pelo perfil,
 plan remoto, `apply`, deploy ou teardown. Os logs foram removidos depois que os
 inputs da action expuseram identificadores, e esta correção não realizou nova
-tentativa live. Roles, provedor OIDC, backend S3, domínio, certificado, usuário de
-smoke e valores reais continuam sendo bootstrap externo autorizado; o contrato
-não cria nem altera esses controles.
+tentativa live. Roles, provedor OIDC, backend S3, environments, domínio e
+certificado são controles externos preparados; a identidade de smoke permanece
+pendente da foundation. O contrato não cria nem altera esses controles.
 
 O contrato público [`delivery-contract.v1.json`](delivery-contract.v1.json) usa
 somente placeholders e fixa repositório, ref, subjects OIDC, referências completas
@@ -544,8 +545,9 @@ o mesmo endpoint, exigir `use_default: true` e comparar o
 bootstrap e exige nova revisão. Com a evidência vigente, não há motivo para
 alterar a configuração OIDC nem manter trust nominal ou dual; as três roles devem
 aceitar somente os subjects imutáveis exatos. O run `32725423445` confirmou a
-assunção real da role de plan, mas parou no controlador antes de qualquer acesso
-ao backend ou ao Terraform; isso não comprova plan, state, Budget ou deploy.
+assunção real da role de deploy no modo foundation, mas parou no controlador antes
+de qualquer acesso ao backend ou ao Terraform; isso não comprova plan remoto,
+state, Budget ou deploy.
 
 Referências primárias:
 

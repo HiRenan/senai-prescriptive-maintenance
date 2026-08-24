@@ -32,12 +32,14 @@ local integralmente identificado e autorizado.
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
 | Web | Painel responsivo de análise e gestão documental em módulos ESM, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Node/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
-| AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline; preflight e OIDC de plan passaram no run `32725423445`. | O controlador parou antes do Terraform; state e Budget permaneceram ausentes, sem recursos, plan remoto, `apply`, deploy, smoke ou teardown. |
+| AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline; preflight e OIDC do workflow de deploy em modo foundation passaram no run `32725423445`. | O controlador parou antes do Terraform; state e Budget permaneceram ausentes, sem recursos gerenciados pelo perfil, plan remoto, `apply`, deploy, smoke ou teardown. |
 
 Nos environments AWS, região, AZ e domínio são variáveis (`vars`); account ID,
 bucket de state, certificado e role exclusiva são segredos (`secrets`), assim como
-e-mail do Budget e token de smoke. Nenhum secret é referenciado antes da action
-OIDC.
+e-mail do Budget e token de smoke. A migração externa dos quatro identificadores
+já foi preparada; as variáveis legadas equivalentes permanecem temporariamente
+para rollback até a validação do hotfix. Os workflows referenciam somente os
+secrets e nenhum deles aparece antes da action OIDC.
 
 As afirmações públicas usam quatro rótulos:
 
