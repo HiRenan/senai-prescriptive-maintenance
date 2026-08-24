@@ -149,6 +149,7 @@
             "Effect": "Allow",
             "Action": [
               "apigateway:GET",
+              "aws-portal:ViewBilling",
               "budgets:ViewBudget",
               "cloudfront:GetCachePolicy",
               "cloudfront:GetDistribution",
@@ -162,6 +163,7 @@
               "cognito-idp:DescribeUserPoolDomain",
               "cognito-idp:ListTagsForResource",
               "ec2:DescribeAvailabilityZones",
+              "ec2:DescribeNetworkAcls",
               "ec2:DescribeRouteTables",
               "ec2:DescribeSecurityGroupRules",
               "ec2:DescribeSecurityGroups",
@@ -443,6 +445,7 @@
             "Effect": "Allow",
             "Action": [
               "apigateway:GET",
+              "aws-portal:ViewBilling",
               "budgets:ViewBudget",
               "cloudfront:GetCachePolicy",
               "cloudfront:GetDistribution",
@@ -456,6 +459,7 @@
               "cognito-idp:DescribeUserPoolDomain",
               "cognito-idp:ListTagsForResource",
               "ec2:DescribeAvailabilityZones",
+              "ec2:DescribeNetworkAcls",
               "ec2:DescribeRouteTables",
               "ec2:DescribeSecurityGroupRules",
               "ec2:DescribeSecurityGroups",
@@ -529,6 +533,12 @@
                 "aws:ResourceTag/Profile": "aws-demo"
               }
             }
+          },
+          {
+            "Sid": "BudgetPortalRW",
+            "Effect": "Allow",
+            "Action": "aws-portal:ModifyBilling",
+            "Resource": "*"
           },
           {
             "Sid": "BudgetRW",
@@ -804,6 +814,7 @@
               "AlarmCreate",
               "ApiCreate",
               "ApiWrites",
+              "BudgetPortalRW",
               "BudgetRW",
               "CfPolicyNew",
               "CfTagCreate",
@@ -994,6 +1005,7 @@
             "Effect": "Allow",
             "Action": [
               "apigateway:GET",
+              "aws-portal:ViewBilling",
               "budgets:ViewBudget",
               "cloudfront:GetCachePolicy",
               "cloudfront:GetDistribution",
@@ -1012,6 +1024,7 @@
               "cognito-idp:DescribeUserPoolDomain",
               "cognito-idp:ListTagsForResource",
               "cognito-idp:ListUserPools",
+              "ec2:DescribeNetworkAcls",
               "ec2:DescribeRouteTables",
               "ec2:DescribeSecurityGroupRules",
               "ec2:DescribeSecurityGroups",
@@ -1057,6 +1070,12 @@
                 "aws:ResourceTag/Profile": "aws-demo"
               }
             }
+          },
+          {
+            "Sid": "BudgetPortalRW",
+            "Effect": "Allow",
+            "Action": "aws-portal:ModifyBilling",
+            "Resource": "*"
           },
           {
             "Sid": "DestroyDemoBudget",
@@ -1147,6 +1166,7 @@
           {
             "name": "${NAME_PREFIX}-demo-teardown-v1",
             "sids": [
+              "BudgetPortalRW",
               "DestroyDemoApiGateway",
               "DestroyDemoBucketObjects",
               "DestroyDemoBuckets",

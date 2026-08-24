@@ -108,9 +108,9 @@ BUILDX_NAME_EXPRESSION = "sen68-${{ github.run_id }}-${{ github.run_attempt }}"
 BUILDX_OUTPUT_EXPRESSION = "${{ steps.buildx.outputs.name }}"
 PROTECTED_MAIN_REVALIDATION = "Revalidate the current main revision after approval"
 EXPECTED_PERMISSION_POLICY_SHA256 = {
-    "deploy": "f5667616a0b5d91f9d39feaa0c79b19e4bc159cca4ad04fcad9fa545e303c309",
-    "plan": "86eb1b1f5a4966ab6e1adf6de4c07e6ee01753e895b22151232d7c2197e5b8ce",
-    "teardown": "f7fd9eb08901edc9cccba5ea6e58fbe93731efd2e8bc47193a8ca3e26db6a74a",
+    "deploy": "61ec9c25ce30ef744039408575f6053a41e79a54cf8d9b5a206bb7a53a429d27",
+    "plan": "5668b6259afb11b266bd82ea3ad10015f1b0bb70ec42f34d525ff0557b7c64b5",
+    "teardown": "b790abe34cb3349db1b3962e4329b2e49abb81379cbebbdde94d0958d3c4c92b",
 }
 EXPECTED_PERMISSION_SIDS = {
     "deploy": (
@@ -119,6 +119,7 @@ EXPECTED_PERMISSION_SIDS = {
         "ApiSlr",
         "ApiWrites",
         "Buckets",
+        "BudgetPortalRW",
         "BudgetRW",
         "CfPolicyNew",
         "CfTagCreate",
@@ -165,6 +166,7 @@ EXPECTED_PERMISSION_SIDS = {
         "ReadStateObject",
     ),
     "teardown": (
+        "BudgetPortalRW",
         "DestroyDemoApiGateway",
         "DestroyDemoBucketObjects",
         "DestroyDemoBuckets",
@@ -185,6 +187,7 @@ EXPECTED_PERMISSION_SIDS = {
 }
 EXPECTED_WILDCARD_SIDS = {
     "deploy": {
+        "BudgetPortalRW",
         "CfPolicyNew",
         "CloudMapTag",
         "EcrAuth",
@@ -193,7 +196,11 @@ EXPECTED_WILDCARD_SIDS = {
         "TaskDeregister",
     },
     "plan": {"ReadDemoResources"},
-    "teardown": {"DestroyTaskDefinitions", "InventoryDemoResourcesGlobal"},
+    "teardown": {
+        "BudgetPortalRW",
+        "DestroyTaskDefinitions",
+        "InventoryDemoResourcesGlobal",
+    },
 }
 INLINE_POLICY_MAX_CHARS = 10_240
 INLINE_POLICY_MIN_HEADROOM = 1_024
@@ -246,6 +253,7 @@ EXPECTED_POLICY_PUBLICATION = {
                     "AlarmCreate",
                     "ApiCreate",
                     "ApiWrites",
+                    "BudgetPortalRW",
                     "BudgetRW",
                     "CfPolicyNew",
                     "CfTagCreate",
@@ -288,19 +296,27 @@ EXPECTED_POLICY_PUBLICATION = {
 }
 REQUIRED_PROVIDER_ACTIONS = {
     "deploy": {
+        "aws-portal:ModifyBilling",
+        "aws-portal:ViewBilling",
         "cognito-idp:DescribeUserPoolDomain",
+        "ec2:DescribeNetworkAcls",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
     },
     "plan": {
+        "aws-portal:ViewBilling",
         "cognito-idp:DescribeUserPoolDomain",
+        "ec2:DescribeNetworkAcls",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
     },
     "teardown": {
+        "aws-portal:ModifyBilling",
+        "aws-portal:ViewBilling",
         "cognito-idp:DescribeUserPoolDomain",
+        "ec2:DescribeNetworkAcls",
         "ec2:DescribeSecurityGroupRules",
         "ec2:DescribeVpcAttribute",
         "iam:ListAttachedRolePolicies",
