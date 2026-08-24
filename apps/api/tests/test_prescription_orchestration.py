@@ -10,8 +10,14 @@ from hashlib import sha256
 from threading import Barrier, Event, Lock
 from typing import cast
 
+import pandas as pd
 import pytest
-from prescriptive_maintenance.contracts import Diagnosis, OpaqueNeighbor
+from prescriptive_maintenance.contracts import (
+    ANALYSIS_FEATURE_NAMES,
+    AnalysisFeatures,
+    Diagnosis,
+    OpaqueNeighbor,
+)
 from prescriptive_maintenance.generation import (
     GENERATION_CONTRACT_VERSION,
     GENERATION_SYSTEM_PROMPT_VERSION,
@@ -29,6 +35,10 @@ from prescriptive_maintenance.governed_retrieval import (
     build_governed_retrieval_policy,
 )
 from prescriptive_maintenance.knowledge_retrieval import RankedKnowledgeSnapshot
+from prescriptive_maintenance.modeling.knn import (
+    KnnModelPortAdapter,
+    fit_knn_model,
+)
 from prescriptive_maintenance.ports import (
     ModelAbstentionReason,
     ModelDisposition,
@@ -97,6 +107,39 @@ def _prediction(
             else retrieval_key
         ),
     )
+
+
+def _knn_operating_prediction(operating_label: str) -> ModelPrediction:
+    rows: list[dict[str, object]] = []
+    for first_value, label in (
+        (0.0, operating_label),
+        (10.0, "synthetic-problem"),
+    ):
+        row: dict[str, object] = {
+            name: float(first_value if position == 0 else position + 1)
+            for position, name in enumerate(ANALYSIS_FEATURE_NAMES)
+        }
+        row["y"] = label
+        rows.append(row)
+    training = pd.DataFrame(rows, columns=(*ANALYSIS_FEATURE_NAMES, "y"))
+    training.loc[:, list(ANALYSIS_FEATURE_NAMES)] = training.loc[
+        :, list(ANALYSIS_FEATURE_NAMES)
+    ].astype("float64")
+    training["y"] = training["y"].astype("string")
+    model = fit_knn_model(
+        training,
+        dataset_id="a" * 64,
+        training_partition_sha256="b" * 64,
+        default_top_k=1,
+        minimum_class_count=1,
+    )
+    features = AnalysisFeatures.model_validate(
+        {
+            name: float(0.0 if position == 0 else position + 1)
+            for position, name in enumerate(ANALYSIS_FEATURE_NAMES)
+        }
+    )
+    return KnnModelPortAdapter(model).predict(features, top_k=1)
 
 
 def _snapshot(
@@ -458,6 +501,48 @@ def test_non_documented_model_outcomes_skip_retrieval_and_provider(
     assert result.notice.code is reason
     assert result.diagnosis == prediction.diagnosis
     assert result.neighbors == prediction.neighbors
+    assert result.guardrail is None
+    assert result.metadata is None
+    assert retrieval.calls == 0
+    assert provider.call_count == 0
+
+
+@pytest.mark.parametrize(
+    ("operating_label", "canonical_state"),
+    (
+        ("NÓRMAL", "normal"),
+        ("BÁSELÍNE", "baseline"),
+        ("TÉSTE", "teste"),
+        ("ACELERÁNDO", "acelerando"),
+        ("MÓTOR-DESLIGÁDO", "motor_desligado"),
+    ),
+)
+def test_knn_operating_state_never_calls_retrieval_or_provider(
+    operating_label: str,
+    canonical_state: str,
+) -> None:
+    prediction = _knn_operating_prediction(operating_label)
+    retrieval = _Retrieval()
+    provider = _RecordingProvider()
+
+    result = _service(retrieval=retrieval, provider=provider).orchestrate(
+        prediction,
+        top_k=1,
+    )
+
+    assert prediction.disposition is ModelDisposition.NORMAL
+    assert prediction.diagnosis is not None
+    assert prediction.diagnosis.code == f"operating_state_{canonical_state}"
+    assert prediction.retrieval_key is None
+    assert prediction.neighbors
+    assert all(
+        neighbor.fault_code == f"operating_state_{canonical_state}"
+        for neighbor in prediction.neighbors
+    )
+    assert result.status is PrescriptionOrchestrationStatus.SKIPPED
+    assert result.notice is not None
+    assert result.notice.code is PrescriptionOrchestrationReason.NORMAL
+    assert result.diagnosis == prediction.diagnosis
     assert result.guardrail is None
     assert result.metadata is None
     assert retrieval.calls == 0

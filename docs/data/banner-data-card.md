@@ -13,7 +13,7 @@ exploratória controlada e à baseline k-NN com revisão humana.
 
 Não deve ser usado para autorizar manutenção, estimar desempenho de produção,
 treinar decisões autônomas ou inferir cobertura de classes futuras. O
-[model card](../model-cards/temporal-knn-v2.md) registra a decisão de não
+[model card atual](../model-cards/temporal-knn-v3.md) registra a decisão de não
 aprovar o modelo avaliado para automação.
 
 ## Proveniência e composição

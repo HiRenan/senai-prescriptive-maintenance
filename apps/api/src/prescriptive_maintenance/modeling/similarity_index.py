@@ -410,7 +410,7 @@ def save_similarity_index_from_knn_artifact(
     schema_id: str,
     output_directory: Path,
 ) -> Path:
-    """Build an atomic safe index from one fully verified k-NN v2 artifact."""
+    """Build an atomic safe index from one fully verified k-NN v3 artifact."""
 
     _require_sha256(schema_id, SimilarityIndexArtifactError)
     source_directory = _validate_source_model_directory(knn_artifact_directory)

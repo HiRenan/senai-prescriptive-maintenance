@@ -47,7 +47,7 @@ class ModelAbstentionReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ModelPrediction:
-    """Model disposition with non-calibrated support and opaque k-NN neighbors."""
+    """Probable condition with heuristic support and opaque similar histories."""
 
     disposition: ModelDisposition
     abstention_reason: ModelAbstentionReason | None
@@ -70,7 +70,7 @@ class DocumentEvidence:
 
 
 class ModelPort(Protocol):
-    """Infer a model-level disposition without transport concerns."""
+    """Retrieve a probable condition without transport concerns."""
 
     def predict(
         self,

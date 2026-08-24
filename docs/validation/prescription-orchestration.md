@@ -23,7 +23,9 @@ Somente a combinação abaixo pode alcançar `RagGuardrailService`:
 4. relógio monotônico válido antes do gate.
 
 `NORMAL`, `OUT_OF_DISTRIBUTION`, falha sem chave, ausência de evidência e classe
-não mapeada encerram sem provider. Falha técnica de recuperação encerra como
+não mapeada encerram sem provider. Em `NORMAL`, o diagnóstico explica a condição
+operacional candidata, mas a chave de recuperação permanece nula e nenhuma
+prescrição é produzida. Falha técnica de recuperação encerra como
 `degraded`. A composição não repete filtros de lifecycle, score, integridade,
 schema, citações ou currentness: esses invariantes continuam pertencendo às
 fronteiras SEN-56, SEN-57 e SEN-58.

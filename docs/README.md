@@ -23,11 +23,13 @@ sem repetir extensamente a mesma orientação.
 | [`validation/data-pipeline.md`](validation/data-pipeline.md) | Encerramento da EPIC 2: decisões, gates e evidências sanitizadas do pipeline canônico SEN-41. |
 | [`validation/document-pipeline.md`](validation/document-pipeline.md) | Encerramento do recorte MVP da SEN-4: extração, indexação, ciclo de vida e recuperação documental governada. |
 | [`validation/dynamic-rag-e2e.md`](validation/dynamic-rag-e2e.md) | Roteiro e evidência sintética da jornada dinâmica de chunk, aprovação, ranking e citação SEN-77. |
-| [`validation/knn-baseline.md`](validation/knn-baseline.md) | Decisões, integridade e avaliação temporal sanitizada da baseline k-NN SEN-42. |
-| [`validation/knn-abstention.md`](validation/knn-abstention.md) | Política versionada de suporte, novidade e abstenção do k-NN SEN-51, com avaliação temporal agregada. |
-| [`model-cards/temporal-knn-v2.md`](model-cards/temporal-knn-v2.md) | Condições de uso, resultado, riscos e decisão do motor temporal k-NN v2. |
+| [`validation/knn-baseline.md`](validation/knn-baseline.md) | Relatório histórico da baseline k-NN SEN-42, preservado como evidência da Epic 3. |
+| [`validation/knn-abstention.md`](validation/knn-abstention.md) | Relatório histórico da política de abstenção do k-NN v2 na SEN-51. |
+| [`model-cards/temporal-knn-v2.md`](model-cards/temporal-knn-v2.md) | Model card histórico do motor temporal k-NN v2. |
+| [`model-cards/temporal-knn-v3.md`](model-cards/temporal-knn-v3.md) | Estado atual, política operacional, resultado, riscos e artefatos do k-NN v3. |
 | [`rag/prescriptive-rag-card.md`](rag/prescriptive-rag-card.md) | Contratos, guardrails, evidências disponíveis e limites da composição RAG. |
-| [`validation/model-evaluation.md`](validation/model-evaluation.md) | Protocolo, métricas, benchmark e limitações da avaliação reprodutível SEN-53. |
+| [`validation/model-evaluation.md`](validation/model-evaluation.md) | Relatório histórico congelado da avaliação exata SEN-53. |
+| [`validation/model-evaluation-v2.md`](validation/model-evaluation-v2.md) | Correção da Epic 3 na SEN-78: objetivo operacional, leitura seletiva e evidência v3. |
 | [`validation/analysis-benchmark.md`](validation/analysis-benchmark.md) | Método, métricas, rastreabilidade e limites do benchmark local sintético SEN-65. |
 | [`validation/prescription-orchestration.md`](validation/prescription-orchestration.md) | Decisões, timeout limitado, metadados, estados e riscos residuais da composição prescritiva SEN-59. |
 | [`validation/similarity-index.md`](validation/similarity-index.md) | Contrato, integridade e paridade sintética do índice de similaridade SEN-52. |

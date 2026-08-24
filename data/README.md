@@ -244,6 +244,12 @@ pickle; ela exige `allow_pickle=False`, o conjunto exato de arquivos e a
 verificação de schema, compatibilidade, hashes e `model_id` antes de disponibilizar
 o modelo em memória.
 
+O artefato atual usa schema/model 3 e incorpora a política fechada
+`operating-states.v1`. A leitura rejeita artefatos v2: a mudança semântica exige
+rebuild local a partir dos derivados aprovados e nunca rebind silencioso. IDs,
+hashes, contagens e métricas agregadas podem ser documentados; manifesto, arrays
+e labels por registro permanecem privados.
+
 ## Índice de similaridade local
 
 O índice derivado do modelo deve ser gravado em outro destino explícito e
@@ -255,6 +261,8 @@ para fixtures, logs ou documentação.
 
 `save_similarity_index_from_knn_artifact()` só aceita um artefato de modelo já
 validado, exige destino ignorado dentro de worktrees e faz publicação atômica.
+Um índice reconstruído para o modelo v3 vincula exatamente seu ID e hash; um
+índice ligado ao modelo v2 falha fechado no runtime atual.
 `load_similarity_index()` verifica versões, configuração, dimensão, métrica,
 quantidade, identidades e hashes antes de carregar o array com
 `allow_pickle=False`. Somente um índice carregado por essa fronteira deve ser
