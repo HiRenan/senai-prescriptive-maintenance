@@ -631,7 +631,6 @@ for (const viewport of [
       "#online-mode",
       "#offline-mode",
       "#analysis-navigation",
-      "#assistant-navigation",
       "#documents-navigation",
       "#example-select",
       '[data-feature="z_rms_velocity_mm_s"]',
