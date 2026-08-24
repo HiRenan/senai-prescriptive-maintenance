@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Painel de demonstração da análise prescritiva: 18 features, cinco resultados fechados e prescrição auditável."
+    />
+    <title>Análise prescritiva — demonstração</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./main.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#report">Ir para o resultado</a>
+
+    <header class="masthead">
+      <div class="masthead-inner">
+        <p class="masthead-kicker">Manutenção prescritiva</p>
+        <h1 class="masthead-title">Análise da leitura</h1>
+        <p class="masthead-lede">
+          Informe as 18 features do contrato, execute a análise e leia o resultado com
+          diagnóstico, suporte, abstenção, vizinhos, prescrição e citações.
+        </p>
+        <dl class="masthead-meta">
+          <div>
+            <dt>Contrato</dt>
+            <dd class="mono" id="contract-version">v1</dd>
+          </div>
+          <div>
+            <dt>Operação</dt>
+            <dd class="mono">POST /analysis</dd>
+          </div>
+        </dl>
+      </div>
+    </header>
+
+    <noscript>
+      <p class="noscript">
+        Este painel executa a análise no navegador e precisa de JavaScript habilitado.
+      </p>
+    </noscript>
+
+    <main class="workbench">
+      <section class="console" id="console" aria-labelledby="console-heading">
+        <h2 class="console-heading" id="console-heading">Entrada da análise</h2>
+
+        <form id="analysis-form" novalidate>
+          <div class="import">
+            <h3 class="block-label">Importar entrada</h3>
+            <div class="import-row">
+              <label class="field-label" for="example-select">Exemplo sintético</label>
+              <select id="example-select" class="field-input">
+                <option value="">Selecione um exemplo</option>
+              </select>
+            </div>
+            <div class="import-row">
+              <label class="field-label" for="import-text">JSON do contrato</label>
+              <textarea
+                id="import-text"
+                class="field-input import-text"
+                rows="4"
+                spellcheck="false"
+                placeholder='{"features": {"rpm": 1000, ...}, "top_k": 3}'
+              ></textarea>
+            </div>
+            <div class="import-row import-actions">
+              <label class="field-label" for="import-file">Arquivo JSON</label>
+              <input id="import-file" class="field-file" type="file" accept="application/json,.json" />
+              <button type="button" id="import-apply" class="button button-quiet">
+                Importar JSON
+              </button>
+            </div>
+            <div class="import-issues" id="import-issues" hidden></div>
+          </div>
+
+          <div class="metrics"></div>
+
+          <div class="run">
+            <div class="field field-topk">
+              <label class="field-label" for="top-k">Vizinhos solicitados</label>
+              <input
+                id="top-k"
+                name="top_k"
+                class="field-input"
+                type="number"
+                inputmode="numeric"
+                step="1"
+                autocomplete="off"
+                aria-describedby="top-k-error"
+              />
+              <p class="field-error" id="top-k-error" data-error-for="top_k"></p>
+            </div>
+            <div class="run-actions">
+              <button type="submit" class="button button-primary">Executar análise</button>
+              <button type="button" id="console-reset" class="button button-quiet">
+                Limpar
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="report" id="report" aria-labelledby="report-heading" tabindex="-1"></section>
+    </main>
+
+    <p class="status" id="run-status" role="status" aria-live="polite"></p>
+
+    <footer class="colophon">
+      <p>
+        Demonstração local. Os exemplos de importação vêm do contrato público e são
+        inteiramente sintéticos.
+      </p>
+    </footer>
+  </body>
+</html>

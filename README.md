@@ -30,7 +30,7 @@ autorização explícitas.
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
-| Web | Processo Node e imagem OCI com liveness. | Não existe interface, componente visual ou experiência de usuário implementada. |
+| Web | Painel de análise em módulos ESM, contrato derivado do OpenAPI v1 e processo Node com liveness, ativos e proxy de mesma origem. | O painel cobre o fluxo de análise; gestão documental, acabamento de acessibilidade e teste em navegador não existem. |
 | AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline. | Nenhum recurso, identidade, deploy, smoke ou teardown foi executado na AWS. |
 
 As afirmações públicas usam quatro rótulos:
@@ -57,7 +57,8 @@ uv run --frozen poe smoke
 uv run --frozen poe golden-e2e
 ```
 
-- `check` executa formatação somente leitura, lint, tipagem estrita e testes;
+- `check` executa formatação somente leitura, lint, tipagem estrita, testes e
+  as verificações da web;
 - `smoke` valida runtimes, Compose e liveness/readiness reais em loopback, sem
   iniciar serviços;
 - `golden-e2e` percorre por HTTP os cinco estados do produto e o ciclo
@@ -91,14 +92,16 @@ Todos os comandos partem da raiz. Somente `format` reescreve código.
 | --- | --- |
 | `uv run --frozen poe setup` | Sincroniza os workspaces pelos locks e instala hooks. |
 | `uv run --frozen poe format` | Aplica correções seguras e formata Python. |
-| `uv run --frozen poe check` | Executa format-check, lint, typecheck e testes. |
+| `uv run --frozen poe check` | Executa format-check, lint, typecheck, testes e as verificações da web. |
 | `uv run --frozen poe hooks` | Executa todos os hooks em todos os arquivos. |
+| `uv run --frozen poe web-contract` | Gera o contrato web a partir do snapshot OpenAPI v1. |
+| `uv run --frozen poe web-test` | Executa os testes essenciais do fluxo do painel. |
 | `uv run --frozen poe failure-matrix` | Exercita falhas P0/P1 e audita o histórico público. |
 | `uv run --frozen poe smoke` | Valida a aplicação offline e o Compose, sem iniciar serviços. |
 | `uv run --frozen poe golden-e2e` | Executa a demonstração sintética ponta a ponta. |
 | `uv run --frozen poe services-up` | Inicia somente PostgreSQL/pgvector local. |
 | `uv run --frozen poe applications-audit` | Audita contextos e builders das imagens. |
-| `uv run --frozen poe applications-build` | Constrói as imagens da API e da fronteira web. |
+| `uv run --frozen poe applications-build` | Constrói as imagens da API e do painel web. |
 | `uv run --frozen poe applications-up` | Inicia PostgreSQL, API e web localmente. |
 | `uv run --frozen poe services-down` | Remove contêineres e rede, preservando o volume. |
 
@@ -112,13 +115,21 @@ uv run --frozen poe smoke --with-services --with-applications
 uv run --frozen poe services-down
 ```
 
+O painel fica em `127.0.0.1:3000` e localiza a API por `API_BASE_URL`, cujo
+padrão é `http://127.0.0.1:8000` e cujo valor no Compose é `http://api:8000`. O
+navegador chama sempre a mesma origem da página: o processo web encaminha
+`POST /api/analysis` para `POST /analysis`, então a API não precisa de exceção
+de CORS. O [README do painel](apps/web/README.md) descreve o fluxo, o contrato
+gerado e os estados da prescrição.
+
 ## Arquitetura
 
-O backend é um monólito modular em `apps/api`; `apps/web` é apenas uma
-fronteira operacional sem UI. PostgreSQL/pgvector apoia o perfil local, e os
-artefatos reais de dados, modelo e documentos continuam fora do Git. A factory
-HTTP padrão não descobre esses artefatos: a composição integrada só é usada
-quando todas as identidades são injetadas e autorizadas.
+O backend é um monólito modular em `apps/api`; `apps/web` serve o painel de
+análise e o proxy de mesma origem, sem framework, bundler nem etapa de build.
+PostgreSQL/pgvector apoia o perfil local, e os artefatos reais de dados, modelo
+e documentos continuam fora do Git. A factory HTTP padrão não descobre esses
+artefatos: a composição integrada só é usada quando todas as identidades são
+injetadas e autorizadas.
 
 Os [diagramas lógico, local e AWS](docs/architecture/diagrams.md) marcam
 explicitamente essa separação. O
@@ -127,7 +138,7 @@ código que o comprova.
 
 ```text
 apps/api       API, domínio, dados, modelo, recuperação, geração e persistência
-apps/web       processo de liveness; nenhuma interface
+apps/web       painel de análise e processo que o serve
 data           manifesto, fixtures sintéticas e derivados públicos permitidos
 docs           arquitetura, cards, decisões, runbooks e evidências
 infra          Compose local e perfil Terraform AWS demo
@@ -205,7 +216,8 @@ Não estão implementados:
 - composição padrão com modelo real aprovado, embedding semântico, mapeamento
   real, pgvector preenchido e provider de geração habilitado;
 - autenticação, autorização, rate limiting e operação de produção;
-- interface web;
+- gestão documental na interface, acabamento final de acessibilidade e
+  responsividade e teste automatizado de ponta a ponta em navegador;
 - infraestrutura AWS aplicada, bootstrap OIDC/IAM, deploy ou evidência live.
 
 Esses itens são futuro, não compromisso desta versão.

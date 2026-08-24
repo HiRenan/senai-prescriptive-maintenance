@@ -2,13 +2,14 @@
 
 - Responsável: Renan Mocelin
 - Data de referência: 2026-08-23
-- Baseline: `origin/develop` em `00af0e3`
+- Baseline: `origin/develop` em `7a05487`
 - Estado: runtime local e perfil AWS apenas declarativo; sem produção
 
 ## Escopo e premissas
 
 O modelo cobre o repositório público, processamento local, API FastAPI,
-PostgreSQL/pgvector, composição de modelo/RAG, imagens OCI, CI e o perfil
+PostgreSQL/pgvector, composição de modelo/RAG, o painel de análise servido
+por `apps/web` com seu proxy de mesma origem, imagens OCI, CI e o perfil
 Terraform AWS demo. O adversário pode enviar requisições hostis, adulterar
 arquivos acessíveis à sua conta local, inserir instruções em documentos ou
 tentar expor segredos e materiais pelo Git.
@@ -27,7 +28,7 @@ IAM, mas não foi aplicado; esses controles não protegem a execução local atu
 - orçamento e privilégio da futura conta AWS.
 
 As principais fronteiras são: repositório público ↔ filesystem local; cliente ↔
-API; processo ↔ PostgreSQL; documento não confiável ↔ recuperação/RAG;
+API; navegador ↔ processo web; processo ↔ PostgreSQL; documento não confiável ↔ recuperação/RAG;
 aplicação ↔ provider; GitHub OIDC ↔ AWS. Hash não concede confiança ao conteúdo:
 ele prova somente identidade dos bytes esperados.
 
@@ -41,6 +42,8 @@ ele prova somente identidade dos bytes esperados.
 | **P0 — prompt injection ou citação fabricada** | Documento encapsulado como não confiável, mapping da classe exata, currentness pre/pós-provider e rejeição de citações fora do conjunto. | Não há prova de resistência semântica universal. Provider real exige avaliação adversarial antes de habilitar. |
 | **P0 — adulteração de fonte ou artefato** | Fingerprint pre/post no mesmo descritor read-only, IDs/hashes determinísticos, conjunto fechado de arquivos, `allow_pickle=False` e checks cruzados. | Conta local comprometida pode alterar código e evidência em conjunto. Separar autoridade e preservar evidência externa em uso real. |
 | **P1 — exposição da API sem controle de acesso** | Binds locais em `127.0.0.1`, containers não privilegiados e erros sanitizados. | Não há autenticação, autorização, TLS ou rate limiting local. Nunca publicar esse runtime; implementar controles antes de rede compartilhada. |
+| **P1 — apresentação enganosa de resultado no painel** | Decodificação estrita do corpo contra a tabela de esquemas gerada do contrato, com recusa de propriedade extra, constante, enum ou limite divergente; sucesso apenas no status publicado; quatro estados de prescrição em que só a emitida renderiza conteúdo; distinção por texto, forma e cor; próximo passo em toda abstenção e falha; comparação declarada como descritiva. | O painel não julga correção semântica e o laudo não autoriza manutenção. Revisão humana e leitura das citações continuam obrigatórias. |
+| **P1 — superfície do painel e do proxy de mesma origem** | Allowlist de extensão com recusa de travessia e de material de desenvolvimento, encaminhamento de rota única, tetos e prazos nos dois sentidos com liquidação única, recusa de redirecionamento, verificação de status e tipo de mídia do contrato, tamanho recusado antes de ler o arquivo importado, CSP estrita, DOM construído sem `innerHTML` e nenhuma dependência de execução. | O proxy herda a exposição da API e não adiciona autenticação, TLS nem quota. Manter em loopback e aplicar os controles de acesso antes de qualquer rede compartilhada. |
 | **P1 — evidência obsoleta ou corrida TOCTOU** | Lifecycle com revisão CAS, aprovação vigente e revalidação do mesmo snapshot antes/depois do provider. | Mudança após a última conferência ainda é possível. Operação real exige transação, lease ou política equivalente. |
 | **P1 — indisponibilidade e exaustão** | Readiness limitada, `top_k` e budgets fechados, uma chamada de provider por instância, timeout e ausência de retry/fila. | Provider travado retém o slot; API não tem quota. Substituir a instância e definir limites operacionais antes de carga real. |
 | **P1 — vazamento ao provider externo** | Fake offline padrão; Bedrock lazy, desabilitado e sem descoberta de credenciais. | Habilitar provider transmite conteúdo autorizado. Revisar minimização, região, retenção, acesso e contrato previamente. |
@@ -76,7 +79,9 @@ trabalho e, portanto, não abre arquivos ignorados.
 
 Revisar este documento antes de adicionar autenticação, exposição de rede,
 upload, novo dado, provider externo, artefato real autorizado, busca semântica,
-worker, nova persistência, UI ou execução AWS. Também revisar após incidente,
+worker, nova persistência, nova superfície de interface ou execução AWS. A
+revisão exigida pela entrada do painel de análise está registrada nas duas
+linhas P1 acima. Também revisar após incidente,
 mudança de trust boundary ou alteração relevante de retenção.
 
 A política de reporte privado, segredos e resposta a vazamentos está em

@@ -13,6 +13,7 @@ RUN corepack pnpm install --frozen-lockfile --prod \
     --filter @senai-prescriptive-maintenance/web
 
 COPY apps/web/server.mjs ./apps/web/server.mjs
+COPY apps/web/src ./apps/web/src
 
 FROM builder AS builder-audit
 
@@ -21,7 +22,9 @@ RUN set -eu; \
     test ! -e /workspace/apps/web/README.md; \
     test ! -e /workspace/apps/web/tests; \
     test ! -e /workspace/apps/web/openapi; \
-    test "$(find /workspace/apps/web -type f | wc -l | tr -d ' ')" -eq 2; \
+    test ! -e /workspace/apps/web/node_modules; \
+    test -z "$(find /workspace/apps/web -type f ! -name 'package.json' ! -name 'server.mjs' ! -name '*.css' ! -name '*.html' ! -name '*.js' -print -quit)"; \
+    test -z "$(find /workspace/apps/web -type f -name '*.d.ts' -print -quit)"; \
     test -z "$(find /workspace -type f \( -name '*.pyc' -o -name '*.pyo' -o -name '*.pdf' -o -name '*.csv' -o -name '.env' -o -name '.env.*' \) -print -quit)"; \
     test -z "$(find /workspace -type d \( -name '__pycache__' -o -name '.git' -o -name '.cache' -o -name '.npm' -o -name '.pnpm-store' \) -print -quit)"; \
     printf '%s\n' 'Web builder audit: repository residues and caches absent.'
@@ -36,6 +39,7 @@ WORKDIR /app
 
 COPY --from=builder --chown=node:node /workspace/apps/web/package.json ./package.json
 COPY --from=builder --chown=node:node /workspace/apps/web/server.mjs ./server.mjs
+COPY --from=builder --chown=node:node /workspace/apps/web/src ./src
 
 USER node
 

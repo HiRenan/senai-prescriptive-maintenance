@@ -1,19 +1,165 @@
-# Fronteira web
+# Painel de análise
 
-Este diretório reserva a fronteira de workspace e o futuro ponto de integração
-web. Nesta etapa ele contém somente um processo HTTP operacional, sem
-dependências, que responde `GET /health/live` com `{"status":"ok"}` para o
-healthcheck do contêiner. Todas as demais rotas respondem `404`.
+Este diretório contém o fluxo principal de demonstração: informar as 18 features
+do contrato, executar `POST /analysis` e ler o resultado de forma auditável.
 
-Não há interface, componentes, estilos, assets, framework ou comportamento
-visual. O processo pode ser executado localmente com Node.js 22:
+O painel não tem framework, bundler nem dependência de execução. São módulos ESM
+servidos diretamente ao navegador por um processo Node mínimo.
+
+## Estrutura
+
+```text
+apps/web/
+├── server.mjs        # liveness, arquivos estáticos e proxy de mesma origem
+├── src/
+│   ├── index.html    # documento e marcos de acessibilidade
+│   ├── styles.css    # tokens, tons dos desfechos e layout
+│   ├── main.js       # ponto de entrada e ligação do fluxo
+│   ├── api/          # cliente de POST /analysis
+│   ├── core/         # regras puras: features, importação, laudo, comparação
+│   ├── generated/    # contrato derivado do OpenAPI v1, não editar à mão
+│   └── ui/           # construção de DOM do console e do laudo
+└── tests/            # testes essenciais do fluxo com o runner do Node
+```
+
+## Contrato
+
+`src/generated/analysis-contract.js` e o `.d.ts` irmão são gerados a partir de
+[`apps/api/openapi/v1.json`](../api/openapi/v1.json). Nenhum tipo de request ou
+response é escrito à mão. O módulo publica as 18 features na ordem do contrato,
+os limites de `top_k`, os cinco desfechos com o que cada um pode conter e os
+exemplos sintéticos usados na importação.
+
+O gerador recusa um padrão de texto que não esteja ancorado ou que use
+construção fora do subconjunto lido igual por Python e pelo navegador. Os
+atalhos `\d`, `\w` e `\s` ficam de fora por isso: são Unicode de um lado e
+ASCII do outro. Só classes explícitas e escapes literais são publicados.
+
+Regenere e verifique a partir da raiz:
+
+```powershell
+uv run --frozen poe web-contract
+uv run --frozen poe web-contract-check
+```
+
+O `.d.ts` é material de desenvolvimento: fica fora do contexto Docker e da
+imagem.
+
+## Fluxo
+
+1. O console monta os 18 campos a partir do contrato, agrupados por métrica com
+   os eixos X e Z lado a lado.
+2. A entrada pode ser digitada, carregada de um exemplo sintético do contrato ou
+   importada de um JSON colado ou de arquivo. A importação recusa chaves fora do
+   contrato em vez de descartá-las em silêncio, e recusa um arquivo acima de
+   64 KiB pelo tamanho declarado, antes de lê-lo.
+3. O envio valida campo a campo antes de qualquer requisição e mostra o motivo
+   junto do campo.
+4. Durante a execução o laudo mostra um esqueleto e a região viva anuncia o
+   estado.
+5. O resultado é apresentado como um laudo: desfecho, próximo passo, prescrição,
+   diagnóstico, suporte, abstenção, citações, vizinhos opacos, avisos e a
+   comparação das features enviadas.
+
+## Decodificação da resposta
+
+O contrato gerado publica a tabela de esquemas das cinco variantes de resposta.
+O cliente decodifica o corpo contra a variante do desfecho recebido: membros
+obrigatórios, ausência de qualquer propriedade que o contrato não declare,
+constantes, enums, padrões e limites de texto, limites numéricos e limites de
+lista, até cada elemento. Só o status de sucesso publicado vira resultado; um `201` ou um
+`204` é resposta inesperada. O prazo do cliente cobre a leitura do corpo, então
+uma resposta que começa e nunca termina vira tempo limite. Qualquer divergência
+é apresentada como falha de contrato, com o próximo passo, em vez de virar um
+laudo com lacunas ou rótulos inventados.
+
+## Disponibilidade da prescrição
+
+A prescrição tem quatro estados de apresentação e só o primeiro exibe conteúdo:
+
+| Estado | Quando | O que aparece |
+| --- | --- | --- |
+| Emitida | `documented_fault` com prescrição válida | resumo, prioridade e ações |
+| Não se aplica | `normal` | explicação de que condição normal não prescreve |
+| Retida | abstenção do contrato | motivo da API e próximo passo |
+| Indisponível | corpo que contradiz o contrato | nota de integridade |
+
+A decisão vem da tabela de desfechos gerada do contrato, não de condições
+escritas à mão. Um corpo que traga prescrição num desfecho que não prescreve, ou
+que omita a prescrição em `documented_fault`, cai em indisponível e nada é
+exibido como prescrição.
+
+Essa checagem é independente da validação do cliente. O corpo contraditório é
+recusado antes de chegar ao laudo, e mesmo assim a apresentação continua
+incapaz de exibir uma prescrição que o contrato não autoriza.
+
+## Comparação de features
+
+A comparação mostra os oito pares de eixo X e Z e as duas leituras de processo.
+Cada par é escalado pela própria magnitude máxima, porque as 18 features não
+compartilham unidade. Nada é comparado com o modelo, com os vizinhos ou com
+qualquer limiar: o painel declara que a comparação é descritiva e não indica
+causa, gravidade nem relação com o desfecho.
+
+## Servidor
+
+`server.mjs` responde:
+
+| Rota | Comportamento |
+| --- | --- |
+| `GET /health/live` | `{"status":"ok"}` para o healthcheck do contêiner |
+| `GET` de `src/` | `index.html`, CSS e módulos, com allowlist de extensão |
+| `POST /api/analysis` | encaminha para `POST /analysis` da API |
+
+O proxy existe para que o navegador use a mesma origem da página e a API não
+precise de exceção de CORS. Ele encaminha apenas essa rota. Caminhos fora da
+raiz estática são recusados.
+
+Os dois sentidos são limitados e temporizados:
+
+| Limite | Valor | Comportamento ao exceder |
+| --- | --- | --- |
+| Corpo recebido | 64 KiB | `413`, sem chamar a API |
+| Leitura do corpo recebido | 15 s | `408`, sem chamar a API |
+| Corpo devolvido pela API | 256 KiB | `502`, sem repassar |
+| Resposta da API | 20 s, incluindo a leitura do corpo | `504` |
+
+O proxy repassa apenas os status que o contrato publica e apenas com o tipo de
+mídia do contrato, verificado por token exato; não segue redirecionamento. Fora
+disso responde `502` com envelope próprio. O tipo de mídia entregue ao navegador
+é sempre `application/json`.
+
+Configure a API por `API_BASE_URL`; o padrão local é `http://127.0.0.1:8000` e o
+Compose usa `http://api:8000`. `WEB_REQUEST_TIMEOUT_MS` e
+`WEB_UPSTREAM_TIMEOUT_MS` ajustam os prazos em milissegundos, aceitos de 1 a
+120000; qualquer outro valor é ignorado em favor do padrão.
+
+## Execução local
+
+Com a API em execução:
 
 ```powershell
 corepack pnpm --filter @senai-prescriptive-maintenance/web start
 ```
 
-O build e o smoke da imagem fazem parte do fluxo documentado na raiz e em
-[`infra/README.md`](../../infra/README.md).
+Em contêineres, a partir da raiz:
 
-A implementação visual e o comportamento da aplicação pertencem a tarefas
-posteriores.
+```powershell
+uv run --frozen poe applications-up
+```
+
+O painel fica em `127.0.0.1:3000`.
+
+## Verificações
+
+```powershell
+uv run --frozen poe web-contract-check
+uv run --frozen poe web-typecheck
+uv run --frozen poe web-test
+```
+
+A verificação de tipos usa TypeScript sobre JavaScript anotado com JSDoc, sem
+etapa de build: os mesmos arquivos que rodam no navegador são os verificados. Os
+testes usam o runner do Node e tomam os exemplos do próprio snapshot OpenAPI, de
+modo que nenhum material original participa da suíte. As três tarefas também
+fazem parte de `uv run --frozen poe check`.

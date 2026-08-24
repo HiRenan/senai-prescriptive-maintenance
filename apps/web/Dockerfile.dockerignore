@@ -9,3 +9,11 @@ apps/*
 apps/web/*
 !apps/web/package.json
 !apps/web/server.mjs
+!apps/web/src/
+apps/web/src/*
+!apps/web/src/**/
+!apps/web/src/**/*.css
+!apps/web/src/**/*.html
+!apps/web/src/**/*.js
+apps/web/src/**/*.d.ts
+apps/web/src/**/tests/

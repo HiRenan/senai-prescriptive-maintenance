@@ -8,10 +8,10 @@ futura para evitar diagramas ou integrações fictícias.
 
 O projeto usa um monorepo. O backend FastAPI em `apps/api` é a aplicação de
 produto implementada e está estruturado como base para um monólito modular. A
-fronteira `apps/web` possui somente um processo operacional de liveness, sem
-interface. PostgreSQL/pgvector existe como serviço local independente. A API
-abre conexões curtas apenas quando uma rota documental usa explicitamente o
-backend `postgres`; importação, liveness e o perfil `offline` não abrem rede.
+fronteira `apps/web` serve o painel de demonstração da análise a partir do
+contrato congelado. PostgreSQL/pgvector existe como serviço local independente.
+A API abre conexões curtas apenas quando uma rota documental usa explicitamente
+o backend `postgres`; importação, liveness e o perfil `offline` não abrem rede.
 `infra/aws/demo` descreve recursos Terraform, mas nenhum ambiente AWS foi
 aplicado.
 
@@ -28,7 +28,8 @@ aplicado.
 | `apps/api/src/prescriptive_maintenance/prescription_orchestration.py` | Composição interna pura que valida o resultado do modelo, liga o binding efetivo da recuperação, chama busca apenas para falha documentável, reutiliza os guardrails RAG, limita o provider síncrono por timeout e slot unitário e devolve estados e metadados allowlisted. | Não executa o modelo, não persiste, não configura provider real e não oferece cancelamento do provider síncrono. |
 | `apps/api/src/prescriptive_maintenance/analysis_integration.py` | Composição explícita da rota de análise com autorização imutável de dataset/modelo/índice/recuperação/geração/projeção, paridade de vizinhos, cinco estados públicos, citações usadas, UoW, cache posterior ao commit e logs por estágio. | Não é selecionada pela factory padrão, não autoriza artefato real, mantém o `GET` completo somente no processo e não armazena features, conteúdo ou narrativas. |
 | `apps/api/src/prescriptive_maintenance/analysis_benchmark.py` e `scripts/analysis_benchmark.py` | Harness e CLI sintéticos para medir o `POST /analysis` integrado, com aquecimento isolado, passagem temporizada sem tracing, runtime novo para memória, métricas primárias por cenário, eventos pós-medição, p50/p95, erros, alocações Python por requisição, uso simulado e proveniência dirty vinculada a conteúdo. | É um microbenchmark sequencial de QA; o mix de cenários é apenas secundário e não mede RSS, memória nativa, concorrência, capacidade, artefatos reais, rede, LLM ou custo faturável. |
-| `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração posterior de cliente. | É a fonte de tipos HTTP; `apps/web` não duplica nem gera o cliente nesta tarefa. |
+| `apps/api/openapi/v1.json` | Snapshot OpenAPI 3.1 determinístico e compatível com geração de cliente. | É a fonte de tipos HTTP; `apps/web` deriva seu contrato dele e não duplica tipos à mão. |
+| `scripts/generate_web_contract.py` | Gerador determinístico do contrato web de análise, com modo `--check`, a partir do snapshot v1. | Cobre somente as estruturas alcançáveis por `POST /analysis`; não gera cliente do ciclo documental. |
 | `apps/api/src/prescriptive_maintenance/settings.py` | Perfis `local`, `offline` e `aws`, backend obrigatório `memory`/`postgres` e URL coerente, carregados no lifespan. | A importação e a liveness não instanciam dependências externas. |
 | `apps/api/src/prescriptive_maintenance/persistence/` | Metadados imutáveis de análise/documento/versão/chunk/evidência, registry de ciclo/auditoria, UoW, adapter psycopg, CAS transacional e migrações reversíveis para metadados e índice de similaridade. | As rotas documentais usam somente metadados; conteúdo, features e narrativas não são persistidos. Migrações continuam explícitas. |
 | `apps/api/src/prescriptive_maintenance/data/` | Fronteira interna com portas tipadas para abrir `banner.csv` e os seis PDFs autorizados em modo binário read-only, emitir evidências pre/post, extrair PDFs com rastreabilidade e qualidade por página, segmentar a extração estruturada com IDs determinísticos, representar chunks offline, armazená-los em memória ou entregá-los a um writer pgvector injetado, aplicar o contrato v2 estrito das 26 colunas, perfilar um DataFrame, executar a baseline determinística e o inventário categórico normalizado de `fault` em duas rodadas e carregar a política declarativa de qualidade. | Exige caminhos explícitos no acesso às fontes; o indexador não recebe PDFs. Derivados permanecem locais e ignorados, o embedding fake hash de CI não é semântico e a fronteira pgvector não abre conexão nem executa SQL. OCR depende de adapter local explícito e sua ausência produz `ocr_required` apenas em páginas sem texto utilizável. Os artefatos públicos tabulares só são persistidos após integridade, gates, reconciliações e igualdade byte a byte. |
@@ -36,7 +37,7 @@ aplicado.
 | `apps/api/src/prescriptive_maintenance/modeling/` | Busca k-NN v3 em memória sobre 18 features, `StandardScaler` de treino, distância euclidiana, condição candidata baseada em históricos, política fechada dos cinco estados operacionais, suporte heurístico, abstenção tipada, adapter `ModelPort`, artefato NumPy/JSON íntegro, índice derivado versionado com adapters exatos em memória e PostgreSQL/pgvector e harness temporal com métricas candidatas, seletivas e exatas. | Não está ligada às rotas nem à factory padrão, não calibra probabilidade, não usa o teste no fit, não faz tuning, não usa busca aproximada ou GPU; a avaliação é pós-hoc em um teste historicamente observado e não aprova o modelo para operação. |
 | `apps/api/tests/` | Contratos do pacote, aplicação, liveness, OpenAPI v1, configuração, persistência, dados, geração e modelo, incluindo snapshots, PDFs sintéticos, JSON, golden e cenários Unicode inteiramente sintéticos. | A suíte padrão não acessa materiais originais, serviços externos nem credenciais; a integração PostgreSQL é opcional e usa schema descartável. |
 | `apps/api/Dockerfile` | Build multi-stage pelo `uv.lock`, runtime Python 3.13 não privilegiado e healthcheck da readiness. | Não inclui dependências de desenvolvimento nem executa migrações automaticamente; a readiness segue o backend configurado. |
-| `apps/web` | Workspace privado, servidor HTTP sem dependências, Dockerfile multi-stage e `GET /health/live`. | Não contém UI, framework, componentes, estilos, assets ou comportamento visual. |
+| `apps/web` | Painel ESM sem framework nem bundler, contrato derivado do OpenAPI v1, servidor com liveness, ativos estáticos e proxy de mesma origem para `POST /analysis`. | Cobre apenas o fluxo de análise; não implementa ciclo documental nem `GET /analysis/{id}`. |
 | `.dockerignore` e `apps/*/Dockerfile.dockerignore` | União segura na raiz e allowlists específicas dos manifests, locks e fontes necessários a cada build. | Excluem todo o restante do monorepo dos contextos; a API inclui somente o README exigido pelos metadados Python. |
 | `compose.yaml` | Topologia API, web e PostgreSQL 17/pgvector 0.8.6, binds em loopback, healthchecks e volume nomeado. | É infraestrutura de desenvolvimento local, não ambiente de produção. |
 | `infra/postgres/init/001-enable-vector.sql` | Habilita a extensão `vector` na primeira criação do volume. | Não cria esquema ou tabelas da aplicação. |
@@ -148,8 +149,10 @@ estão registrados no [ADR 0004](../adr/0004-gitflow-ci-and-releases.md).
   auditoria e usam CAS transacional. A integração de análise usa uma UoW
   injetada para metadados e referências, sem persistir resposta completa,
   features, narrativas ou bytes documentais.
-- **Web:** `apps/web` reserva o limite do workspace e oferece somente liveness
-  operacional para o contêiner; não existe frontend ou rota visual.
+- **Web:** `apps/web` implementa o fluxo de análise sobre tipos gerados do
+  contrato v1. A disponibilidade da prescrição é decidida pela tabela de
+  desfechos derivada do contrato, e todo estado que não seja prescrição emitida
+  aparece explicitamente como não emitida.
 - **Dados:** manifesto, fixtures sintéticas, baseline agregada, inventário
   categórico aprovado e visão derivada da política são públicos; originais e
   extrações dos PDFs e demais derivados permanecem locais e ignorados.
