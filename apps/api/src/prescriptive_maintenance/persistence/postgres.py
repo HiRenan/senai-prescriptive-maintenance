@@ -249,8 +249,9 @@ class PostgresAnalysisRepository(AnalysisRepository):
                     model_id,
                     prompt_id,
                     configuration_id,
+                    index_id,
                     created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     analysis.analysis_id,
@@ -259,6 +260,7 @@ class PostgresAnalysisRepository(AnalysisRepository):
                     analysis.model_id,
                     analysis.prompt_id,
                     analysis.configuration_id,
+                    analysis.index_id,
                     analysis.created_at,
                 ),
             )
@@ -283,6 +285,23 @@ class PostgresAnalysisRepository(AnalysisRepository):
                         reference.ordinal,
                     ),
                 )
+            for ordinal, neighbor_ref in enumerate(analysis.neighbor_refs, start=1):
+                self._connection.execute(
+                    """
+                    INSERT INTO analysis_neighbor_references (
+                        analysis_id,
+                        index_id,
+                        neighbor_ref,
+                        ordinal
+                    ) VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        analysis.analysis_id,
+                        analysis.index_id,
+                        neighbor_ref,
+                        ordinal,
+                    ),
+                )
         except IntegrityError as error:
             failure = _sanitized_constraint_error(error, self._transaction_state)
         else:
@@ -301,6 +320,7 @@ class PostgresAnalysisRepository(AnalysisRepository):
                 model_id,
                 prompt_id,
                 configuration_id,
+                index_id,
                 created_at
             FROM analyses
             WHERE analysis_id = %s
@@ -334,6 +354,15 @@ class PostgresAnalysisRepository(AnalysisRepository):
             )
             for row in evidence_rows
         )
+        neighbor_rows = self._connection.execute(
+            """
+            SELECT neighbor_ref
+            FROM analysis_neighbor_references
+            WHERE analysis_id = %s
+            ORDER BY ordinal
+            """,
+            (analysis_id,),
+        ).fetchall()
         return canonical_analysis(
             AnalysisMetadata(
                 analysis_id=cast(str, analysis_row["analysis_id"]),
@@ -344,6 +373,14 @@ class PostgresAnalysisRepository(AnalysisRepository):
                 configuration_id=cast(str, analysis_row["configuration_id"]),
                 created_at=cast(datetime, analysis_row["created_at"]),
                 evidence_references=references,
+                index_id=(
+                    None
+                    if analysis_row["index_id"] is None
+                    else cast(str, analysis_row["index_id"])
+                ),
+                neighbor_refs=tuple(
+                    cast(str, row["neighbor_ref"]) for row in neighbor_rows
+                ),
             )
         )
 

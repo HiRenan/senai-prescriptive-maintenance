@@ -18,6 +18,11 @@ from prescriptive_maintenance.persistence import (
 
 SYNTHETIC_TIME: Final = datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)
 SYNTHETIC_DATASET_ID: Final = "a" * 64
+SYNTHETIC_INDEX_ID: Final = f"similarity_index_v1_{'b' * 32}"
+SYNTHETIC_NEIGHBOR_REFS: Final = (
+    "neighbor_synthetic_trace_01",
+    "neighbor_synthetic_trace_02",
+)
 SYNTHETIC_FORBIDDEN_PAYLOAD: Final = (
     "synthetic raw payload that must never be persisted"
 )
@@ -296,6 +301,8 @@ SYNTHETIC_ANALYSIS: Final = AnalysisMetadata(
     prompt_id="prompt_synthetic_v1",
     configuration_id="config_synthetic_v1",
     created_at=SYNTHETIC_TIME,
+    index_id=SYNTHETIC_INDEX_ID,
+    neighbor_refs=SYNTHETIC_NEIGHBOR_REFS,
     evidence_references=(
         EvidenceReference(
             evidence_id="synthetic-evidence-v1-chunk-02",
@@ -498,6 +505,10 @@ def synthetic_tainted_scalar_aggregates() -> tuple[
         prompt_id=_tainted_text(SYNTHETIC_ANALYSIS.prompt_id),
         configuration_id=_tainted_text(SYNTHETIC_ANALYSIS.configuration_id),
         created_at=_tainted_datetime(SYNTHETIC_ANALYSIS.created_at),
+        index_id=_tainted_text(SYNTHETIC_INDEX_ID),
+        neighbor_refs=tuple(
+            _tainted_text(reference) for reference in SYNTHETIC_NEIGHBOR_REFS
+        ),
         evidence_references=tuple(
             EvidenceReference(
                 evidence_id=_tainted_text(reference.evidence_id),
@@ -565,6 +576,8 @@ def assert_persisted_scalars_are_canonical(
         analysis.model_id,
         analysis.prompt_id,
         analysis.configuration_id,
+        *((analysis.index_id,) if analysis.index_id is not None else ()),
+        *analysis.neighbor_refs,
         *(reference.evidence_id for reference in references),
         *(reference.document_id for reference in references),
         *(reference.document_version_id for reference in references),

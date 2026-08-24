@@ -778,6 +778,10 @@ class IntegratedAnalysisService:
             prompt_id=self._authorization.prompt_id,
             configuration_id=self._authorization.configuration_id,
             created_at=instant,
+            index_id=self._authorization.index_id,
+            neighbor_refs=tuple(
+                neighbor.neighbor_ref for neighbor in response.root.neighbors
+            ),
             evidence_references=tuple(
                 EvidenceReference(
                     evidence_id=item.chunk_ref,

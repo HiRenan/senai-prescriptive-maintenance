@@ -664,6 +664,10 @@ def test_integrated_service_composes_four_non_failure_outcomes(
     assert persisted.model_id == _MODEL_ID
     assert persisted.prompt_id == PERSISTED_GENERATION_PROMPT_ID
     assert persisted.configuration_id.startswith("config_")
+    assert persisted.index_id == _INDEX_ID
+    assert persisted.neighbor_refs == tuple(
+        neighbor.neighbor_ref for neighbor in response.root.neighbors
+    )
     assert persisted.document_version_ids == (
         (_DOCUMENT_VERSION_ID,)
         if retrieval_status is GovernedRetrievalStatus.EVIDENCE
@@ -728,6 +732,8 @@ def test_documented_projection_exposes_only_evidence_cited_by_generation() -> No
     with InMemoryUnitOfWork(store) as query:
         persisted = query.analyses.get(response.analysis_id)
     assert persisted is not None
+    assert persisted.index_id == _INDEX_ID
+    assert persisted.neighbor_refs == (_NEIGHBOR_REF,)
     assert tuple(item.chunk_ref for item in persisted.evidence_references) == (
         _CHUNK_REF,
         _SECOND_CHUNK_REF,
@@ -1482,6 +1488,8 @@ def test_integrated_analysis_round_trips_traceability_in_real_postgres(
     assert persisted.dataset_id == _DATASET_ID
     assert persisted.model_id == _MODEL_ID
     assert persisted.prompt_id == PERSISTED_GENERATION_PROMPT_ID
+    assert persisted.index_id == _INDEX_ID
+    assert persisted.neighbor_refs == (_NEIGHBOR_REF,)
     assert tuple(
         (item.document_id, item.document_version_id, item.chunk_ref)
         for item in persisted.evidence_references

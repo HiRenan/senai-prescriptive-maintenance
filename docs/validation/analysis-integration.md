@@ -63,6 +63,12 @@ ordem da recuperação. Já a persistência registra todas as referências
 recuperadas, sem conteúdo, para permitir auditar o contexto que foi oferecido ao
 guardrail.
 
+A mesma transação registra ainda o `index_id` autorizado e os `neighbor_ref`
+exatos, na ordem usada pela análise. Esses metadados já passaram pela paridade
+entre modelo, índice e autorização; nenhum vetor, feature, label ou conteúdo é
+persistido. A migração reversível `analysis_neighbor_traceability` mantém o
+vínculo entre análise e índice e rejeita referência duplicada ou sem índice.
+
 ## Persistência e correlação
 
 A jornada prepara a projeção pública, duas cópias defensivas e os metadados antes
@@ -98,6 +104,7 @@ matriz de corrupção/incompatibilidade do composition root.
 
 ```powershell
 uv run --frozen pytest apps/api/tests/test_analysis_integration.py --no-cov -q
+uv run --frozen pytest apps/api/tests/test_postgres_persistence.py --no-cov -q
 uv run --frozen poe check
 uv run --frozen python scripts/generate_openapi.py --check
 ```

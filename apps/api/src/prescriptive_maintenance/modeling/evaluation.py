@@ -57,8 +57,8 @@ from prescriptive_maintenance.operating_states import (
 )
 from prescriptive_maintenance.ports import ModelAbstentionReason
 
-MODEL_EVALUATION_SCHEMA_VERSION: Final = 2
-MODEL_EVALUATION_PROTOCOL_VERSION: Final = "temporal-knn-exact.v2"
+MODEL_EVALUATION_SCHEMA_VERSION: Final = 3
+MODEL_EVALUATION_PROTOCOL_VERSION: Final = "temporal-knn-open-set-exact.v3"
 MODEL_EVALUATION_TOP_K: Final = 5
 MODEL_EVALUATION_WORKING_MEMORY_MIB: Final = 64
 MODEL_EVALUATION_PARITY_SAMPLE_COUNT: Final = 16
@@ -66,7 +66,7 @@ MODEL_EVALUATION_LATENCY_WARMUP_COUNT: Final = 5
 MODEL_EVALUATION_LATENCY_SAMPLE_COUNT: Final = 64
 MODEL_EVALUATION_HOLDOUT_PARTITION: Final = "test"
 
-_PLAN_ID_PREFIX: Final = "evaluation_plan_v2_"
+_PLAN_ID_PREFIX: Final = "evaluation_plan_v3_"
 _HOLDOUT_FILENAME: Final = "test.parquet"
 _MANIFEST_MAXIMUM_BYTES: Final = 2 * 1024 * 1024
 _HOLDOUT_MAXIMUM_BYTES: Final = 128 * 1024 * 1024
@@ -91,9 +91,16 @@ _METRIC_NAMES: Final[tuple[str, ...]] = (
     "candidate_top1_accuracy",
     "neighbor_hit_at_1",
     "neighbor_hit_at_k",
+    "neighbor_precision_at_k",
+    "neighbor_recall_at_k",
+    "neighbor_incremental_hit_at_positions_2_to_k",
     "neighbor_mrr_at_k",
     "majority_class_accuracy",
     "selective_candidate_accuracy",
+    "open_set_known_coverage",
+    "open_set_known_selective_accuracy",
+    "open_set_unknown_false_acceptance_rate",
+    "open_set_unknown_rejection_rate",
 )
 _ALWAYS_PROBLEM_BASELINE_TYPE: Final = "constant_class_accuracy"
 _ALWAYS_PROBLEM_BASELINE_STRATEGY: Final = "always_problem"
@@ -183,6 +190,7 @@ class FrozenEvaluationPlan:
                     "secondary_exact_label_diagnostics": [
                         "all_rows",
                         "known_train_classes",
+                        "unknown_train_classes",
                     ],
                 },
                 "metrics": list(_METRIC_NAMES),
@@ -254,6 +262,12 @@ class ScopeMetrics:
     accepted_count: int
     accepted_candidate_correct_count: int
     abstention_counts: tuple[tuple[str, int], ...]
+    hit_counts_by_k: tuple[int, ...]
+    relevant_retrieved_counts_by_k: tuple[int, ...]
+    retrieved_counts_by_k: tuple[int, ...]
+    first_hit_counts_by_position: tuple[int, ...]
+    relevant_available_count: int
+    absent_relevance_row_count: int
 
     def to_payload(self) -> dict[str, object]:
         abstained_count = self.row_count - self.accepted_count
@@ -274,8 +288,13 @@ class ScopeMetrics:
             "neighbor_mrr_at_k": {
                 "reciprocal_rank_sum": round(self.reciprocal_rank_sum, 12),
                 "denominator": self.row_count,
-                "value": _ratio(self.reciprocal_rank_sum, self.row_count),
+                "value": (
+                    None
+                    if self.row_count == 0
+                    else _ratio(self.reciprocal_rank_sum, self.row_count)
+                ),
             },
+            "neighbor_ranking": _neighbor_ranking_payload(self),
             "majority_class_baseline": _rate_payload(
                 self.majority_correct_count,
                 self.row_count,
@@ -368,7 +387,7 @@ class EvaluationReport:
     operational_objective: OperationalObjectiveMetrics
     all_rows: ScopeMetrics
     known_train_classes: ScopeMetrics
-    unknown_class_row_count: int
+    unknown_train_classes: ScopeMetrics
     boundary_repair_row_count: int
     parity_audit_count: int
     evaluation_seconds: float
@@ -376,6 +395,12 @@ class EvaluationReport:
     process_peak_before: _ProcessPeakMemory
     process_peak_after: _ProcessPeakMemory
     peak_traced_allocation_bytes: int
+
+    @property
+    def unknown_class_row_count(self) -> int:
+        """Preserve the previous aggregate accessor for report consumers."""
+
+        return self.unknown_train_classes.row_count
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -386,7 +411,7 @@ class EvaluationReport:
             "holdout_summary": {
                 "all_row_count": self.all_rows.row_count,
                 "known_train_class_row_count": self.known_train_classes.row_count,
-                "unknown_train_class_row_count": self.unknown_class_row_count,
+                "unknown_train_class_row_count": self.unknown_train_classes.row_count,
             },
             "metrics": {
                 "definitions": _metric_definitions(),
@@ -396,7 +421,12 @@ class EvaluationReport:
                 "secondary_exact_label_diagnostics": {
                     "all_rows": self.all_rows.to_payload(),
                     "known_train_classes": self.known_train_classes.to_payload(),
+                    "unknown_train_classes": self.unknown_train_classes.to_payload(),
                 },
+                "open_set": _open_set_payload(
+                    self.known_train_classes,
+                    self.unknown_train_classes,
+                ),
             },
             "execution": {
                 "full_distance_rows": self.all_rows.row_count,
@@ -447,6 +477,10 @@ class EvaluationReport:
                     "diagnóstico secundário."
                 ),
                 "Classes ausentes do treino não podem ser previstas pelo candidato.",
+                (
+                    "Precisão e recall do ranking usam linhas de treino; "
+                    "não representam ocorrências independentes."
+                ),
                 "A busca é exata e O(N); o lote reduz overhead sem mudar o ranking.",
                 (
                     "O índice operacional é vinculado por identidade e "
@@ -643,7 +677,11 @@ def evaluate_frozen_holdout(
         tracemalloc.stop()
     process_peak_after = _process_peak_memory()
 
-    training_targets = frozenset(label.target_slug for label in snapshot.labels)
+    training_target_counts = {
+        label.target_slug: snapshot.class_counts[position]
+        for position, label in enumerate(snapshot.labels)
+    }
+    training_targets = frozenset(training_target_counts)
     majority_target = min(
         range(len(snapshot.labels)),
         key=lambda index: (
@@ -657,8 +695,25 @@ def evaluate_frozen_holdout(
         [item.truth in training_targets for item in outcomes],
         dtype=np.bool_,
     )
-    all_metrics = _scope_metrics(outcomes, all_mask, majority_label)
-    known_metrics = _scope_metrics(outcomes, known_mask, majority_label)
+    unknown_mask = np.logical_not(known_mask)
+    all_metrics = _scope_metrics(
+        outcomes,
+        all_mask,
+        majority_label,
+        training_target_counts,
+    )
+    known_metrics = _scope_metrics(
+        outcomes,
+        known_mask,
+        majority_label,
+        training_target_counts,
+    )
+    unknown_metrics = _scope_metrics(
+        outcomes,
+        unknown_mask,
+        majority_label,
+        training_target_counts,
+    )
     operational_metrics = _operational_objective_metrics(outcomes)
     latency = _benchmark_latency(
         holdout,
@@ -672,7 +727,7 @@ def evaluate_frozen_holdout(
         operational_objective=operational_metrics,
         all_rows=all_metrics,
         known_train_classes=known_metrics,
-        unknown_class_row_count=len(outcomes) - known_metrics.row_count,
+        unknown_train_classes=unknown_metrics,
         boundary_repair_row_count=repair_count,
         parity_audit_count=parity_count,
         evaluation_seconds=max(0.0, (finished_ns - started_ns) / 1_000_000_000),
@@ -893,25 +948,30 @@ def _scope_metrics(
     outcomes: tuple[_RowEvaluation, ...],
     mask: BoolVector,
     majority_label: str,
+    relevant_counts: Mapping[str, int],
 ) -> ScopeMetrics:
     selected = tuple(item for item, keep in zip(outcomes, mask, strict=True) if keep)
     candidate_correct = sum(item.candidate == item.truth for item in selected)
-    neighbor_hit_1 = sum(
-        bool(item.neighbor_targets) and item.neighbor_targets[0] == item.truth
-        for item in selected
-    )
-    neighbor_hit_k = sum(item.truth in item.neighbor_targets for item in selected)
-    reciprocal_ranks = tuple(
-        next(
-            (
-                1.0 / rank
-                for rank, target in enumerate(item.neighbor_targets, start=1)
-                if target == item.truth
-            ),
-            0.0,
+    hit_counts = [0] * MODEL_EVALUATION_TOP_K
+    relevant_retrieved_counts = [0] * MODEL_EVALUATION_TOP_K
+    retrieved_counts = [0] * MODEL_EVALUATION_TOP_K
+    first_hit_counts = [0] * MODEL_EVALUATION_TOP_K
+    reciprocal_ranks: list[float] = []
+    for item in selected:
+        matches = tuple(target == item.truth for target in item.neighbor_targets)
+        first_hit = next(
+            (position for position, match in enumerate(matches) if match),
+            None,
         )
-        for item in selected
-    )
+        reciprocal_ranks.append(0.0 if first_hit is None else 1.0 / (first_hit + 1))
+        if first_hit is not None and first_hit < MODEL_EVALUATION_TOP_K:
+            first_hit_counts[first_hit] += 1
+        for position in range(MODEL_EVALUATION_TOP_K):
+            prefix = matches[: position + 1]
+            relevant_count = sum(prefix)
+            retrieved_counts[position] += len(prefix)
+            relevant_retrieved_counts[position] += relevant_count
+            hit_counts[position] += relevant_count > 0
     accepted = tuple(item for item in selected if item.abstention_reason is None)
     reasons = tuple(
         (
@@ -923,8 +983,8 @@ def _scope_metrics(
     return ScopeMetrics(
         row_count=len(selected),
         candidate_correct_count=candidate_correct,
-        neighbor_hit_at_1_count=neighbor_hit_1,
-        neighbor_hit_at_k_count=neighbor_hit_k,
+        neighbor_hit_at_1_count=hit_counts[0],
+        neighbor_hit_at_k_count=hit_counts[-1],
         reciprocal_rank_sum=fsum(reciprocal_ranks),
         majority_correct_count=sum(item.truth == majority_label for item in selected),
         accepted_count=len(accepted),
@@ -932,6 +992,16 @@ def _scope_metrics(
             item.candidate == item.truth for item in accepted
         ),
         abstention_counts=reasons,
+        hit_counts_by_k=tuple(hit_counts),
+        relevant_retrieved_counts_by_k=tuple(relevant_retrieved_counts),
+        retrieved_counts_by_k=tuple(retrieved_counts),
+        first_hit_counts_by_position=tuple(first_hit_counts),
+        relevant_available_count=sum(
+            relevant_counts.get(item.truth, 0) for item in selected
+        ),
+        absent_relevance_row_count=sum(
+            item.truth not in relevant_counts for item in selected
+        ),
     )
 
 
@@ -1284,6 +1354,17 @@ def _metric_definitions() -> dict[str, str]:
             "Ao menos um dos K vizinhos possui o target consultado; para uma "
             "relevância categórica por consulta, equivale ao Recall@K binário."
         ),
+        "neighbor_precision_at_k": (
+            "Vizinhos com target exato relevante divididos pelas linhas de treino "
+            "recuperadas até K."
+        ),
+        "neighbor_recall_at_k": (
+            "Linhas de treino relevantes recuperadas até K divididas por todas as "
+            "linhas de treino relevantes disponíveis para cada consulta."
+        ),
+        "neighbor_incremental_hit_at_positions_2_to_k": (
+            "Primeiros acertos que surgem exatamente em cada posição de 2 até K."
+        ),
         "neighbor_mrr_at_k": (
             "Média de 1/r para o primeiro vizinho relevante até K; zero quando "
             "não há target relevante no ranking."
@@ -1296,6 +1377,22 @@ def _metric_definitions() -> dict[str, str]:
         "abstention_rate": "Linhas abstidas divididas pelas linhas do escopo.",
         "selective_candidate_accuracy": (
             "Candidatas corretas entre linhas aceitas; denominador: aceitas."
+        ),
+        "open_set_known_coverage": (
+            "Classes conhecidas aceitas divididas pelas classes conhecidas, com "
+            "intervalo de Wilson de 95%."
+        ),
+        "open_set_known_selective_accuracy": (
+            "Candidatas exatas corretas entre classes conhecidas aceitas, com "
+            "intervalo de Wilson de 95%."
+        ),
+        "open_set_unknown_false_acceptance_rate": (
+            "Classes ausentes do treino aceitas pelo modelo divididas pelas classes "
+            "ausentes do treino, com intervalo de Wilson de 95%."
+        ),
+        "open_set_unknown_rejection_rate": (
+            "Classes ausentes do treino rejeitadas divididas pelas classes ausentes "
+            "do treino, com intervalo de Wilson de 95%."
         ),
     }
 
@@ -1349,6 +1446,128 @@ def _operational_candidate_scope_payload(
         f"{prefix}_balanced_accuracy": {"value": balanced_accuracy},
         f"{prefix}_operational_recall": operational_recall,
         f"{prefix}_problem_recall": problem_recall,
+    }
+
+
+def _neighbor_ranking_payload(metrics: ScopeMetrics) -> dict[str, object]:
+    by_k: list[dict[str, object]] = []
+    for position, (hits, relevant, retrieved, first_hits) in enumerate(
+        zip(
+            metrics.hit_counts_by_k,
+            metrics.relevant_retrieved_counts_by_k,
+            metrics.retrieved_counts_by_k,
+            metrics.first_hit_counts_by_position,
+            strict=True,
+        ),
+        start=1,
+    ):
+        by_k.append(
+            {
+                "k": position,
+                "hit": _rate_payload(hits, metrics.row_count),
+                "precision": _rate_payload(relevant, retrieved),
+                "recall": _rate_payload(
+                    relevant,
+                    metrics.relevant_available_count,
+                ),
+                "first_hit_at_position": _rate_payload(
+                    first_hits,
+                    metrics.row_count,
+                ),
+            }
+        )
+    return {
+        "unit": "training_rows",
+        "relevance": "exact_target_slug_match",
+        "relevant_available_count": metrics.relevant_available_count,
+        "absent_relevance_row_count": metrics.absent_relevance_row_count,
+        "by_k": by_k,
+        "incremental_first_hits_at_positions_2_to_k": [
+            {
+                "position": position,
+                "first_hit": _rate_payload(
+                    metrics.first_hit_counts_by_position[position - 1],
+                    metrics.row_count,
+                ),
+            }
+            for position in range(2, MODEL_EVALUATION_TOP_K + 1)
+        ],
+        "mrr_at_k": {
+            "reciprocal_rank_sum": round(metrics.reciprocal_rank_sum, 12),
+            "denominator": metrics.row_count,
+            "value": (
+                None
+                if metrics.row_count == 0
+                else _ratio(metrics.reciprocal_rank_sum, metrics.row_count)
+            ),
+        },
+    }
+
+
+def _open_set_payload(
+    known: ScopeMetrics,
+    unknown: ScopeMetrics,
+) -> dict[str, object]:
+    unknown_rejected = unknown.row_count - unknown.accepted_count
+    return {
+        "definition": "exact_target_slug_presence_in_training_partition",
+        "calibration_role": "train_and_validation_only",
+        "holdout_role": "post_freeze_measurement_only",
+        "confidence_interval": "wilson_score_95",
+        "known_train_classes": {
+            "row_count": known.row_count,
+            "coverage": _rate_payload_with_wilson(
+                known.accepted_count,
+                known.row_count,
+            ),
+            "selective_candidate_accuracy": _rate_payload_with_wilson(
+                known.accepted_candidate_correct_count,
+                known.accepted_count,
+            ),
+        },
+        "unknown_train_classes": {
+            "row_count": unknown.row_count,
+            "false_acceptance_rate": _rate_payload_with_wilson(
+                unknown.accepted_count,
+                unknown.row_count,
+            ),
+            "rejection_rate": _rate_payload_with_wilson(
+                unknown_rejected,
+                unknown.row_count,
+            ),
+        },
+    }
+
+
+def _rate_payload_with_wilson(numerator: int, denominator: int) -> dict[str, object]:
+    return {
+        **_rate_payload(numerator, denominator),
+        "wilson_95": _wilson_interval(numerator, denominator),
+    }
+
+
+def _wilson_interval(numerator: int, denominator: int) -> dict[str, float | None]:
+    if denominator == 0:
+        return {"lower": None, "upper": None}
+    if denominator < 0 or numerator < 0 or numerator > denominator:
+        raise ModelEvaluationError("Wilson interval counts are invalid.")
+    z_score = 1.959963984540054
+    z_squared = z_score * z_score
+    proportion = numerator / denominator
+    scale = 1.0 + z_squared / denominator
+    center = (proportion + z_squared / (2.0 * denominator)) / scale
+    margin = (
+        z_score
+        * (
+            proportion * (1.0 - proportion) / denominator
+            + z_squared / (4.0 * denominator * denominator)
+        )
+        ** 0.5
+        / scale
+    )
+    return {
+        "lower": round(max(0.0, center - margin), 12),
+        "upper": round(min(1.0, center + margin), 12),
     }
 
 

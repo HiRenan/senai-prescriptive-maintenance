@@ -87,6 +87,7 @@ _APPLICATION_TABLES: Final = {
     "document_versions",
     "chunk_references",
     "evidence_references",
+    "analysis_neighbor_references",
     "document_lifecycle_registries",
     "document_lifecycle_versions",
     "document_lifecycle_events",
@@ -99,6 +100,7 @@ _EXPECTED_COLUMNS: Final = {
         "model_id",
         "prompt_id",
         "configuration_id",
+        "index_id",
         "created_at",
     },
     "documents": {"document_id", "created_at"},
@@ -120,6 +122,12 @@ _EXPECTED_COLUMNS: Final = {
         "document_id",
         "document_version_id",
         "chunk_ref",
+        "ordinal",
+    },
+    "analysis_neighbor_references": {
+        "analysis_id",
+        "index_id",
+        "neighbor_ref",
         "ordinal",
     },
     "document_lifecycle_registries": {
@@ -322,6 +330,10 @@ def test_schema_constraints_and_columns_are_minimal(
             "analysis_id",
             "evidence_id",
         )
+        assert _primary_key_columns(
+            connection,
+            "analysis_neighbor_references",
+        ) == ("analysis_id", "ordinal")
         assert not {
             "features",
             "feature_vector",
