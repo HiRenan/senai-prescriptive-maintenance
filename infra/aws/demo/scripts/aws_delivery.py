@@ -25,12 +25,21 @@ from delivery_gate import (
     audit_state_snapshot,
     load_plan,
 )
+from frontend_delivery import (
+    FrontendDeliveryError,
+    add_runtime_config,
+    assert_final_profile,
+    publish_frontend,
+    runtime_config,
+    stage_frontend,
+)
 from orphan_inventory import (
     OrphanInventoryError,
     command_runner,
     inventory_queries,
     scan_inventory,
 )
+from published_smoke import PublishedSmokeError, run_published_smoke
 from remote_smoke import (
     RemoteSmokeError,
     run_smoke,
@@ -132,6 +141,15 @@ def required_text(
     return value
 
 
+def require_final_profile(*, region: object, domain: object) -> None:
+    if type(region) is not str or type(domain) is not str:
+        fail("Perfil final da entrega está ausente ou inválido.")
+    try:
+        assert_final_profile(region=region, domain=domain)
+    except FrontendDeliveryError:
+        fail("Perfil final da entrega diverge da região ou domínio aprovados.")
+
+
 def validated_configuration(environment: Mapping[str, str]) -> dict[str, str]:
     account_id = required_text(environment, "AWS_DEMO_ACCOUNT_ID", ACCOUNT_PATTERN)
     region = required_text(environment, "AWS_REGION", REGION_PATTERN)
@@ -163,6 +181,7 @@ def validated_configuration(environment: Mapping[str, str]) -> dict[str, str]:
         or not frontend_domain
     ):
         fail("Backend remoto da entrega está ausente ou inválido.")
+    require_final_profile(region=region, domain=frontend_domain)
     temporary_credentials = (
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
@@ -582,7 +601,16 @@ def audit_pulled_state(
 def terraform_output(
     environment: Mapping[str, str], name: str, *, max_bytes: int = 4096
 ) -> str:
-    if name not in {"api_base_url", "api_image_reference", "ecr_repository_url"}:
+    if name not in {
+        "api_base_url",
+        "api_image_reference",
+        "cognito_client_id",
+        "cognito_hosted_ui_origin",
+        "ecr_repository_url",
+        "frontend_bucket_name",
+        "frontend_distribution_id",
+        "frontend_url",
+    }:
         fail("Output Terraform não pertence à allowlist da entrega.")
     raw = capture_silent(
         "terraform",
@@ -595,6 +623,18 @@ def terraform_output(
         return raw.decode("utf-8", errors="strict").strip()
     except UnicodeError:
         raise AwsDeliveryError("Output Terraform não é UTF-8 válido.") from None
+
+
+def validated_frontend_bucket_output(
+    configuration: Mapping[str, str], value: str
+) -> str:
+    expected = (
+        f"{configuration['name_prefix']}-frontend-{configuration['account_id']}"
+        f"-{configuration['region']}"
+    )
+    if value != expected:
+        fail("Output do bucket frontend diverge do destino exato aprovado.")
+    return value
 
 
 def existing_digest(
@@ -672,6 +712,10 @@ def terraform_apply(
 
 
 def plan_operation(configuration: Mapping[str, str], temporary: Path) -> None:
+    require_final_profile(
+        region=configuration.get("region"),
+        domain=configuration.get("frontend_domain"),
+    )
     base_environment = child_environment(
         os.environ,
         digest=PLACEHOLDER_DIGEST,
@@ -981,6 +1025,10 @@ def require_sen46_baseline(configuration: Mapping[str, str]) -> None:
 
 
 def foundation_operation(configuration: Mapping[str, str], temporary: Path) -> None:
+    require_final_profile(
+        region=configuration.get("region"),
+        domain=configuration.get("frontend_domain"),
+    )
     base_environment = child_environment(
         os.environ,
         digest=PLACEHOLDER_DIGEST,
@@ -1039,6 +1087,10 @@ def foundation_operation(configuration: Mapping[str, str], temporary: Path) -> N
 
 
 def deploy_operation(configuration: Mapping[str, str], temporary: Path) -> None:
+    require_final_profile(
+        region=configuration.get("region"),
+        domain=configuration.get("frontend_domain"),
+    )
     require_sen46_baseline(configuration)
     token = validate_token(os.environ.get("AWS_DEMO_SMOKE_BEARER_TOKEN"))
     buildx_builder, docker_config = validated_buildx_configuration(os.environ)
@@ -1105,14 +1157,61 @@ def deploy_operation(configuration: Mapping[str, str], temporary: Path) -> None:
         terraform_output(runtime_environment, "api_base_url"),
         configuration["region"],
     )
+    frontend_bucket = validated_frontend_bucket_output(
+        configuration,
+        terraform_output(runtime_environment, "frontend_bucket_name"),
+    )
+    frontend_origin = terraform_output(runtime_environment, "frontend_url")
+    if frontend_origin != f"https://{configuration['frontend_domain']}":
+        fail("Output do frontend diverge da origem final aprovada.")
+    distribution_id = terraform_output(runtime_environment, "frontend_distribution_id")
+    cognito_client_id = terraform_output(runtime_environment, "cognito_client_id")
+    cognito_origin = terraform_output(runtime_environment, "cognito_hosted_ui_origin")
+    stage_root = temporary / "frontend-stage"
+    staged = stage_frontend(
+        REPOSITORY_ROOT / "apps/web/src",
+        stage_root,
+        configuration["source_sha"],
+    )
+    public_config = runtime_config(
+        api_origin=endpoint,
+        client_id=cognito_client_id,
+        cognito_origin=cognito_origin,
+    )
+    staged = add_runtime_config(
+        staged,
+        stage_root,
+        api_origin=endpoint,
+        client_id=cognito_client_id,
+        cognito_origin=cognito_origin,
+    )
+    require_session_window(configuration, 1_800)
+    publish_frontend(
+        staged,
+        bucket=frontend_bucket,
+        distribution_id=distribution_id,
+        runner=command_runner,
+    )
     run_smoke(endpoint, token)
+    run_published_smoke(
+        frontend_origin=frontend_origin,
+        api_origin=endpoint,
+        cognito_origin=cognito_origin,
+        runtime_config=public_config,
+        staged=staged,
+        bearer_token=token,
+    )
     print(
-        "Deploy concluído por digest e smoke autenticado aprovado; nenhum "
-        "plano, state, output ou conteúdo foi publicado."
+        "Deploy concluído por digest, frontend allowlisted e smokes autenticados "
+        "aprovados; nenhum plano, state ou output sensível foi publicado."
     )
 
 
 def teardown_operation(configuration: Mapping[str, str], temporary: Path) -> None:
+    require_final_profile(
+        region=configuration.get("region"),
+        domain=configuration.get("frontend_domain"),
+    )
     base_environment = child_environment(
         os.environ,
         digest=PLACEHOLDER_DIGEST,
@@ -1211,7 +1310,9 @@ if __name__ == "__main__":
     except (
         AwsDeliveryError,
         DeliveryGateError,
+        FrontendDeliveryError,
         OrphanInventoryError,
+        PublishedSmokeError,
         RemoteSmokeError,
     ) as error:
         print(str(error), file=sys.stderr)

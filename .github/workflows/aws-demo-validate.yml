@@ -6,7 +6,15 @@ on:
       - develop
     paths:
       - ".github/workflows/aws-demo-*.yml"
+      - "apps/api/openapi/v1.json"
+      - "apps/web/**"
+      - "docs/**"
       - "infra/aws/demo/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pyproject.toml"
+      - "scripts/generate_web_contract.py"
+      - "uv.lock"
 
 permissions: {}
 
@@ -52,3 +60,4 @@ jobs:
           python infra/aws/demo/scripts/security_regression.py "$plan_json"
           python infra/aws/demo/scripts/delivery_policy.py
           python infra/aws/demo/scripts/delivery_regression.py
+          python infra/aws/demo/scripts/frontend_delivery_regression.py

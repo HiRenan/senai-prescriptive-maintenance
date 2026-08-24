@@ -4,7 +4,16 @@ import {
 } from "./generated/analysis-contract.js";
 import { DOCUMENT_CONTRACT_VERSION } from "./generated/document-contract.js";
 import { createAnalysisClient } from "./api/analysis-client.js";
+import { createAuthenticatedFetch } from "./api/authenticated-fetch.js";
+import { createDocumentClient } from "./api/document-client.js";
 import { createOfflineAnalysisClient } from "./api/offline-analysis-client.js";
+import { createCognitoAuth, readAndCleanOAuthCallback } from "./auth/cognito.js";
+import { clearPkce } from "./auth/pkce.js";
+import { createMemorySession } from "./auth/session.js";
+import {
+  isPublishedFrontendOrigin,
+  loadRuntimeConfig,
+} from "./config/runtime-config.js";
 import {
   FEATURE_NAMES,
   buildAnalysisRequest,
@@ -26,9 +35,111 @@ import { clear, el, requireElement } from "./ui/dom.js";
  * @typedef {import("./core/features.js").ValidationIssue} ValidationIssue
  * @typedef {"online" | "offline"} ReportSource
  * @typedef {{ request: AnalysisRequest, source: ReportSource }} AnalysisRun
+ * @typedef {ReturnType<typeof readAndCleanOAuthCallback>} OAuthCallback
  */
 
 const EXAMPLE_PLACEHOLDER = "escolha um exemplo sintético";
+
+/**
+ * @param {HTMLElement} panel
+ * @param {HTMLElement} status
+ * @param {HTMLElement} detail
+ * @param {HTMLButtonElement} loginButton
+ * @param {HTMLButtonElement} logoutButton
+ * @param {"authenticated" | "required" | "invalid" | "config"} state
+ * @returns {void}
+ */
+function renderAuthentication(
+  panel,
+  status,
+  detail,
+  loginButton,
+  logoutButton,
+  state,
+) {
+  panel.removeAttribute("hidden");
+  panel.dataset.state = state;
+  loginButton.hidden = state === "authenticated" || state === "config";
+  logoutButton.hidden = state !== "authenticated";
+  if (state === "authenticated") {
+    status.textContent = "Sessão autenticada";
+    detail.textContent =
+      "O access token e o refresh token existem somente na memória desta página; não há renovação automática.";
+    return;
+  }
+  if (state === "config") {
+    status.textContent = "Configuração de publicação indisponível";
+    detail.textContent =
+      "O painel recusou a configuração pública. Publique novamente o runtime config canônico antes de usar a API.";
+    return;
+  }
+  status.textContent = state === "invalid" ? "Callback de login recusado" : "Login necessário";
+  detail.textContent =
+    state === "invalid"
+      ? "O callback expirou, não corresponde ao state iniciado ou foi recusado. Inicie um login novo."
+      : "Entre pelo Cognito para usar a API. Nenhuma requisição protegida foi enviada.";
+}
+
+/** @returns {AnalysisOutput} */
+function blockedAnalysisOutput() {
+  return {
+    ok: false,
+    failure: {
+      kind: "authentication",
+      status: null,
+      detail: null,
+      issues: [],
+    },
+  };
+}
+
+/**
+ * @param {Iterable<Element>} controls
+ * @returns {void}
+ */
+function disableControls(controls) {
+  for (const control of controls) {
+    if (
+      typeof control === "object" &&
+      control !== null &&
+      "disabled" in control &&
+      typeof control.disabled === "boolean"
+    ) {
+      control.disabled = true;
+    }
+  }
+}
+
+/**
+ * @param {Document} documentImpl
+ * @param {boolean} ready
+ * @param {boolean} busy
+ * @returns {void}
+ */
+function setProtectedSurfaces(documentImpl, ready, busy) {
+  setProtectedSurface(documentImpl, "analysis-form", ready, busy);
+  setProtectedSurface(documentImpl, "documents-panel", ready, busy);
+}
+
+/**
+ * @param {Document} documentImpl
+ * @param {"analysis-form" | "documents-panel"} id
+ * @param {boolean} ready
+ * @param {boolean} busy
+ * @returns {void}
+ */
+function setProtectedSurface(documentImpl, id, ready, busy) {
+  const surface = documentImpl.getElementById(id);
+  if (surface === null) {
+    return;
+  }
+  surface.setAttribute("aria-busy", busy ? "true" : "false");
+  if (ready) {
+    surface.removeAttribute("inert");
+  } else {
+    surface.setAttribute("inert", "");
+  }
+}
 
 /**
  * @param {HTMLElement} host
@@ -61,9 +172,12 @@ function renderImportIssues(host, issues, heading) {
 /**
  * Start the analysis dashboard against the live `POST /analysis` endpoint.
  *
- * @returns {void}
+ * @param {object} [options]
+ * @param {ReturnType<typeof readAndCleanOAuthCallback>} [options.oauthCallback]
+ * @returns {Promise<void>}
  */
-export function startDashboard() {
+export async function startDashboard(options = {}) {
+  setProtectedSurfaces(document, false, true);
   const consoleRoot = requireElement("console");
   const reportRoot = requireElement("report");
   const statusRoot = requireElement("run-status");
@@ -78,12 +192,19 @@ export function startDashboard() {
   const onlineMode = requireElement("online-mode");
   const offlineMode = requireElement("offline-mode");
   const modeDescription = requireElement("mode-description");
+  const authPanel = requireElement("auth-panel");
+  const authStatus = requireElement("auth-status");
+  const authDetail = requireElement("auth-detail");
+  const loginButton = requireElement("auth-login");
+  const logoutButton = requireElement("auth-logout");
 
   if (
     !(exampleSelect instanceof HTMLSelectElement) ||
     !(importText instanceof HTMLTextAreaElement) ||
     !(importFile instanceof HTMLInputElement) ||
-    !(form instanceof HTMLFormElement)
+    !(form instanceof HTMLFormElement) ||
+    !(loginButton instanceof HTMLButtonElement) ||
+    !(logoutButton instanceof HTMLButtonElement)
   ) {
     throw new Error("O documento não declara os controles esperados do console.");
   }
@@ -103,15 +224,143 @@ export function startDashboard() {
     onlineMode.setAttribute("aria-current", "page");
     offlineMode.removeAttribute("aria-current");
   }
+  const published = isPublishedFrontendOrigin(window.location.origin);
+  const local = !published;
   modeDescription.textContent = offline
     ? "Offline ativo: somente as cinco fixtures sintéticas do contrato, sem chamadas à API. Entradas alteradas não recebem outcome inventado."
-    : "API local ativa: a leitura é enviada pela mesma origem do painel.";
+    : local
+      ? "API local ativa: a leitura é enviada pela mesma origem do painel."
+      : "API AWS autenticada: somente operações publicadas recebem o bearer em memória.";
+  onlineMode.textContent = published ? "API AWS autenticada" : "API local";
   startWorkspaceNavigation();
 
   const consoleView = createConsoleView(consoleRoot);
   const reportView = createReportView(reportRoot);
-  const client = offline ? createOfflineAnalysisClient() : createAnalysisClient();
-  const documentsPanel = createDocumentsPanel(documentsRoot, { offline });
+  /** @type {ReturnType<typeof createAnalysisClient> | ReturnType<typeof createOfflineAnalysisClient>} */
+  let client;
+  /** @type {ReturnType<typeof createDocumentsPanel>} */
+  let documentsPanel;
+  /** @type {(() => Promise<void>) | null} */
+  let login = null;
+  let runtimeBlocked = false;
+  let protectedReady = offline || !published;
+  let authenticationInvalid = false;
+
+  if (offline) {
+    clearPkce(window.sessionStorage);
+    client = createOfflineAnalysisClient();
+    documentsPanel = createDocumentsPanel(documentsRoot, { offline: true });
+  } else if (!published) {
+    clearPkce(window.sessionStorage);
+    client = createAnalysisClient();
+    documentsPanel = createDocumentsPanel(documentsRoot);
+  } else {
+    const loaded = await loadRuntimeConfig();
+    if (!loaded.ok) {
+      clearPkce(window.sessionStorage);
+      runtimeBlocked = true;
+      client = { requestAnalysis: async () => blockedAnalysisOutput() };
+      documentsPanel = {
+        async start() {
+          clear(documentsRoot);
+          documentsRoot.append(
+            el("p", { class: "documents-empty" }, [
+              "A gestão documental foi bloqueada porque o runtime config público não é válido.",
+            ]),
+          );
+        },
+        async refresh() {},
+      };
+      renderAuthentication(
+        authPanel,
+        authStatus,
+        authDetail,
+        loginButton,
+        logoutButton,
+        "config",
+      );
+    } else {
+      const session = createMemorySession({ clientId: loaded.config.cognito.clientId });
+      const auth = createCognitoAuth({
+        config: loaded.config.cognito,
+        session,
+        storage: window.sessionStorage,
+      });
+      const callback = await auth.handleCallback(
+        options.oauthCallback ?? { code: null, error: null, invalid: false, state: null },
+      );
+      const authenticated = callback.ok && session.isAuthenticated();
+      protectedReady = authenticated;
+      authenticationInvalid = !callback.ok;
+      const showRequired = () => {
+        protectedReady = false;
+        setProtectedSurfaces(document, false, false);
+        renderAuthentication(
+          authPanel,
+          authStatus,
+          authDetail,
+          loginButton,
+          logoutButton,
+          "required",
+        );
+      };
+      const authenticatedFetch = createAuthenticatedFetch({
+        apiBaseUrl: loaded.config.apiBaseUrl,
+        session,
+        onAuthenticationRequired: showRequired,
+      });
+      client = createAnalysisClient({
+        endpoint: `${loaded.config.apiBaseUrl}/analysis`,
+        fetchImpl: authenticatedFetch,
+      });
+      documentsPanel = createDocumentsPanel(documentsRoot, {
+        client: createDocumentClient({
+          prefix: loaded.config.apiBaseUrl,
+          fetchImpl: authenticatedFetch,
+        }),
+      });
+      renderAuthentication(
+        authPanel,
+        authStatus,
+        authDetail,
+        loginButton,
+        logoutButton,
+        authenticated
+          ? "authenticated"
+          : callback.ok
+            ? "required"
+            : "invalid",
+      );
+      let loginPending = false;
+      login = async () => {
+        if (loginPending) {
+          return;
+        }
+        loginPending = true;
+        loginButton.disabled = true;
+        loginButton.setAttribute("aria-busy", "true");
+        authPanel.setAttribute("aria-busy", "true");
+        authStatus.textContent = "Abrindo login seguro";
+        try {
+          await auth.login();
+        } catch {
+          loginPending = false;
+          loginButton.disabled = false;
+          loginButton.removeAttribute("aria-busy");
+          authPanel.removeAttribute("aria-busy");
+          showRequired();
+        }
+      };
+      loginButton.addEventListener("click", () => void login?.());
+      logoutButton.addEventListener("click", () => {
+        logoutButton.disabled = true;
+        void auth.logout().catch(() => {
+          showRequired();
+          logoutButton.disabled = false;
+        });
+      });
+    }
+  }
 
   for (const example of SYNTHETIC_ANALYSIS_EXAMPLES) {
     const label = offline
@@ -121,7 +370,24 @@ export function startDashboard() {
   }
 
   reportView.showIdle();
-  void documentsPanel.start();
+  /** @type {Promise<void>} */
+  let documentInitialization;
+  if (protectedReady) {
+    documentInitialization = documentsPanel.start();
+  } else if (!runtimeBlocked) {
+    clear(documentsRoot);
+    documentsRoot.append(
+      el("p", { class: "documents-empty" }, [
+        "A gestão documental permanece bloqueada até uma autenticação válida.",
+      ]),
+    );
+    documentInitialization = Promise.resolve();
+  } else {
+    documentInitialization = documentsPanel.start();
+  }
+  if (runtimeBlocked) {
+    disableControls(form.elements);
+  }
 
   /**
    * @param {string} message
@@ -305,6 +571,12 @@ export function startDashboard() {
           run: () => exampleSelect.focus(),
         });
         reportView.focus();
+      } else if (output.failure.kind === "authentication" && login !== null) {
+        reportView.showFailure(report, run.source, {
+          label: "Entrar novamente",
+          run: () => void login?.(),
+        });
+        reportView.focus();
       } else {
         reportView.showFailure(report, run.source, {
           label: "Tentar novamente",
@@ -353,12 +625,77 @@ export function startDashboard() {
     );
   });
 
+  setProtectedSurface(document, "analysis-form", protectedReady, false);
   exampleSelect.value = "";
   announce(
     offline
       ? `Modo offline pronto. Escolha ${EXAMPLE_PLACEHOLDER}; nenhuma chamada à API será feita.`
-      : `Pronto. Escolha ${EXAMPLE_PLACEHOLDER} ou preencha as 18 features.`,
+      : runtimeBlocked
+        ? "Painel bloqueado: publique um runtime config válido antes de usar a API."
+        : published && !protectedReady
+          ? authenticationInvalid
+            ? "Painel bloqueado: o callback foi recusado. Inicie um login novo."
+            : "Painel protegido: entre pelo Cognito antes de usar a API AWS."
+          : `Pronto. Escolha ${EXAMPLE_PLACEHOLDER} ou preencha as 18 features.`,
   );
+  await documentInitialization;
+  setProtectedSurface(document, "documents-panel", protectedReady, false);
 }
 
-startDashboard();
+/** @param {Document} documentImpl @returns {void} */
+function renderBootstrapFailure(documentImpl) {
+  setProtectedSurfaces(documentImpl, false, false);
+  const authPanel = documentImpl.getElementById("auth-panel");
+  const authStatus = documentImpl.getElementById("auth-status");
+  const authDetail = documentImpl.getElementById("auth-detail");
+  const form = documentImpl.getElementById("analysis-form");
+  const documents = documentImpl.getElementById("documents-panel");
+  if (authPanel !== null && authStatus !== null && authDetail !== null) {
+    authPanel.removeAttribute("hidden");
+    authPanel.dataset.state = "config";
+    authStatus.textContent = "Painel bloqueado com segurança";
+    authDetail.textContent =
+      "A inicialização não foi concluída. Recarregue a página; nenhuma operação da API foi enviada.";
+  }
+  if (form !== null && "elements" in form && form.elements !== null) {
+    disableControls(/** @type {Iterable<Element>} */ (form.elements));
+  }
+  disableControls(
+    ["auth-login", "auth-logout"]
+      .map((id) => documentImpl.getElementById(id))
+      .filter((element) => element !== null),
+  );
+  if (documents !== null) {
+    documents.replaceChildren();
+    const message = documentImpl.createElement("p");
+    message.className = "documents-empty";
+    message.textContent =
+      "A gestão documental permaneceu bloqueada porque o painel não iniciou.";
+    documents.append(message);
+  }
+}
+
+/**
+ * @param {OAuthCallback} callback
+ * @param {object} [options]
+ * @param {(options: { oauthCallback: OAuthCallback }) => Promise<void>} [options.start]
+ * @param {() => void} [options.onFailure]
+ * @param {Document} [options.documentImpl]
+ * @returns {Promise<void>}
+ */
+export async function bootstrapDashboard(callback, options = {}) {
+  try {
+    await (options.start ?? startDashboard)({ oauthCallback: callback });
+  } catch {
+    if (options.onFailure !== undefined) {
+      options.onFailure();
+    } else {
+      renderBootstrapFailure(options.documentImpl ?? document);
+    }
+  }
+}
+
+if (typeof window !== "undefined") {
+  const initialCallback = readAndCleanOAuthCallback(window.location, window.history);
+  void bootstrapDashboard(initialCallback);
+}

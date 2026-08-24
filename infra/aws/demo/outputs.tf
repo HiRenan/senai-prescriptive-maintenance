@@ -1,5 +1,5 @@
 output "api_base_url" {
-  description = "Endpoint HTTPS da API Gateway; todas as rotas exigem JWT Cognito."
+  description = "Endpoint HTTPS da API Gateway; rotas de negócio exigem JWT Cognito."
   value       = aws_apigatewayv2_api.demo.api_endpoint
 }
 
@@ -28,6 +28,11 @@ output "cognito_user_pool_id" {
   value       = aws_cognito_user_pool.demo.id
 }
 
+output "cognito_hosted_ui_origin" {
+  description = "Origem pública do Hosted UI Cognito usada somente por OAuth Code com PKCE."
+  value       = local.cognito_hosted_ui
+}
+
 output "cors_allowed_origin" {
   description = "Única origem autorizada pelo CORS da API."
   value       = "https://${var.frontend_domain_name}"
@@ -51,6 +56,16 @@ output "frontend_url" {
 output "frontend_distribution_domain_name" {
   description = "Alvo DNS público da distribuição para configurar o domínio próprio fora deste perfil."
   value       = aws_cloudfront_distribution.frontend.domain_name
+}
+
+output "frontend_bucket_name" {
+  description = "Bucket privado exato que recebe somente a allowlist publicada do frontend."
+  value       = aws_s3_bucket.storage["frontend"].id
+}
+
+output "frontend_distribution_id" {
+  description = "ID público da distribuição usado para invalidação e espera após a publicação."
+  value       = aws_cloudfront_distribution.frontend.id
 }
 
 output "ingestion_dead_letter_queue_url" {

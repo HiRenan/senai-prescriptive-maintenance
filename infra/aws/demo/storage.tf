@@ -155,9 +155,32 @@ resource "aws_cloudfront_cache_policy" "frontend" {
 
 resource "aws_cloudfront_response_headers_policy" "frontend" {
   name    = "${local.name}-frontend-security"
-  comment = "Cabeçalhos defensivos independentes de uma UI ainda inexistente."
+  comment = "Cabeçalhos defensivos do frontend autenticado da demo."
+
+  custom_headers_config {
+    items {
+      header   = "Permissions-Policy"
+      override = true
+      value    = "camera=(), geolocation=(), microphone=()"
+    }
+  }
 
   security_headers_config {
+    content_security_policy {
+      content_security_policy = join("; ", [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self'",
+        "connect-src 'self' ${aws_apigatewayv2_api.demo.api_endpoint} ${local.cognito_hosted_ui}",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+      ])
+      override = true
+    }
+
     content_type_options {
       override = true
     }
@@ -168,7 +191,7 @@ resource "aws_cloudfront_response_headers_policy" "frontend" {
     }
 
     referrer_policy {
-      referrer_policy = "same-origin"
+      referrer_policy = "no-referrer"
       override        = true
     }
 
@@ -195,7 +218,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   is_ipv6_enabled     = true
   price_class         = "PriceClass_100"
   retain_on_delete    = false
-  wait_for_deployment = false
+  wait_for_deployment = true
 
   origin {
     domain_name              = aws_s3_bucket.storage["frontend"].bucket_regional_domain_name

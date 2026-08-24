@@ -92,6 +92,10 @@ help = "Executa os fluxos reais de acessibilidade e reflow no Chromium."
 cmd = "corepack pnpm --filter @senai-prescriptive-maintenance/web test:browser"
 executor = { type = "simple" }
 
+[tool.poe.tasks.aws-demo-frontend-regression]
+help = "Prova staging, publicação e smoke do frontend AWS somente com fakes locais."
+cmd = "python infra/aws/demo/scripts/frontend_delivery_regression.py"
+
 [tool.poe.tasks.check]
 help = "Executa todos os checks; não aceita argumentos adicionais."
 sequence = [
@@ -102,6 +106,7 @@ sequence = [
   "web-contract-check",
   "web-typecheck",
   "web-test",
+  "aws-demo-frontend-regression",
 ]
 
 [tool.poe.tasks.golden-e2e]

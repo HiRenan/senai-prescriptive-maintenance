@@ -82,6 +82,11 @@ const SUPPORT_LABELS = Object.freeze({
 });
 
 const FAILURE_COPY = Object.freeze({
+  authentication: {
+    title: "Autenticação necessária",
+    statement: "A sessão não existe mais ou foi recusada antes de produzir resultado.",
+    nextStep: "Entre novamente. O painel não repetirá esta análise automaticamente.",
+  },
   input: {
     title: "A análise não foi enviada",
     statement: "A entrada não passou pela validação local do contrato v1.",

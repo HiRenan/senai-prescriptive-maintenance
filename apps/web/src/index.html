@@ -9,7 +9,6 @@
       content="Painel de demonstração da manutenção prescritiva: análise rastreável e gestão documental governada."
     />
     <title>Manutenção prescritiva — demonstração</title>
-    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles.css" />
     <script type="module" src="./main.js"></script>
   </head>
@@ -38,6 +37,30 @@
             <dd class="mono">GET · POST /documents</dd>
           </div>
         </dl>
+        <section class="auth-panel" id="auth-panel" aria-labelledby="auth-status" hidden>
+          <div>
+            <p
+              class="auth-status"
+              id="auth-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              Login necessário
+            </p>
+            <p class="auth-detail" id="auth-detail">
+              Entre pelo Cognito para usar a API protegida.
+            </p>
+          </div>
+          <div class="auth-actions">
+            <button class="button button-primary" id="auth-login" type="button">
+              Entrar com Cognito
+            </button>
+            <button class="button button-quiet" id="auth-logout" type="button" hidden>
+              Encerrar sessão
+            </button>
+          </div>
+        </section>
         <nav class="mode-nav" aria-label="Modo da demonstração">
           <p class="mode-label">Modo da demonstração</p>
           <div class="mode-links">
@@ -103,7 +126,7 @@
           <section class="console" id="console" aria-labelledby="console-heading">
             <h2 class="console-heading" id="console-heading">Entrada da análise</h2>
 
-            <form id="analysis-form" novalidate>
+            <form id="analysis-form" novalidate inert aria-busy="true">
               <div class="import">
                 <h3 class="block-label">Importar entrada</h3>
                 <div class="import-row">
@@ -202,7 +225,7 @@
               </div>
             </dl>
           </header>
-          <div id="documents-panel"></div>
+          <div id="documents-panel" inert aria-busy="true"></div>
         </div>
       </section>
     </main>
@@ -211,8 +234,10 @@
 
     <footer class="colophon">
       <p>
-        Demonstração local. Entradas e metadados de exemplo vêm do contrato público e são
-        inteiramente sintéticos; nenhum PDF é lido ou enviado pelo painel.
+        Entradas e metadados de exemplo vêm do contrato público e são inteiramente
+        sintéticos; nenhum PDF é lido ou enviado pelo painel. No perfil AWS, ao sair, o
+        painel tenta revogar o refresh token quando disponível, mas o access token já
+        emitido pode seguir válido até expirar.
       </p>
     </footer>
   </body>

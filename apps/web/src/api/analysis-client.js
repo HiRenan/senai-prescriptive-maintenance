@@ -13,8 +13,8 @@ import { createSchemaMatcher, isRecord, readErrorEnvelope } from "../core/contra
 
 /**
  * @typedef {object} AnalysisFailure
- * @property {"network" | "timeout" | "validation" | "unavailable" | "unexpected"
- *   | "malformed" | "offline" | "input"} kind
+ * @property {"authentication" | "network" | "timeout" | "validation" | "unavailable"
+ *   | "unexpected" | "malformed" | "offline" | "input"} kind
  * @property {number | null} status
  * @property {string | null} detail
  * @property {readonly ValidationIssue[]} issues
@@ -98,6 +98,8 @@ export function createAnalysisClient(options = {}) {
           method: "POST",
           headers: { "content-type": "application/json", accept: "application/json" },
           body: JSON.stringify(request),
+          credentials: "omit",
+          redirect: "manual",
           signal: controller.signal,
         });
       } catch {
@@ -133,6 +135,9 @@ export function createAnalysisClient(options = {}) {
       if (httpResponse.status === 422) {
         const envelope = readErrorEnvelope(body);
         return failure("validation", 422, envelope.detail, envelope.issues);
+      }
+      if (httpResponse.status === 401 || httpResponse.status === 403) {
+        return failure("authentication", httpResponse.status, null);
       }
       if (httpResponse.status === 503) {
         const envelope = readErrorEnvelope(body);

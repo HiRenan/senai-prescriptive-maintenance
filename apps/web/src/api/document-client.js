@@ -20,8 +20,8 @@ import {
 
 /**
  * @typedef {object} DocumentFailure
- * @property {"network" | "timeout" | "refused" | "validation" | "missing" | "conflict"
- *   | "unavailable" | "unexpected" | "malformed"} kind
+ * @property {"authentication" | "network" | "timeout" | "refused" | "validation"
+ *   | "missing" | "conflict" | "unavailable" | "unexpected" | "malformed"} kind
  * @property {number | null} status
  * @property {string | null} detail
  * @property {readonly ValidationIssue[]} issues
@@ -189,6 +189,8 @@ export function createDocumentClient(options = {}) {
               ? { accept: "application/json" }
               : { "content-type": "application/json", accept: "application/json" },
           body: body === null ? undefined : JSON.stringify(body),
+          credentials: "omit",
+          redirect: "manual",
           signal: controller.signal,
         });
       } catch {
@@ -215,6 +217,9 @@ export function createDocumentClient(options = {}) {
           : failure("malformed", httpResponse.status, null);
       }
       const envelope = readErrorEnvelope(answer);
+      if (httpResponse.status === 401 || httpResponse.status === 403) {
+        return failure("authentication", httpResponse.status, null);
+      }
       if (httpResponse.status === 404 && operation.statuses.includes(404)) {
         return failure("missing", 404, envelope.detail, envelope.issues);
       }

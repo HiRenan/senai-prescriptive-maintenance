@@ -105,11 +105,12 @@ flowchart LR
   end
 
   Viewer[Cliente HTTPS] --> CF[CloudFront com OAC]
-  CF --> Frontend[S3 privado; começa vazio]
+  CF --> Frontend[S3 privado; fundação vazia, deploy allowlisted]
   DNS -. alias e certificado .-> CF
 
   Viewer -->|JWT| APIGW[API Gateway HTTP API]
-  Cognito[Cognito user pool] --> APIGW
+  Viewer -->|OAuth code + PKCE| Cognito[Cognito Hosted UI]
+  Cognito -. issuer e audience .-> APIGW
 
   subgraph VPC[VPC privada single-AZ]
     APIGW --> VPCLink[VPC Link]

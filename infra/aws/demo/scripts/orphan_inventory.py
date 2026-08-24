@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -108,6 +109,7 @@ class CommandResult:
     returncode: int
     stdout: str = field(repr=False)
     stderr: str = field(repr=False)
+    missing: bool = False
 
 
 Runner = Callable[[tuple[str, ...]], CommandResult]
@@ -121,6 +123,8 @@ class InventoryQuery:
     collection_path: tuple[str, ...]
     predicate: Predicate = field(repr=False)
     allow_missing_collection: bool = False
+    single_object: bool = False
+    allow_not_found: bool = False
 
 
 def safe_environment(host_environment: Mapping[str, str]) -> InventoryEnvironment:
@@ -150,6 +154,21 @@ def safe_environment(host_environment: Mapping[str, str]) -> InventoryEnvironmen
         }
     )
     return child
+
+
+def is_canonical_domain_not_found(
+    arguments: Sequence[str], returncode: int, stderr: str
+) -> bool:
+    return (
+        returncode != 0
+        and tuple(arguments[:2]) == ("cognito-idp", "describe-user-pool-domain")
+        and re.fullmatch(
+            r"\s*An error occurred \(ResourceNotFoundException\) when calling the "
+            r"DescribeUserPoolDomain operation: [^\r\n]{1,2048}\s*",
+            stderr,
+        )
+        is not None
+    )
 
 
 def command_runner(arguments: tuple[str, ...]) -> CommandResult:
@@ -188,6 +207,7 @@ def command_runner(arguments: tuple[str, ...]) -> CommandResult:
         if stdout_thread.is_alive() or stderr_thread.is_alive():
             fail("Captura do inventário AWS não terminou dentro do limite.")
         stdout = bytes(stdout_capture.content).decode("utf-8", errors="strict")
+        stderr = bytes(stderr_capture.content).decode("utf-8", errors="strict")
     except (OSError, subprocess.SubprocessError, UnicodeError):
         if process is not None and process.poll() is None:
             process.kill()
@@ -204,6 +224,7 @@ def command_runner(arguments: tuple[str, ...]) -> CommandResult:
         returncode=returncode,
         stdout=stdout,
         stderr="",
+        missing=is_canonical_domain_not_found(arguments, returncode, stderr),
     )
 
 
@@ -224,6 +245,25 @@ def nested_collection(
             fail("Resposta AWS omitiu uma coleção obrigatória do inventário.")
         value = current[key]
     return sequence(value, context="coleção do inventário")
+
+
+def nested_object(
+    document: Mapping[str, Any],
+    path: Sequence[str],
+    *,
+    allow_missing_final: bool,
+) -> object | None:
+    if not path:
+        fail("Consulta de inventário não definiu um objeto.")
+    value: object = document
+    for index, key in enumerate(path):
+        current = mapping(value, context="estrutura do inventário")
+        if key not in current or current[key] is None:
+            if allow_missing_final and index == len(path) - 1:
+                return None
+            fail("Resposta AWS omitiu um objeto obrigatório do inventário.")
+        value = current[key]
+    return value
 
 
 def base_text(value: object, key: str) -> str:
@@ -305,6 +345,19 @@ def nested_name(*keys: str, expected: str) -> Predicate:
     return matches
 
 
+def cognito_domain_matches(expected: str) -> Predicate:
+    def matches(item: object) -> bool:
+        description = mapping(item, context="descrição do domínio Cognito")
+        if not description:
+            return False
+        domain = description.get("Domain")
+        if type(domain) is not str or domain != expected:
+            fail("Descrição Cognito não corresponde ao domínio consultado.")
+        return True
+
+    return matches
+
+
 def inventory_queries(
     *,
     account_id: str,
@@ -331,6 +384,8 @@ def inventory_queries(
         f"{name}-dlq-messages",
         f"{name}-queue-age",
     }
+    domain_seed = f"{name_prefix}:{frontend_domain}:{region}"
+    cognito_domain = f"spm-{hashlib.sha256(domain_seed.encode()).hexdigest()[:20]}"
     tag_filters = (
         "Key=Environment,Values=demo",
         "Key=Profile,Values=aws-demo",
@@ -409,6 +464,22 @@ def inventory_queries(
             ),
             ("UserPools",),
             exact_name("Name", {name}),
+        ),
+        InventoryQuery(
+            "Cognito hosted UI domain",
+            (
+                "cognito-idp",
+                "describe-user-pool-domain",
+                "--domain",
+                cognito_domain,
+                "--region",
+                region,
+            ),
+            ("DomainDescription",),
+            cognito_domain_matches(cognito_domain),
+            allow_missing_collection=True,
+            single_object=True,
+            allow_not_found=True,
         ),
         InventoryQuery(
             "API Gateway APIs",
@@ -534,9 +605,24 @@ def scan_inventory(queries: Sequence[InventoryQuery], runner: Runner) -> int:
     residual_count = 0
     for query in queries:
         result = runner(query.arguments)
-        if type(result) is not CommandResult or result.returncode != 0:
+        if type(result) is not CommandResult:
             fail("Uma consulta obrigatória do inventário AWS falhou.")
+        if result.returncode != 0:
+            if query.allow_not_found and result.missing:
+                continue
+            fail("Uma consulta obrigatória do inventário AWS falhou.")
+        if result.missing:
+            fail("Consulta bem-sucedida não pode declarar recurso ausente.")
         document = parse_json(result.stdout)
+        if query.single_object:
+            item = nested_object(
+                document,
+                query.collection_path,
+                allow_missing_final=query.allow_missing_collection,
+            )
+            if item is not None and query.predicate(item):
+                residual_count += 1
+            continue
         items = nested_collection(
             document,
             query.collection_path,

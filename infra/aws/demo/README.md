@@ -1,8 +1,8 @@
 # Perfil AWS demo
 
 Este diretório define, sem executar `apply`, um único perfil Terraform efêmero
-para demonstrar a API e a fronteira web na AWS. A configuração é deliberadamente
-single-AZ, não cria banco, não contém UI e não tenta representar produção.
+para demonstrar a API e a fronteira web autenticada na AWS. A configuração é
+deliberadamente single-AZ, não cria banco e não tenta representar produção.
 
 Versões fixadas:
 
@@ -61,7 +61,7 @@ flowchart LR
   OIDC -. plan, deploy e teardown autorizados .-> State
 ```
 
-A confrontação reproduzível entre esse diagrama, o plano de 73 recursos e os
+A confrontação reproduzível entre esse diagrama, o plano de 75 recursos e os
 gates da SEN-68 está na
 [evidência offline da SEN-69](../../../docs/validation/aws-demo-evidence.md).
 
@@ -86,14 +86,22 @@ três buckets bloqueiam acesso público, impõem Object Ownership, SSE-S3 e
 versionamento. `force_destroy` e a expiração de versões não correntes existem
 somente porque este perfil é removível.
 
+A fundação nasce sem objetos no bucket frontend. O dispatch protegido de runtime
+faz staging pela allowlist exata de `apps/web/src`, publica módulos ESM imutáveis,
+gera o `runtime-config.v1.json` público a partir dos outputs do mesmo state e envia
+o `index.html` por último. Depois remove apenas assets residuais já validados,
+invalida a distribuição, espera `Completed` e executa o smoke pela URL final.
+
 O viewer HTTPS não usa o certificado padrão do CloudFront. A AWS fixa esse
 fallback em `TLSv1` mesmo quando a configuração declara outra política; por isso
 o perfil exige alias próprio, certificado ACM de `us-east-1`, SNI e
 `TLSv1.2_2021`, sem caminho alternativo para o certificado público legado.
 
-O `$default` do API Gateway exige o authorizer JWT do Cognito. O client Cognito é
-público (`generate_secret = false`), usuários só podem ser criados por um
-administrador e nenhuma senha é colocada no Terraform. CORS aceita exclusivamente
+O `$default` do API Gateway exige o authorizer JWT do Cognito; a rota explícita
+`OPTIONS /{proxy+}` usa `authorization_type = "NONE"` para o preflight. O client
+Cognito é público (`generate_secret = false`), mantém o fluxo administrativo usado
+pelo smoke efêmero e oferece ao navegador somente OAuth Authorization Code com
+PKCE. Callback e logout apontam para a raiz HTTPS exata. CORS aceita exclusivamente
 o domínio HTTPS próprio informado e coberto pelo certificado; não há `*` para
 origem, headers ou métodos.
 
@@ -269,7 +277,7 @@ pontuação:
 | `CKV_AWS_259` | HSTS já usa um ano, subdomínios e override; preload fica falso até existir domínio real, governança DNS e plano de recuperação. |
 | `CKV_AWS_310`, `CKV_AWS_144` | Failover de origem e replicação multi-região contradizem o desenho single-AZ de oito horas. |
 | `CKV_AWS_374` | Restrição geográfica não foi inventada sem requisito da banca; autenticação JWT continua obrigatória na API. |
-| `CKV_AWS_68`, `CKV2_AWS_47` | WAF gerenciado tem custo e operação contínuos; não há endpoint anônimo da API, e o frontend estático começa vazio. |
+| `CKV_AWS_68`, `CKV2_AWS_47` | WAF gerenciado tem custo e operação contínuos; não há endpoint de negócio anônimo da API. A fundação começa sem objetos web e o deploy protegido publica somente a allowlist autenticada. |
 | `CKV2_AWS_62` | Notificações S3 criariam um fluxo inexistente; o contrato assíncrono atual é SQS explícito. |
 | `CKV2_AWS_12` | O default security group não é associado a recurso algum; os três grupos usados possuem sete regras independentes em allowlist exata. |
 
@@ -346,8 +354,9 @@ Riscos aceitos pelo prazo e custo:
   alerta por e-mail mínimo;
 - o Budget é conservador e cobre a conta, pois ativação de cost allocation tags
   tem atraso e não seria um gate confiável antes da demo;
-- o frontend S3 começa vazio, o ECR começa vazio e nenhum usuário Cognito é
-  criado; conteúdo, imagem e identidade pertencem ao fluxo autorizado posterior;
+- a fundação começa com frontend S3 e ECR vazios e não cria usuário Cognito; o
+  dispatch protegido posterior publica a allowlist web e a imagem, enquanto a
+  identidade efêmera permanece externa;
 - domínio, certificado ACM validado e registro DNS são pré-requisitos externos;
   o Terraform falha antes de um plano real que reutilize os placeholders;
 - habilitar Bedrock acrescenta custo por modelo e exige uma nova estimativa;

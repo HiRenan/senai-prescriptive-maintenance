@@ -12,6 +12,12 @@ Este relatório confronta o Terraform da SEN-67, a automação protegida da SEN-
 o diagrama e a documentação. Ele separa configuração versionada, prova executada
 localmente e capacidade ainda dependente de autorização.
 
+> **Nota de supersessão (SEN-75, 2026-08-24):** este documento preserva números e
+> conclusões do snapshot SEN-69. O código posterior passou a incluir a UI,
+> publicação allowlisted, Hosted UI/PKCE e smoke da URL publicada. Isso foi
+> validado apenas offline; apply, publicação, login humano e teardown live
+> continuam como evidência pendente da SEN-74.
+
 Nenhuma das variáveis usuais de credencial AWS estava definida. Não foram
 executados `apply`, deploy, smoke remoto, teardown, consulta de billing ou
 alteração de GitHub environment. Os materiais originais não foram acessados.

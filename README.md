@@ -26,12 +26,12 @@ local integralmente identificado e autorizado.
 
 | Capacidade | O que existe | Limite que importa |
 | --- | --- | --- |
-| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, dois modos explícitos, health checks, correlation ID e erros sanitizados. | Não há autenticação; o repositório não distribui artefatos privados nem configuração operacional. |
+| API | FastAPI, contrato OpenAPI v1, cinco estados de análise, dois modos explícitos, health checks, correlation ID e erros sanitizados. | O runtime local/offline não autentica; no perfil AWS, a HTTP API exige JWT Cognito. O repositório não distribui artefatos privados nem configuração operacional. |
 | Dados | Pipeline local auditado, contrato de 18 features, split temporal e checker determinístico. | A fonte e os derivados por registro permanecem locais e ignorados; a CI usa somente fixtures sintéticas. |
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
-| Web | Painel responsivo de análise e gestão documental em módulos ESM, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Node/Chromium. | O cadastro documental registra somente metadados; o modo offline não simula decisões documentais e o runtime não possui autenticação. |
+| Web | Painel responsivo de análise e gestão documental em módulos ESM, modo offline sintético dos cinco outcomes, contratos derivados do OpenAPI v1 e testes Node/Chromium. | Local/offline permanecem sem login; a origem AWS exata implementa Cognito Authorization Code + PKCE e JWT somente em memória. A prova live continua na SEN-74. |
 | AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline. | Nenhum recurso, identidade, deploy, smoke ou teardown foi executado na AWS. |
 
 As afirmações públicas usam quatro rótulos:

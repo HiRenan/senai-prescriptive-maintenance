@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -85,6 +86,25 @@ STATE_INSTANCE_KEYS = {
     "schema_version",
     "sensitive_attributes",
     "status",
+}
+EXPECTED_STATE_OUTPUT_TYPES = {
+    "api_base_url": "string",
+    "api_image_reference": "string",
+    "artifact_bucket_name": "string",
+    "bedrock_enabled": "bool",
+    "cognito_client_id": "string",
+    "cognito_hosted_ui_origin": "string",
+    "cognito_user_pool_id": "string",
+    "cors_allowed_origin": "string",
+    "document_bucket_name": "string",
+    "ecr_repository_url": "string",
+    "frontend_bucket_name": "string",
+    "frontend_distribution_domain_name": "string",
+    "frontend_distribution_id": "string",
+    "frontend_url": "string",
+    "ingestion_dead_letter_queue_url": "string",
+    "ingestion_queue_url": "string",
+    "worker_task_role_arn": "string",
 }
 PLAN_CHANGE_KEYS = {
     "actions",
@@ -323,6 +343,17 @@ def expected_buckets(identity: Mapping[str, str]) -> dict[str, str]:
     }
 
 
+def expected_cognito_domain(identity: Mapping[str, str]) -> str:
+    seed = ":".join(
+        (
+            identity["name_prefix"],
+            identity["frontend_domain"],
+            identity["region"],
+        )
+    )
+    return f"spm-{hashlib.sha256(seed.encode()).hexdigest()[:20]}"
+
+
 def validate_tags(
     address: str, values: Mapping[str, Any], identity: Mapping[str, str]
 ) -> None:
@@ -351,7 +382,9 @@ def validate_generated_id(resource_type: str, values: Mapping[str, Any]) -> None
     patterns = {
         "aws_apigatewayv2_api": r"^[a-z0-9]{10}$",
         "aws_apigatewayv2_vpc_link": r"^[a-z0-9]{10}$",
+        "aws_cloudfront_distribution": r"^[A-Z0-9]{8,32}$",
         "aws_cognito_user_pool": r"^[a-z]{2}-[a-z]+-\d_[A-Za-z0-9]+$",
+        "aws_cognito_user_pool_client": r"^[a-z0-9]{1,128}$",
         "aws_route_table": r"^rtb-[0-9a-f]+$",
         "aws_route_table_association": r"^rtbassoc-[0-9a-f]+$",
         "aws_security_group": r"^sg-[0-9a-f]+$",
@@ -392,7 +425,11 @@ def validate_resource_identity(
     )
     if bucket_match is not None:
         field = "bucket"
-        if attributes.get(field) != buckets[bucket_match.group(1)]:
+        expected_bucket = buckets[bucket_match.group(1)]
+        if attributes.get(field) != expected_bucket or (
+            address.startswith("aws_s3_bucket.storage")
+            and attributes.get("id") != expected_bucket
+        ):
             fail("Recurso S3 possui bucket fora da identidade canônica.")
     if (
         address == "aws_s3_bucket_policy.frontend"
@@ -406,6 +443,12 @@ def validate_resource_identity(
         api_id = attributes.get("api_id")
         if type(api_id) is not str or re.fullmatch(r"[a-z0-9]{10}", api_id) is None:
             fail("Subrecurso API Gateway não possui API ID canônico.")
+    if address == "aws_apigatewayv2_api.demo":
+        api_id = attributes.get("id")
+        if attributes.get("api_endpoint") != (
+            f"https://{api_id}.execute-api.{identity['region']}.amazonaws.com"
+        ):
+            fail("API demo não possui endpoint regional ligado ao próprio ID.")
     if address == "aws_cognito_user_pool_client.demo":
         pool_id = attributes.get("user_pool_id")
         if (
@@ -413,6 +456,18 @@ def validate_resource_identity(
             or re.fullmatch(r"[a-z]{2}-[a-z]+-\d_[A-Za-z0-9]+", pool_id) is None
         ):
             fail("App client não aponta para user pool canônico.")
+    if address == "aws_cognito_user_pool_domain.demo":
+        domain = expected_cognito_domain(identity)
+        pool_id = attributes.get("user_pool_id")
+        if (
+            attributes.get("domain") != domain
+            or attributes.get("id") != domain
+            or re.fullmatch(r"spm-[0-9a-f]{20}", domain) is None
+            or type(pool_id) is not str
+            or re.fullmatch(r"[a-z]{2}-[a-z]+-\d_[A-Za-z0-9]+", pool_id) is None
+            or attributes.get("managed_login_version") != 1
+        ):
+            fail("Domínio Cognito no state diverge da identidade determinística.")
     if (
         address == "aws_ecr_lifecycle_policy.api"
         and attributes.get("repository") != f"{demo_name}/api"
@@ -949,12 +1004,19 @@ def validate_relationships(values: Mapping[str, Mapping[str, Any]]) -> None:
                 fail("Subrecurso API Gateway aponta para outra API.")
     user_pool = values.get("aws_cognito_user_pool.demo")
     user_pool_client = values.get("aws_cognito_user_pool_client.demo")
+    user_pool_domain = values.get("aws_cognito_user_pool_domain.demo")
     if (
         user_pool is not None
         and user_pool_client is not None
         and user_pool_client.get("user_pool_id") != user_pool.get("id")
     ):
         fail("App client aponta para outro user pool.")
+    if (
+        user_pool is not None
+        and user_pool_domain is not None
+        and user_pool_domain.get("user_pool_id") != user_pool.get("id")
+    ):
+        fail("Domínio Cognito aponta para outro user pool.")
     ecr = values.get("aws_ecr_repository.api")
     ecr_lifecycle = values.get("aws_ecr_lifecycle_policy.api")
     if (
@@ -998,6 +1060,81 @@ def validate_relationships(values: Mapping[str, Mapping[str, Any]]) -> None:
             fail("Recurso de rede aponta para VPC fora do state aprovado.")
 
 
+def state_output_values(snapshot: object) -> Mapping[str, object]:
+    document = mapping(snapshot, context="snapshot do state")
+    raw_outputs = mapping(document.get("outputs"), context="state.outputs")
+    values: dict[str, object] = {}
+    for name, raw_output in raw_outputs.items():
+        if type(name) is not str or name not in EXPECTED_STATE_OUTPUT_TYPES:
+            fail("State possui nome de output inválido.")
+        output = mapping(raw_output, context=f"state.outputs.{name}")
+        if not {"type", "value"} <= set(output) or set(output) - {
+            "sensitive",
+            "type",
+            "value",
+        }:
+            fail("State possui schema de output desconhecido.")
+        if output.get("type") != EXPECTED_STATE_OUTPUT_TYPES[name] or output.get(
+            "sensitive"
+        ) not in {
+            None,
+            False,
+        }:
+            fail("Output do state diverge do tipo público canônico.")
+        values[name] = output.get("value")
+    return values
+
+
+def validate_operational_outputs(
+    snapshot: object,
+    resources: Mapping[str, Mapping[str, Any]],
+    identity: Mapping[str, str],
+    *,
+    required: bool,
+) -> None:
+    outputs = state_output_values(snapshot)
+    required_names = {
+        "api_base_url",
+        "cognito_client_id",
+        "cognito_hosted_ui_origin",
+        "frontend_bucket_name",
+        "frontend_distribution_id",
+    }
+    if required and set(outputs) != set(EXPECTED_STATE_OUTPUT_TYPES):
+        fail("State existente diverge da lista exata de outputs públicos.")
+    if not required:
+        return
+    if not set(outputs) & required_names:
+        return
+    api = resources.get("aws_apigatewayv2_api.demo")
+    client = resources.get("aws_cognito_user_pool_client.demo")
+    domain = resources.get("aws_cognito_user_pool_domain.demo")
+    bucket = resources.get('aws_s3_bucket.storage["frontend"]')
+    distribution = resources.get("aws_cloudfront_distribution.frontend")
+    if any(item is None for item in (api, client, domain, bucket, distribution)):
+        fail("Outputs operacionais não possuem todos os recursos correspondentes.")
+    expected = {
+        "api_base_url": cast(Mapping[str, Any], api).get("api_endpoint"),
+        "cognito_client_id": cast(Mapping[str, Any], client).get("id"),
+        "cognito_hosted_ui_origin": (
+            f"https://{expected_cognito_domain(identity)}.auth."
+            f"{identity['region']}.amazoncognito.com"
+        ),
+        "frontend_bucket_name": cast(Mapping[str, Any], bucket).get("id"),
+        "frontend_distribution_id": cast(Mapping[str, Any], distribution).get("id"),
+    }
+    if any(
+        type(expected_value) is not str
+        or not expected_value
+        or outputs.get(name) != expected_value
+        for name, expected_value in expected.items()
+    ):
+        fail("Output operacional não aponta para o recurso do mesmo state.")
+    domain_values = cast(Mapping[str, Any], domain)
+    if domain_values.get("domain") != expected_cognito_domain(identity):
+        fail("Hosted UI não corresponde ao domínio Cognito do mesmo state.")
+
+
 def audit_state_snapshot(
     snapshot: object,
     *,
@@ -1009,7 +1146,7 @@ def audit_state_snapshot(
     resources = state_managed_values(snapshot)
     addresses = set(resources)
     if mode in {"fresh", "destroyed"}:
-        if addresses:
+        if addresses or state_output_values(snapshot):
             fail("Snapshot do state deveria estar vazio para esta fase.")
         return
     if mode == "existing":
@@ -1028,6 +1165,12 @@ def audit_state_snapshot(
             address, resource_type, attributes, scope
         )
     validate_relationships(values)
+    validate_operational_outputs(
+        snapshot,
+        values,
+        scope,
+        required=mode == "existing",
+    )
     task_values = values.get("aws_ecs_task_definition.api")
     if task_values is not None:
         task = validate_task_values(

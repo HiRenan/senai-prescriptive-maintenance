@@ -34,6 +34,7 @@ from aws_delivery import (
 )
 from delivery_gate import (
     EXPECTED_MANAGED,
+    EXPECTED_STATE_OUTPUT_TYPES,
     REQUIRED_TAGS,
     TAGGED_ADDRESSES,
     DeliveryGateError,
@@ -41,6 +42,7 @@ from delivery_gate import (
     audit_state,
     audit_state_snapshot,
     expected_buckets,
+    expected_cognito_domain,
     expected_names,
 )
 from delivery_policy import (
@@ -498,6 +500,36 @@ def prove_contract_mutations_rejected() -> int:
 
     mutations.append(untagged_api_destroy)
 
+    def scoped_cognito_domain_describe(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "CognitoDomainRW")
+        statement["Action"] = [
+            "cognito-idp:CreateUserPoolDomain",
+            "cognito-idp:DescribeUserPoolDomain",
+        ]
+
+    mutations.append(scoped_cognito_domain_describe)
+
+    def widened_frontend_delete(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "FrontendObjectDelete")
+        statement["Resource"] = (
+            "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}/*"
+        )
+
+    mutations.append(widened_frontend_delete)
+
+    def widened_frontend_put(contract: dict[str, Any]) -> None:
+        statement = permission_statement(contract, "deploy", "FrontendObjectPut")
+        statement["Resource"] = (
+            "arn:aws:s3:::${NAME_PREFIX}-frontend-${AWS_ACCOUNT_ID}-${AWS_REGION}/*"
+        )
+
+    mutations.append(widened_frontend_put)
+
+    def unencrypted_frontend_put(contract: dict[str, Any]) -> None:
+        permission_statement(contract, "deploy", "FrontendObjectPut").pop("Condition")
+
+    mutations.append(unencrypted_frontend_put)
+
     def without_provider_action(
         role_name: str, sid: str, action: str
     ) -> Callable[[dict[str, Any]], None]:
@@ -666,7 +698,34 @@ def prove_workflow_mutations_rejected(action_pins: Mapping[str, str]) -> int:
                 ),
                 DeliveryPolicyError,
             )
-    return len(mutations)
+        validate_source = (
+            REPOSITORY_ROOT / ".github/workflows/aws-demo-validate.yml"
+        ).read_text(encoding="utf-8")
+        validate_mutations = (
+            validate_source.replace('      - "apps/web/**"\n', "", 1),
+            validate_source.replace(
+                "          python infra/aws/demo/scripts/"
+                "frontend_delivery_regression.py\n",
+                "",
+                1,
+            ),
+        )
+        for index, candidate in enumerate(validate_mutations):
+            candidate_path = Path(temporary) / f"validate-{index}.yml"
+            candidate_path.write_text(candidate, encoding="utf-8", newline="\n")
+            expect_failure(
+                lambda candidate_path=candidate_path: audit_workflow(
+                    candidate_path,
+                    expected_environment=None,
+                    uses_oidc=False,
+                    action_pins=action_pins,
+                    expected_role_variable=None,
+                    expected_confirmation=None,
+                    expected_operation=None,
+                ),
+                DeliveryPolicyError,
+            )
+    return len(mutations) + len(validate_mutations)
 
 
 def prove_github_environment_gate() -> int:
@@ -790,14 +849,14 @@ def prove_cognito_runbook_is_sanitized() -> int:
     exact_flows = """explicit_auth_flows = [
     "ALLOW_ADMIN_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_SRP_AUTH",
   ]"""
     if (
         exact_flows not in identity
         or "ALLOW_USER_PASSWORD_AUTH" in identity
+        or "ALLOW_USER_SRP_AUTH" in identity
         or identity.count("ALLOW_ADMIN_USER_PASSWORD_AUTH") != 1
-        or "access_token_validity                         = 2" not in identity
-        or "id_token_validity             = 2" not in identity
+        or re.search(r"(?m)^\s*access_token_validity\s*=\s*2\s*$", identity) is None
+        or re.search(r"(?m)^\s*id_token_validity\s*=\s*2\s*$", identity) is None
     ):
         raise DeliveryRegressionError(
             "Cliente Cognito ampliou fluxo ou validade fora do contrato."
@@ -974,6 +1033,12 @@ def synthetic_attributes(
     }
     if resource_type in generated_ids:
         values["id"] = generated_ids[resource_type]
+    if address == "aws_apigatewayv2_api.demo":
+        values["api_endpoint"] = (
+            "https://abcdefghij.execute-api.us-east-1.amazonaws.com"
+        )
+    if address == "aws_cloudfront_distribution.frontend":
+        values["id"] = "E1SYNTHETIC01"
     if address.startswith("aws_apigatewayv2_") and address not in {
         "aws_apigatewayv2_api.demo",
         "aws_apigatewayv2_vpc_link.api",
@@ -994,11 +1059,25 @@ def synthetic_attributes(
         address,
     )
     if bucket_match is not None:
-        values["bucket"] = expected_buckets(SYNTHETIC_IDENTITY)[bucket_match.group(1)]
+        bucket = expected_buckets(SYNTHETIC_IDENTITY)[bucket_match.group(1)]
+        values["bucket"] = bucket
+        if address.startswith("aws_s3_bucket.storage"):
+            values["id"] = bucket
     if address == "aws_s3_bucket_policy.frontend":
         values["bucket"] = expected_buckets(SYNTHETIC_IDENTITY)["frontend"]
     if address == "aws_cognito_user_pool_client.demo":
+        values["id"] = "syntheticclient01"
         values["user_pool_id"] = "us-east-1_Synthetic01"
+    if address == "aws_cognito_user_pool_domain.demo":
+        domain = expected_cognito_domain(SYNTHETIC_IDENTITY)
+        values.update(
+            {
+                "domain": domain,
+                "id": domain,
+                "managed_login_version": 1,
+                "user_pool_id": "us-east-1_Synthetic01",
+            }
+        )
     if address == "aws_ecr_lifecycle_policy.api":
         values["repository"] = "senai-pm-demo/api"
     role_policy_roles = {
@@ -1124,14 +1203,16 @@ def synthetic_plan(actions: Mapping[str, tuple[str, ...]]) -> dict[str, object]:
 
 
 def synthetic_state(addresses: Iterable[str]) -> dict[str, object]:
+    address_set = set(addresses)
     resources: list[dict[str, object]] = []
-    for address in sorted(addresses):
+    attributes_by_address: dict[str, dict[str, object]] = {}
+    for address in sorted(address_set):
         base = address.split("[", maxsplit=1)[0]
         resource_type, resource_name = base.split(".", maxsplit=1)
+        attributes = synthetic_attributes(address, image=EXPECTED_IMAGE, revision=2)
+        attributes_by_address[address] = attributes
         instance: dict[str, object] = {
-            "attributes": synthetic_attributes(
-                address, image=EXPECTED_IMAGE, revision=2
-            ),
+            "attributes": attributes,
             "schema_version": 0,
             "sensitive_attributes": [],
         }
@@ -1146,14 +1227,93 @@ def synthetic_state(addresses: Iterable[str]) -> dict[str, object]:
                 "type": resource_type,
             }
         )
+    outputs: dict[str, object] = {}
+    operational_addresses = {
+        "aws_apigatewayv2_api.demo",
+        "aws_cloudfront_distribution.frontend",
+        "aws_cognito_user_pool_client.demo",
+        "aws_cognito_user_pool_domain.demo",
+        'aws_s3_bucket.storage["frontend"]',
+    }
+    if operational_addresses <= address_set:
+        domain = expected_cognito_domain(SYNTHETIC_IDENTITY)
+        output_values = {
+            "api_base_url": attributes_by_address["aws_apigatewayv2_api.demo"][
+                "api_endpoint"
+            ],
+            "cognito_client_id": attributes_by_address[
+                "aws_cognito_user_pool_client.demo"
+            ]["id"],
+            "cognito_hosted_ui_origin": (
+                f"https://{domain}.auth.us-east-1.amazoncognito.com"
+            ),
+            "frontend_bucket_name": attributes_by_address[
+                'aws_s3_bucket.storage["frontend"]'
+            ]["id"],
+            "frontend_distribution_id": attributes_by_address[
+                "aws_cloudfront_distribution.frontend"
+            ]["id"],
+            "api_image_reference": EXPECTED_IMAGE,
+            "artifact_bucket_name": expected_buckets(SYNTHETIC_IDENTITY)["artifacts"],
+            "bedrock_enabled": False,
+            "cognito_user_pool_id": "us-east-1_Synthetic01",
+            "cors_allowed_origin": "https://senai.maib.com.br",
+            "document_bucket_name": expected_buckets(SYNTHETIC_IDENTITY)["documents"],
+            "ecr_repository_url": (
+                "000000000000.dkr.ecr.us-east-1.amazonaws.com/senai-pm-demo/api"
+            ),
+            "frontend_distribution_domain_name": "synthetic.cloudfront.net",
+            "frontend_url": "https://senai.maib.com.br",
+            "ingestion_dead_letter_queue_url": "https://sqs.us-east-1.amazonaws.com/synthetic-dlq",
+            "ingestion_queue_url": "https://sqs.us-east-1.amazonaws.com/synthetic",
+            "worker_task_role_arn": (
+                "arn:aws:iam::000000000000:role/senai-pm-demo-worker-task"
+            ),
+        }
+        if set(output_values) != set(EXPECTED_STATE_OUTPUT_TYPES):
+            raise DeliveryRegressionError(
+                "Fixture de outputs do state está incompleta."
+            )
+        outputs = {
+            name: {
+                "sensitive": False,
+                "type": EXPECTED_STATE_OUTPUT_TYPES[name],
+                "value": value,
+            }
+            for name, value in output_values.items()
+        }
     return {
         "lineage": "00000000-0000-4000-8000-000000000000",
-        "outputs": {},
+        "outputs": outputs,
         "resources": resources,
         "serial": 1,
         "terraform_version": "1.15.9",
         "version": 4,
     }
+
+
+def state_attributes(snapshot: Mapping[str, object], address: str) -> dict[str, Any]:
+    base = address.split("[", maxsplit=1)[0]
+    resource_type, resource_name = base.split(".", maxsplit=1)
+    matches = [
+        cast(dict[str, Any], resource)
+        for resource in cast(list[object], snapshot["resources"])
+        if cast(dict[str, Any], resource).get("type") == resource_type
+        and cast(dict[str, Any], resource).get("name") == resource_name
+    ]
+    if len(matches) != 1:
+        raise DeliveryRegressionError("Fixture do state não possui recurso único.")
+    instances = cast(list[dict[str, Any]], matches[0]["instances"])
+    if "[" in address:
+        expected_index = json.loads(address[address.index("[") + 1 : -1])
+        instances = [
+            instance
+            for instance in instances
+            if instance.get("index_key") == expected_index
+        ]
+    if len(instances) != 1:
+        raise DeliveryRegressionError("Fixture do state não possui instância única.")
+    return cast(dict[str, Any], instances[0]["attributes"])
 
 
 def action_map(default: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
@@ -1434,12 +1594,56 @@ def prove_plan_and_state_gates() -> int:
             lambda: audit_state(extra, mode="destroyable"), DeliveryGateError
         )
     complete_snapshot = synthetic_state(EXPECTED_MANAGED)
+    if cast(dict[str, Any], complete_snapshot["outputs"])["bedrock_enabled"] != {
+        "sensitive": False,
+        "type": "bool",
+        "value": False,
+    }:
+        raise DeliveryRegressionError("Fixture perdeu o output booleano do Bedrock.")
     audit_state_snapshot(
         complete_snapshot,
         mode="existing",
         identity=SYNTHETIC_IDENTITY,
         expected_image=EXPECTED_IMAGE,
     )
+    for field, hostile in (
+        ("domain", "spm-00000000000000000000"),
+        ("id", "spm-00000000000000000000"),
+        ("user_pool_id", "us-east-1_Foreign01"),
+    ):
+        hostile_domain = copy.deepcopy(complete_snapshot)
+        state_attributes(hostile_domain, "aws_cognito_user_pool_domain.demo")[field] = (
+            hostile
+        )
+        expect_failure(
+            lambda hostile_domain=hostile_domain: audit_state_snapshot(
+                hostile_domain,
+                mode="existing",
+                identity=SYNTHETIC_IDENTITY,
+            ),
+            DeliveryGateError,
+        )
+    hostile_outputs = {
+        "api_base_url": "https://zzzzzzzzzz.execute-api.us-east-1.amazonaws.com",
+        "cognito_client_id": "foreignclient01",
+        "cognito_hosted_ui_origin": (
+            "https://spm-00000000000000000000.auth.us-east-1.amazoncognito.com"
+        ),
+        "frontend_bucket_name": "senai-pm-frontend-111111111111-us-east-1",
+        "frontend_distribution_id": "E9SYNTHETIC99",
+    }
+    for name, hostile in hostile_outputs.items():
+        poisoned = copy.deepcopy(complete_snapshot)
+        output = cast(dict[str, Any], cast(dict[str, Any], poisoned["outputs"])[name])
+        output["value"] = hostile
+        expect_failure(
+            lambda poisoned=poisoned: audit_state_snapshot(
+                poisoned,
+                mode="existing",
+                identity=SYNTHETIC_IDENTITY,
+            ),
+            DeliveryGateError,
+        )
     hostile_state_schema = copy.deepcopy(complete_snapshot)
     hostile_state_schema["foreign"] = True
     expect_failure(
@@ -1582,7 +1786,7 @@ def prove_plan_and_state_gates() -> int:
         ),
         DeliveryGateError,
     )
-    return 31
+    return 39
 
 
 def synthetic_result(name: str) -> dict[str, object]:
@@ -1838,6 +2042,85 @@ def prove_inventory_is_fail_closed() -> int:
     if len(bucket_queries) != 1:
         raise DeliveryRegressionError("Inventário não fixa scan de buckets S3.")
 
+    domain_queries = tuple(
+        candidate
+        for candidate in actual_queries
+        if candidate.name == "Cognito hosted UI domain"
+    )
+    expected_domain = expected_cognito_domain(
+        {
+            "account_id": "000000000000",
+            "frontend_domain": "demo.example.invalid",
+            "name_prefix": "senai-pm",
+            "region": "us-east-1",
+        }
+    )
+    if (
+        len(domain_queries) != 1
+        or domain_queries[0].arguments
+        != (
+            "cognito-idp",
+            "describe-user-pool-domain",
+            "--domain",
+            expected_domain,
+            "--region",
+            "us-east-1",
+        )
+        or not domain_queries[0].single_object
+        or not domain_queries[0].allow_not_found
+    ):
+        raise DeliveryRegressionError("Inventário não fixa o domínio Cognito opaco.")
+
+    def absent_domain_runner(arguments: tuple[str, ...]) -> CommandResult:
+        del arguments
+        return CommandResult(255, "", "", missing=True)
+
+    scan_inventory(domain_queries, absent_domain_runner)
+
+    if not orphan_inventory.is_canonical_domain_not_found(
+        domain_queries[0].arguments,
+        255,
+        "An error occurred (ResourceNotFoundException) when calling the "
+        "DescribeUserPoolDomain operation: synthetic domain not found.",
+    ) or orphan_inventory.is_canonical_domain_not_found(
+        domain_queries[0].arguments,
+        255,
+        "An error occurred (AccessDeniedException) when calling the "
+        "DescribeUserPoolDomain operation: denied.",
+    ):
+        raise DeliveryRegressionError("Classificação Cognito não separa not-found.")
+
+    def residual_domain_runner(arguments: tuple[str, ...]) -> CommandResult:
+        del arguments
+        return CommandResult(
+            0,
+            json.dumps({"DomainDescription": {"Domain": expected_domain}}),
+            "",
+        )
+
+    expect_failure(
+        lambda: scan_inventory(domain_queries, residual_domain_runner),
+        OrphanInventoryError,
+    )
+
+    def malformed_domain_runner(arguments: tuple[str, ...]) -> CommandResult:
+        del arguments
+        return CommandResult(0, '{"DomainDescription":[]}', "")
+
+    expect_failure(
+        lambda: scan_inventory(domain_queries, malformed_domain_runner),
+        OrphanInventoryError,
+    )
+
+    def denied_domain_runner(arguments: tuple[str, ...]) -> CommandResult:
+        del arguments
+        return CommandResult(255, SENSITIVE_MARKER, "", missing=False)
+
+    expect_failure(
+        lambda: scan_inventory(domain_queries, denied_domain_runner),
+        OrphanInventoryError,
+    )
+
     def malformed_bucket_runner(arguments: tuple[str, ...]) -> CommandResult:
         del arguments
         return CommandResult(0, '{"Buckets":[{}]}', "")
@@ -1872,7 +2155,7 @@ def prove_inventory_is_fail_closed() -> int:
         raise DeliveryRegressionError("Inventário herdou proxy ou trust root hostil.")
     if SENSITIVE_MARKER in repr(inventory_environment):
         raise DeliveryRegressionError("Ambiente do inventário expõe credencial.")
-    return 9
+    return 15
 
 
 def prove_inventory_capture_is_bounded() -> int:
@@ -1935,7 +2218,7 @@ def synthetic_environment() -> dict[str, str]:
             "arn:aws:acm:us-east-1:000000000000:certificate/"
             "00000000-0000-4000-8000-000000000000"
         ),
-        "TF_VAR_frontend_domain_name": "demo.example.invalid",
+        "TF_VAR_frontend_domain_name": "senai.maib.com.br",
         "TF_VAR_monthly_budget_usd": "15",
         "TF_VAR_name_prefix": "senai-pm",
         "TF_VAR_owner": "demo-team",
@@ -1961,6 +2244,19 @@ def prove_hostile_environment_rejected() -> int:
     crossed_region = synthetic_environment()
     crossed_region["AWS_DEFAULT_REGION"] = "us-west-2"
     expect_failure(lambda: validated_configuration(crossed_region), AwsDeliveryError)
+    wrong_region = synthetic_environment()
+    wrong_region.update(
+        {
+            "AWS_DEFAULT_REGION": "us-west-2",
+            "AWS_REGION": "us-west-2",
+            "TF_VAR_availability_zone": "us-west-2a",
+            "TF_VAR_aws_region": "us-west-2",
+        }
+    )
+    expect_failure(lambda: validated_configuration(wrong_region), AwsDeliveryError)
+    wrong_domain = synthetic_environment()
+    wrong_domain["TF_VAR_frontend_domain_name"] = "other.example.invalid"
+    expect_failure(lambda: validated_configuration(wrong_domain), AwsDeliveryError)
     expired_session = synthetic_environment()
     expired_session["AWS_DEMO_SESSION_EXPIRATION"] = "2000-01-01T00:00:00Z"
     expect_failure(lambda: validated_configuration(expired_session), AwsDeliveryError)
@@ -2029,7 +2325,69 @@ def prove_hostile_environment_rejected() -> int:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
-    return 7 + len(remote_smoke.FORBIDDEN_TLS_ENVIRONMENT)
+    return 9 + len(remote_smoke.FORBIDDEN_TLS_ENVIRONMENT)
+
+
+def prove_final_profile_precedes_operations() -> int:
+    approved = validated_configuration(synthetic_environment())
+    hostile_configurations = []
+    wrong_region = dict(approved)
+    wrong_region["region"] = "us-west-2"
+    hostile_configurations.append(wrong_region)
+    wrong_domain = dict(approved)
+    wrong_domain["frontend_domain"] = "other.example.invalid"
+    hostile_configurations.append(wrong_domain)
+
+    observed_external_calls: list[str] = []
+
+    def forbidden_external(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        observed_external_calls.append("external")
+        raise DeliveryRegressionError("Gate final ocorreu depois de efeito externo.")
+
+    boundaries = {
+        "capture_silent": aws_delivery.capture_silent,
+        "child_environment": aws_delivery.child_environment,
+        "command_runner": aws_delivery.command_runner,
+        "publish_frontend": aws_delivery.publish_frontend,
+        "require_sen46_baseline": aws_delivery.require_sen46_baseline,
+        "run_published_smoke": aws_delivery.run_published_smoke,
+        "run_silent": aws_delivery.run_silent,
+        "run_smoke": aws_delivery.run_smoke,
+        "terraform_apply": aws_delivery.terraform_apply,
+        "terraform_init": aws_delivery.terraform_init,
+        "terraform_plan": aws_delivery.terraform_plan,
+    }
+    operations = (
+        aws_delivery.plan_operation,
+        aws_delivery.foundation_operation,
+        aws_delivery.deploy_operation,
+        aws_delivery.teardown_operation,
+    )
+    try:
+        for name in boundaries:
+            aws_delivery.__dict__[name] = forbidden_external
+        with tempfile.TemporaryDirectory(
+            prefix="sen75-final-profile-regression-"
+        ) as temporary:
+            root = Path(temporary)
+            baseline = tuple(root.iterdir())
+            for operation in operations:
+                for configuration in hostile_configurations:
+                    expect_failure(
+                        lambda operation=operation, configuration=configuration: (
+                            operation(configuration, root)
+                        ),
+                        AwsDeliveryError,
+                    )
+                    if observed_external_calls or tuple(root.iterdir()) != baseline:
+                        raise DeliveryRegressionError(
+                            "Perfil final hostil causou efeito externo ou mutação."
+                        )
+    finally:
+        for name, original in boundaries.items():
+            aws_delivery.__dict__[name] = original
+    return len(operations) * len(hostile_configurations)
 
 
 def prove_buildx_configuration_isolated() -> int:
@@ -2285,7 +2643,13 @@ def prove_plan_requires_existing_foundation() -> int:
         aws_delivery.terraform_plan = forbidden_plan
         with tempfile.TemporaryDirectory(prefix="sen68-plan-state-") as temporary:
             expect_failure(
-                lambda: aws_delivery.plan_operation({}, Path(temporary)),
+                lambda: aws_delivery.plan_operation(
+                    {
+                        "frontend_domain": "senai.maib.com.br",
+                        "region": "us-east-1",
+                    },
+                    Path(temporary),
+                ),
                 AwsDeliveryError,
             )
     finally:
@@ -2654,6 +3018,7 @@ def main() -> int:
         "inventory": prove_inventory_is_fail_closed(),
         "inventory_capture": prove_inventory_capture_is_bounded(),
         "environment": prove_hostile_environment_rejected(),
+        "final_profile": prove_final_profile_precedes_operations(),
         "buildx_environment": prove_buildx_configuration_isolated(),
         "git_environment": prove_git_baseline_environment_isolated(),
         "terraform_init": prove_terraform_init_is_readonly(),

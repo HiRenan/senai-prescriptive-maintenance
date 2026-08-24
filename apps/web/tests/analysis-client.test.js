@@ -75,6 +75,17 @@ test("o 422 preserva os campos recusados pelo contrato", async () => {
   assert.deepEqual([...output.failure.issues], envelope.error.issues);
 });
 
+test("401 e 403 são classificados como autenticação sem resultado", async () => {
+  for (const status of [401, 403]) {
+    const output = await client(respondWith(status, {})).requestAnalysis(
+      requestExample("normal"),
+    );
+    assert.equal(output.ok, false);
+    assert.equal(output.failure.kind, "authentication");
+    assert.equal(output.failure.status, status);
+  }
+});
+
 test("o 503 é reportado como indisponibilidade, não como resultado", async () => {
   const output = await client(
     respondWith(503, { error: { code: "unavailable", message: "Sem resultado.", issues: [] } }),
