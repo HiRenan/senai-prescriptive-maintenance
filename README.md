@@ -230,7 +230,8 @@ Não estão implementados:
 - upload, armazenamento ou validação de bytes documentais pela API;
 - artefatos operacionais distribuíveis, embedding semântico aprovado, pgvector
   preenchido e provider de geração real habilitado;
-- autenticação, autorização, rate limiting e operação de produção;
+- autenticação e autorização fora do perfil AWS demo, rate limiting e operação
+  de produção;
 - infraestrutura AWS aplicada, bootstrap OIDC/IAM, deploy ou evidência live.
 
 Esses itens são futuro, não compromisso desta versão.
