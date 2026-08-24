@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { expect, test } from "@playwright/test";
 
 import { PKCE_STORAGE_KEY } from "../../src/auth/pkce.js";
@@ -98,7 +100,11 @@ test("config publicada pendente mantem toda superficie protegida bloqueada", asy
   });
   const apiRequests = [];
   page.on("request", (request) => {
-    if (request.url().startsWith(API_ORIGIN)) {
+    const endpoint = new URL(request.url());
+    if (
+      endpoint.origin === API_ORIGIN &&
+      (endpoint.pathname === "/analysis" || endpoint.pathname === "/documents")
+    ) {
       apiRequests.push(request.url());
     }
   });
@@ -134,26 +140,47 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
       json: publishedRuntimeConfig(),
     });
   });
-  const state = "s".repeat(43);
-  const verifier = "v".repeat(43);
-  await page.addInitScript(
-    ({ key, oauthState, pkceVerifier, timestamp }) => {
-      sessionStorage.setItem(
-        key,
-        JSON.stringify({
-          state: oauthState,
-          timestamp,
-          verifier: pkceVerifier,
-        }),
-      );
-    },
-    {
-      key: PKCE_STORAGE_KEY,
-      oauthState: state,
-      pkceVerifier: verifier,
-      timestamp: Date.now(),
-    },
-  );
+  let authorizeCalls = 0;
+  let authorizeUrl = null;
+  let callbackUrl = null;
+  let markAuthorizeRequested;
+  const authorizeRequested = new Promise((resolve) => {
+    markAuthorizeRequested = resolve;
+  });
+  await page.route(`${COGNITO_ORIGIN}/oauth2/authorize?*`, async (route) => {
+    authorizeCalls += 1;
+    const request = route.request();
+    authorizeUrl = new URL(request.url());
+    expect(request.method()).toBe("GET");
+    expect(request.headers().authorization).toBeUndefined();
+    expect(authorizeUrl.origin).toBe(COGNITO_ORIGIN);
+    expect(authorizeUrl.pathname).toBe("/oauth2/authorize");
+    const state = authorizeUrl.searchParams.get("state");
+    const challenge = authorizeUrl.searchParams.get("code_challenge");
+    if (state === null || challenge === null) {
+      throw new Error("The real authorize request omitted PKCE parameters.");
+    }
+    expect(state).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Object.fromEntries(authorizeUrl.searchParams)).toEqual({
+      client_id: CLIENT_ID,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      redirect_uri: `${PUBLISHED_ORIGIN}/`,
+      response_type: "code",
+      scope: "openid",
+      state,
+    });
+    callbackUrl = new URL("/", PUBLISHED_ORIGIN);
+    callbackUrl.searchParams.set("code", "temporary-code");
+    callbackUrl.searchParams.set("state", state);
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: "<!doctype html><title>Synthetic Cognito Hosted UI</title>",
+    });
+    markAuthorizeRequested();
+  });
 
   const expectedAccessToken = accessToken();
   let releaseToken;
@@ -170,10 +197,20 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
     const request = route.request();
     expect(request.method()).toBe("POST");
     expect(request.headers().authorization).toBeUndefined();
-    expect(Object.fromEntries(new URLSearchParams(request.postData() ?? ""))).toEqual({
+    const parameters = Object.fromEntries(
+      new URLSearchParams(request.postData() ?? ""),
+    );
+    const verifier = parameters.code_verifier;
+    if (typeof verifier !== "string" || authorizeUrl === null) {
+      throw new Error("The real PKCE exchange did not provide verifier material.");
+    }
+    expect(createHash("sha256").update(verifier).digest("base64url")).toBe(
+      authorizeUrl.searchParams.get("code_challenge"),
+    );
+    expect(parameters).toEqual({
       client_id: CLIENT_ID,
       code: "temporary-code",
-      code_verifier: verifier,
+      code_verifier: expect.stringMatching(/^[A-Za-z0-9._~-]{43,128}$/),
       grant_type: "authorization_code",
       redirect_uri: `${PUBLISHED_ORIGIN}/`,
     });
@@ -250,7 +287,14 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
     });
   });
 
-  await page.goto(`${PUBLISHED_ORIGIN}/?code=temporary-code&state=${state}`);
+  await page.goto(`${PUBLISHED_ORIGIN}/`);
+  await expect(page.locator("#auth-status")).toHaveText("Login necess\u00e1rio");
+  await page.getByRole("button", { name: "Entrar com Cognito" }).click();
+  await authorizeRequested;
+  if (callbackUrl === null) {
+    throw new Error("The real authorize request did not produce a callback URL.");
+  }
+  await page.goto(callbackUrl.href, { waitUntil: "commit" });
   await tokenRequested;
 
   await expect(page).toHaveURL(`${PUBLISHED_ORIGIN}/`);
@@ -258,9 +302,14 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
   await expect(page.locator("#analysis-form")).toHaveAttribute("aria-busy", "true");
   await expect(page.locator("#documents-panel")).toHaveAttribute("inert", "");
   expect(apiRequests).toEqual([]);
+  expect(authorizeCalls).toBe(1);
   expect(tokenCalls).toBe(1);
+  expect(
+    await page.evaluate((key) => sessionStorage.getItem(key), PKCE_STORAGE_KEY),
+  ).toBeNull();
 
   releaseToken();
+  await page.waitForLoadState("load");
   await documentsRequested;
   await expect(page.locator("#auth-status")).toHaveText("Sess\u00e3o autenticada");
   await expect(page.locator("#analysis-form")).not.toHaveAttribute("inert", "");
@@ -283,6 +332,11 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
   );
   await page.waitForTimeout(150);
   expect(analysisCalls).toBe(1);
+  expect(tokenCalls).toBe(1);
+  await page.goto(callbackUrl.href);
+  await expect(page.locator("#auth-status")).toHaveText(
+    "Callback de login recusado",
+  );
   expect(tokenCalls).toBe(1);
   expect(
     await page.evaluate((key) => ({
