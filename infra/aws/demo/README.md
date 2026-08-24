@@ -4,6 +4,19 @@ Este diretório define, sem executar `apply`, um único perfil Terraform efêmer
 para demonstrar a API e a fronteira web autenticada na AWS. A configuração é
 deliberadamente single-AZ, não cria banco e não tenta representar produção.
 
+O run `32725423445` confirmou preflight e OIDC do workflow de deploy em modo
+foundation, mas o controlador recusou a expiração JSON-string antes do Terraform.
+State e Budget permaneceram ausentes; não houve recurso gerenciado pelo perfil,
+plan remoto, `apply` ou deploy. A SEN-82 corrige esse limite e mascara account ID,
+bucket de state, certificado e role por segredos (`secrets`) do environment, sem
+executar nova tentativa live.
+
+Nos workflows, região, AZ e domínio permanecem variáveis (`vars`); account ID,
+bucket de state, certificado e a role exclusiva da operação são secrets, assim
+como o e-mail do Budget e o token de smoke. Nenhum secret alcança checkout,
+preflight ou preparação anterior à action OIDC; cada step recebe somente as
+referências necessárias.
+
 Versões fixadas:
 
 - Terraform `>= 1.15.9, < 1.16.0`;
@@ -62,8 +75,8 @@ flowchart LR
 ```
 
 A confrontação reproduzível entre esse diagrama, o plano de 75 recursos e os
-gates da SEN-68 está na
-[evidência offline da SEN-69](../../../docs/validation/aws-demo-evidence.md).
+gates da SEN-68, incluindo a evidência live parcial da SEN-82, está no
+[relatório de validação AWS](../../../docs/validation/aws-demo-evidence.md).
 
 A API da SEN-49 é um servidor Uvicorn OCI comum, com processo não privilegiado,
 porta `8000` e healthcheck HTTP. Por isso o compute é ECS Fargate: ele executa a
@@ -124,7 +137,8 @@ executar um digest ausente. Depois que a imagem real construída pelo Dockerfile
 da SEN-49 for enviada ao repositório, um plano posterior informa o digest
 `sha256:...` e muda a contagem para `1`. Publicação e automação de deploy não
 fazem parte da SEN-67; a SEN-68 acrescenta o fluxo manual protegido descrito em
-[`delivery/README.md`](delivery/README.md), ainda sem execução AWS.
+[`delivery/README.md`](delivery/README.md). Somente preflight e OIDC de deploy no
+modo foundation foram exercitados live; o Terraform ainda não foi iniciado.
 
 SQS, DLQ e `worker-contract.v1.json` definem a fronteira assíncrona mínima. Uma
 mensagem referencia uma versão imutável do objeto e seu SHA-256; o consumidor
@@ -370,7 +384,7 @@ SEN-68, o contrato OIDC/IAM, o bootstrap externo, o deploy por digest, o smoke
 condicionado à SEN-46 e o inventário pós-teardown. Plan, deploy e teardown são
 estritamente manuais, exigem o HEAD atual de `main`, SHA completo idêntico,
 environment distinto e role temporária distinta. A implementação não representa
-uma conta configurada ou uma execução AWS concluída.
+uma execução AWS concluída: o run parcial da SEN-82 parou antes do Terraform.
 
 Referências de arquitetura:
 
