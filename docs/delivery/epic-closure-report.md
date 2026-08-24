@@ -2,8 +2,9 @@
 
 - Responsável: Renan Mocelin
 - Data da consolidação: 2026-08-24
-- Baseline consultada: `origin/develop` em `5273165a28613c987c1a4411bcacddf67cc894f5`
-- Estado: consolidação da SEN-81 pronta para revisão; SEN-71 e SEN-72 posteriores
+- Baseline consultada: `origin/develop` em `32944dfabba772a7713c2c7b3d9cc3d7c6ec687c`
+- Release estável: `origin/main` em `601c26717de021bc424bf4b3e310078cee3d7186`
+- Estado: dez épicos consolidados, auditoria pública concluída e release promovida
 
 Este relatório organiza as decisões e evidências das épicas SEN-1 a SEN-10 sem
 substituir os documentos canônicos. A fonte de cada afirmação material é ligada
@@ -421,9 +422,9 @@ modo compreensível, além de operar o ciclo documental sem ocultar seus limites
 
 ### Decisões técnicas e por que foram escolhidas
 
-- A entrega integrada usa módulos ESM e JavaScript tipado por JSDoc, sem React,
-  bundler ou etapa de build. Os mesmos arquivos são verificados e executados,
-  reduzindo superfície para o recorte da demo.
+- A entrega integrada usa React 19, TypeScript estrito e Vite. Tipos derivados
+  do OpenAPI, build reproduzível e testes do bundle mantêm a interface alinhada
+  ao contrato sem duplicar modelos de request e response.
 - Contratos de análise e documentos são gerados do OpenAPI. Um `200` só vira
   laudo depois da validação estrita da variante; prescrição incompatível fica
   indisponível, não parcialmente renderizada.
@@ -449,6 +450,10 @@ diagnóstico, suporte heurístico, vizinhos, citações e disponibilidade da
 prescrição. A área documental registra somente `filename`, `media_type`,
 `size_bytes` e `sha256`, depois oferece aprovação, rejeição e reprocessamento
 conforme o estado.
+
+O assistente extrativo permanece implementado e testado na API, mas foi retirado
+da navegação final. Seu corpus público fixo comprova recuperação, citação e
+abstenção; não representa consulta aos documentos privados do desafio.
 
 **Testado:** contrato, decoder, importação, proxy, apresentação e falhas têm
 testes Node; o browser-test cobre modo offline sem chamadas, cinco outcomes,
@@ -478,7 +483,7 @@ foi validada em AWS live.
 ### Riscos e limites
 
 O modo offline não executa decisões documentais e só reproduz fixtures exatas.
-O cadastro não envia PDF nem prova conteúdo. Não há conversa livre, histórico
+O cadastro não envia PDF nem prova conteúdo. Não há conversa multi-turno, histórico
 completo de análises ou autenticação nos perfis local/offline. A autenticação do
 perfil AWS está implementada e testada offline, mas não validada live. A
 comparação visual de features é descritiva e não prova causa ou gravidade.
@@ -541,8 +546,8 @@ concorrência, throughput, RSS, GPU, rede ou provider pago.
 
 Fakes comprovam contrato e controle de fluxo, não qualidade semântica ou
 desempenho industrial. Cobertura de testes não substitui nova janela temporal
-nem revisão humana. A auditoria pública final, posterior ao frontend e aos
-documentos de entrega, permanece na SEN-71 e está pendente nesta rodada.
+nem revisão humana. A auditoria pública final foi integrada antes da release;
+ela comprova a fronteira pública, não a qualidade industrial do resultado.
 
 ### Explicação curta para a banca
 
@@ -597,9 +602,11 @@ os checks finais do PR #58 ficaram aprovados.
 para uma janela hipotética de oito horas. É cálculo por preços e hipóteses,
 não cobrança, gasto observado ou garantia de teto.
 
-Nenhuma execução AWS live — `apply`, deploy, publicação, smoke remoto, URL,
-medição de billing ou remoção — foi comprovada por esta baseline. Os workflows
-versionados são capacidade operacional protegida, não evidência de execução.
+Uma execução AWS live alcançou criação parcial de recursos da fundação e parou
+por permissões EC2 ausentes no contrato. A correção foi integrada e validada
+offline, mas não houve nova tentativa: deploy, publicação, smoke remoto, URL e
+remoção final não foram comprovados. Os workflows versionados são capacidade
+operacional protegida, não evidência de operação concluída.
 
 ### Riscos e limites
 
@@ -667,21 +674,16 @@ sequencial foi 413,535 s, ou 06:53,535, sem cortes. Essa medição avalia o
 artefato: não foi uma fala de Renan e não mede perguntas ou interrupções da
 banca.
 
-**Pendente após esta entrega:** SEN-71 (auditoria pública final em clean-room) e
-SEN-72 (promoção estável) permanecem etapas posteriores da SEN-10. Até sua
-execução, não existe release nem evidência pós-release a alegar.
-
-**Pós-release:** somente depois da SEN-72 será possível verificar a árvore
-pública promovida, congelar o commit final de apresentação e registrar qualquer
-evidência que dependa de `main`. Esses resultados não existem nesta baseline.
+**Concluído após a SEN-70:** a auditoria pública final foi integrada pelo
+commit `2d762e0` e a promoção estável foi concluída. A release final está em
+`main` no commit `601c26717de021bc424bf4b3e310078cee3d7186`, após os checks de
+CI, segurança e política de promoção.
 
 ### Riscos e limites
 
-Documentação pode ficar defasada quando uma tarefa paralela integra depois da
-fotografia usada. A auditoria SEN-71 permanece o gate final para links, segredos,
-materiais proibidos, autoria, comandos e árvore limpa; a SEN-72 continua sendo a
-promoção estável posterior. O relatório não substitui a execução das evidências
-citadas.
+Documentação pode ficar defasada quando uma mudança integra depois da fotografia
+usada. O relatório não substitui a execução das evidências citadas, e a ausência
+de deploy AWS concluído deve continuar explícita na apresentação.
 
 ### Explicação curta para a banca
 
