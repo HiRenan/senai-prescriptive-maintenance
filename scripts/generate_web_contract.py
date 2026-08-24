@@ -1,4 +1,4 @@
-"""Render or verify the web analysis contract derived from OpenAPI v1."""
+"""Render or verify the web contract modules derived from OpenAPI v1."""
 
 from __future__ import annotations
 
@@ -14,8 +14,26 @@ OPENAPI_SNAPSHOT: Final = REPOSITORY_ROOT / "apps" / "api" / "openapi" / "v1.jso
 GENERATED_ROOT: Final = REPOSITORY_ROOT / "apps" / "web" / "src" / "generated"
 RUNTIME_MODULE: Final = GENERATED_ROOT / "analysis-contract.js"
 TYPES_MODULE: Final = GENERATED_ROOT / "analysis-contract.d.ts"
+DOCUMENT_RUNTIME_MODULE: Final = GENERATED_ROOT / "document-contract.js"
+DOCUMENT_TYPES_MODULE: Final = GENERATED_ROOT / "document-contract.d.ts"
 
 ANALYSIS_PATH: Final = "/analysis"
+DOCUMENT_COLLECTION_PATH: Final = "/documents"
+DOCUMENT_ITEM_PATH: Final = "/documents/{document_id}"
+DOCUMENT_ID_PARAMETER: Final = "document_id"
+# The six documental operations the panel is allowed to reach, in the order the
+# interface uses them. Every route, method, status and schema below is read from
+# the snapshot; nothing here is a second copy of the contract.
+DOCUMENT_OPERATION_KEYS: Final = (
+    (DOCUMENT_COLLECTION_PATH, "get"),
+    (DOCUMENT_COLLECTION_PATH, "post"),
+    (DOCUMENT_ITEM_PATH, "get"),
+    (f"{DOCUMENT_ITEM_PATH}/approve", "post"),
+    (f"{DOCUMENT_ITEM_PATH}/reject", "post"),
+    (f"{DOCUMENT_ITEM_PATH}/reprocess", "post"),
+)
+DOCUMENT_UNION_SCHEMA: Final = "DocumentResponse"
+DOCUMENT_LIST_SCHEMA: Final = "DocumentListResponse"
 SCHEMA_PREFIX: Final = "#/components/schemas/"
 BANNER: Final = (
     "// Generated from apps/api/openapi/v1.json by "
@@ -79,7 +97,7 @@ def _schema_name(reference: str) -> str:
 
 
 class Contract:
-    """Read-only accessor over the schemas reachable from ``POST /analysis``."""
+    """Read-only accessor over the schemas reachable from the v1 operations."""
 
     def __init__(self, document: Mapping[str, object]) -> None:
         components = _mapping(
@@ -92,14 +110,13 @@ class Contract:
         )
         info = _mapping(_entry(document, "info", "O documento"), "info")
         self.version = _text(_entry(info, "version", "info"), "info.version")
-        paths = _mapping(_entry(document, "paths", "O documento"), "paths")
-        self.operation = _mapping(
-            _entry(
-                _mapping(_entry(paths, ANALYSIS_PATH, "paths"), ANALYSIS_PATH),
-                "post",
-                ANALYSIS_PATH,
-            ),
-            f"{ANALYSIS_PATH}.post",
+        self._paths = _mapping(_entry(document, "paths", "O documento"), "paths")
+        self.operation = self.operation_at(ANALYSIS_PATH, "post")
+
+    def operation_at(self, path: str, method: str) -> Mapping[str, object]:
+        return _mapping(
+            _entry(_mapping(_entry(self._paths, path, "paths"), path), method, path),
+            f"{path}.{method}",
         )
 
     def schema(self, name: str) -> Mapping[str, object]:
@@ -127,20 +144,39 @@ class Contract:
         )
 
 
+def _json_media(node: Mapping[str, object], context: str) -> Mapping[str, object]:
+    """Read the single JSON media object the contract publishes for a body."""
+    content = _mapping(_entry(node, "content", context), f"{context}.content")
+    return _mapping(
+        _entry(content, "application/json", f"{context}.content"),
+        f"{context}.content.application/json",
+    )
+
+
 def _request_schema_name(contract: Contract) -> str:
     body = _mapping(
         _entry(contract.operation, "requestBody", f"{ANALYSIS_PATH}.post"),
         "requestBody",
     )
-    content = _mapping(_entry(body, "content", "requestBody"), "requestBody.content")
-    media = _mapping(
-        _entry(content, "application/json", "requestBody.content"),
-        "requestBody.content.application/json",
-    )
+    media = _json_media(body, "requestBody")
     return contract.resolve(
         _mapping(_entry(media, "schema", "requestBody media"), "requestBody schema"),
         "requestBody schema",
     )
+
+
+def _named_examples(
+    media: Mapping[str, object],
+    context: str,
+) -> tuple[tuple[str, str, object], ...]:
+    """Read the named examples of one media object, in snapshot order."""
+    examples = _mapping(_entry(media, "examples", context), f"{context} examples")
+    collected: list[tuple[str, str, object]] = []
+    for name, raw in examples.items():
+        example = _mapping(raw, f"exemplo {name}")
+        summary = _text(_entry(example, "summary", name), f"{name}.summary")
+        collected.append((name, summary, _entry(example, "value", name)))
+    return tuple(collected)
 
 
 def _request_examples(contract: Contract) -> tuple[tuple[str, str, object], ...]:
@@ -148,21 +184,7 @@ def _request_examples(contract: Contract) -> tuple[tuple[str, str, object], ...]
         _entry(contract.operation, "requestBody", f"{ANALYSIS_PATH}.post"),
         "requestBody",
     )
-    content = _mapping(_entry(body, "content", "requestBody"), "requestBody.content")
-    media = _mapping(
-        _entry(content, "application/json", "requestBody.content"),
-        "requestBody.content.application/json",
-    )
-    examples = _mapping(
-        _entry(media, "examples", "requestBody media"),
-        "requestBody examples",
-    )
-    collected: list[tuple[str, str, object]] = []
-    for name, raw in examples.items():
-        example = _mapping(raw, f"exemplo {name}")
-        summary = _text(_entry(example, "summary", name), f"{name}.summary")
-        collected.append((name, summary, _entry(example, "value", name)))
-    return tuple(collected)
+    return _named_examples(_json_media(body, "requestBody"), "requestBody media")
 
 
 def _feature_fields(contract: Contract) -> tuple[Mapping[str, object], ...]:
@@ -226,45 +248,61 @@ def _top_k_bounds(contract: Contract) -> Mapping[str, int]:
     }
 
 
-def _published_statuses(contract: Contract) -> tuple[int, ...]:
+def _operation_statuses(
+    operation: Mapping[str, object],
+    context: str,
+) -> tuple[int, ...]:
     """Read every HTTP status the operation publishes, in ascending order."""
-    responses = _mapping(
-        _entry(contract.operation, "responses", f"{ANALYSIS_PATH}.post"),
-        "responses",
-    )
+    responses = _mapping(_entry(operation, "responses", context), "responses")
     statuses = sorted(int(key) for key in responses if key.isdigit())
     if not statuses:
-        raise ContractGenerationError(
-            f"{ANALYSIS_PATH}.post deveria publicar ao menos um status."
-        )
+        raise ContractGenerationError(f"{context} deveria publicar ao menos um status.")
     return tuple(statuses)
 
 
-def _success_status(contract: Contract) -> int:
+def _operation_success_status(operation: Mapping[str, object], context: str) -> int:
     """Read the single successful status the operation publishes."""
     statuses = [
-        status for status in _published_statuses(contract) if 200 <= status < 300
+        status
+        for status in _operation_statuses(operation, context)
+        if 200 <= status < 300
     ]
     if len(statuses) != 1:
         raise ContractGenerationError(
-            f"{ANALYSIS_PATH}.post deveria publicar exatamente um status de sucesso."
+            f"{context} deveria publicar exatamente um status de sucesso."
         )
     return statuses[0]
 
 
+def _operation_success_schema(
+    operation: Mapping[str, object],
+    context: str,
+) -> Mapping[str, object]:
+    """Read the schema node the operation publishes under its success status."""
+    status = _operation_success_status(operation, context)
+    responses = _mapping(_entry(operation, "responses", context), "responses")
+    success = _mapping(
+        _entry(responses, str(status), "responses"),
+        f"responses.{status}",
+    )
+    media = _json_media(success, f"responses.{status}")
+    return _mapping(
+        _entry(media, "schema", f"{status} media"),
+        f"{status} schema",
+    )
+
+
+def _published_statuses(contract: Contract) -> tuple[int, ...]:
+    return _operation_statuses(contract.operation, f"{ANALYSIS_PATH}.post")
+
+
+def _success_status(contract: Contract) -> int:
+    return _operation_success_status(contract.operation, f"{ANALYSIS_PATH}.post")
+
+
 def _response_schema_name(contract: Contract) -> str:
-    responses = _mapping(
-        _entry(contract.operation, "responses", f"{ANALYSIS_PATH}.post"),
-        "responses",
-    )
-    success = _mapping(_entry(responses, "200", "responses"), "responses.200")
-    content = _mapping(_entry(success, "content", "responses.200"), "200.content")
-    media = _mapping(
-        _entry(content, "application/json", "200.content"),
-        "200.content.application/json",
-    )
     return contract.resolve(
-        _mapping(_entry(media, "schema", "200 media"), "200 schema"),
+        _operation_success_schema(contract.operation, f"{ANALYSIS_PATH}.post"),
         "200 schema",
     )
 
@@ -433,9 +471,26 @@ def _schema_node(
     pending: list[str],
 ) -> Mapping[str, object]:
     """Translate one property schema into a node the decoder can walk."""
+    for keyword in ("anyOf", "oneOf"):
+        if keyword in node:
+            options = _sequence(node[keyword], f"{context}.{keyword}")
+            return {
+                "kind": "union",
+                "options": [
+                    _schema_node(
+                        contract,
+                        _mapping(option, f"{context}.{keyword}"),
+                        f"{context}.{keyword}",
+                        pending,
+                    )
+                    for option in options
+                ],
+            }
     if "$ref" in node:
         name = contract.resolve(node, context)
         target = contract.schema(name)
+        if "oneOf" in target or "anyOf" in target:
+            return _schema_node(contract, target, name, pending)
         if "enum" in target:
             values = _sequence(target["enum"], f"{name}.enum")
             return {
@@ -473,11 +528,18 @@ def _schema_node(
     raise ContractGenerationError(f"{context} usa um tipo não suportado: {declared}.")
 
 
-def _response_schemas(
+def _object_schema_table(
     contract: Contract,
+    pending: list[str],
+    *,
+    total: bool,
 ) -> tuple[tuple[str, Mapping[str, object]], ...]:
-    """Collect every object schema a `200` body can contain, in closed form."""
-    pending = [str(row["schema"]) for row in _outcome_rows(contract)]
+    """Collect every object schema reachable from ``pending``, in closed form.
+
+    ``total`` demands that a schema require exactly what it declares, which is
+    what every response variant does. Request bodies may publish an optional
+    member, so they are collected without that demand and stay closed anyway.
+    """
     seen: dict[str, Mapping[str, object]] = {}
     while pending:
         name = pending.pop(0)
@@ -494,11 +556,16 @@ def _response_schemas(
         )
         required = [
             _text(entry, f"{name}.required")
-            for entry in _sequence(_entry(schema, "required", name), f"{name}.required")
+            for entry in _sequence(schema.get("required", []), f"{name}.required")
         ]
-        if sorted(required) != sorted(properties):
+        if total and sorted(required) != sorted(properties):
             raise ContractGenerationError(
                 f"{name} precisa exigir exatamente as propriedades declaradas."
+            )
+        unknown = sorted(set(required) - set(properties))
+        if unknown:
+            raise ContractGenerationError(
+                f"{name} exige propriedade não declarada: {unknown[0]}."
             )
         seen[name] = {
             "required": required,
@@ -515,16 +582,43 @@ def _response_schemas(
     return tuple(seen.items())
 
 
+def _response_schemas(
+    contract: Contract,
+) -> tuple[tuple[str, Mapping[str, object]], ...]:
+    """Collect every object schema a `200` body can contain, in closed form."""
+    pending = [str(row["schema"]) for row in _outcome_rows(contract)]
+    return _object_schema_table(contract, pending, total=True)
+
+
+# Node members that hold nested nodes instead of plain literals. They are
+# rendered after the literal members so an array keeps the shape the analysis
+# contract already publishes.
+NESTED_NODE_KEYS: Final = ("items", "options")
+
+
 def _render_node(node: Mapping[str, object], indent: str) -> str:
     entries = [
-        f"{key}: {_literal(value)}" for key, value in node.items() if key != "items"
+        f"{key}: {_literal(value)}"
+        for key, value in node.items()
+        if key not in NESTED_NODE_KEYS
     ]
     if "items" in node:
         items = _mapping(node["items"], "items")
         entries.append(f"items: {_render_node(items, indent + '  ')}")
+    if "options" in node:
+        options = [
+            _render_node(_mapping(option, "options"), indent + "    ")
+            for option in _sequence(node["options"], "options")
+        ]
+        inline = ", ".join(options)
+        if len(indent) + len(inline) <= 66 and "\n" not in inline:
+            entries.append(f"options: Object.freeze([{inline}])")
+        else:
+            body = "".join(f"{indent}    {option},\n" for option in options)
+            entries.append(f"options: Object.freeze([\n{body}{indent}  ])")
     joined = ", ".join(entries)
     inline = f"Object.freeze({{ {joined} }})"
-    if len(indent) + len(inline) <= 78:
+    if len(indent) + len(inline) <= 78 and "\n" not in inline:
         return inline
     body = "".join(f"{indent}  {entry},\n" for entry in entries)
     return f"Object.freeze({{\n{body}{indent}}})"
@@ -637,12 +731,13 @@ def _render_runtime(contract: Contract) -> str:
 def _type_expression(node: Mapping[str, object], context: str) -> str:
     if "$ref" in node:
         return _schema_name(_text(node["$ref"], f"{context}.$ref"))
-    if "oneOf" in node:
-        variants = _sequence(node["oneOf"], f"{context}.oneOf")
-        return " | ".join(
-            _type_expression(_mapping(variant, context), context)
-            for variant in variants
-        )
+    for keyword in ("oneOf", "anyOf"):
+        if keyword in node:
+            variants = _sequence(node[keyword], f"{context}.{keyword}")
+            return " | ".join(
+                _type_expression(_mapping(variant, context), context)
+                for variant in variants
+            )
     if "const" in node:
         return _literal(node["const"])
     if "enum" in node:
@@ -659,7 +754,10 @@ def _type_expression(node: Mapping[str, object], context: str) -> str:
         return "string"
     if declared == "array":
         items = _mapping(_entry(node, "items", context), f"{context}.items")
-        return f"readonly {_type_expression(items, f'{context}.items')}[]"
+        expression = _type_expression(items, f"{context}.items")
+        if " | " in expression:
+            expression = f"({expression})"
+        return f"readonly {expression}[]"
     if declared == "object":
         return "Readonly<Record<string, unknown>>"
     raise ContractGenerationError(f"{context} usa um tipo não suportado.")
@@ -824,6 +922,437 @@ def _render_types(contract: Contract) -> str:
     return "\n".join(blocks)
 
 
+def _document_variants(contract: Contract) -> tuple[Mapping[str, object], ...]:
+    """Read the seven lifecycle states from the discriminated document union."""
+    union = contract.schema(DOCUMENT_UNION_SCHEMA)
+    variants = _sequence(
+        _entry(union, "oneOf", DOCUMENT_UNION_SCHEMA),
+        f"{DOCUMENT_UNION_SCHEMA}.oneOf",
+    )
+    rows: list[Mapping[str, object]] = []
+    for variant in variants:
+        name = contract.resolve(_mapping(variant, "oneOf item"), "oneOf item")
+        note = contract.property_schema(name, "decision_note")
+        failure = contract.property_schema(name, "failure")
+        superseded = contract.property_schema(name, "superseded_by_document_id")
+        rows.append(
+            {
+                "status": _const_of(contract, name, "status"),
+                "schema": name,
+                "hasDecisionNote": not _is_null_schema(note),
+                # Only the rejected state publishes the note as a plain string;
+                # the approved one publishes it as optional.
+                "requiresDecisionNote": note.get("type") == "string",
+                "hasFailure": not _is_null_schema(failure),
+                "supersedes": not _is_null_schema(superseded),
+            }
+        )
+    return tuple(rows)
+
+
+def _document_id_pattern(contract: Contract) -> str:
+    """Read the frozen public document identifier pattern from the union."""
+    patterns = {
+        _string_pattern(
+            contract.property_schema(str(row["schema"]), "document_id"),
+            f"{row['schema']}.document_id",
+        )
+        for row in _document_variants(contract)
+    }
+    if len(patterns) != 1:
+        raise ContractGenerationError(
+            "As variantes documentais divergem no padrão de document_id."
+        )
+    pattern = patterns.pop()
+    if pattern is None:
+        raise ContractGenerationError("document_id deveria publicar um padrão.")
+    return pattern
+
+
+def _path_parameters(
+    contract: Contract,
+    operation: Mapping[str, object],
+    path: str,
+    context: str,
+) -> tuple[str, ...]:
+    """Read the path parameters, refusing any the panel cannot validate."""
+    declared: list[str] = []
+    for entry in _sequence(operation.get("parameters", []), f"{context}.parameters"):
+        parameter = _mapping(entry, f"{context}.parameters")
+        if _text(_entry(parameter, "in", context), f"{context}.in") != "path":
+            raise ContractGenerationError(f"{context} usa parâmetro fora do caminho.")
+        name = _text(_entry(parameter, "name", context), f"{context}.name")
+        if name != DOCUMENT_ID_PARAMETER:
+            raise ContractGenerationError(f"{context} declara o parâmetro '{name}'.")
+        schema = _mapping(_entry(parameter, "schema", context), f"{context}.schema")
+        if _string_pattern(schema, f"{context}.{name}") != _document_id_pattern(
+            contract
+        ):
+            raise ContractGenerationError(
+                f"{context}.{name} diverge do padrão publicado de document_id."
+            )
+        declared.append(name)
+    expected = [
+        segment[1:-1]
+        for segment in path.split("/")
+        if segment.startswith("{") and segment.endswith("}")
+    ]
+    if declared != expected:
+        raise ContractGenerationError(
+            f"{context} não declara exatamente os parâmetros de {path}."
+        )
+    return tuple(declared)
+
+
+def _document_operations(
+    contract: Contract,
+    pending: list[str],
+) -> tuple[Mapping[str, object], ...]:
+    """Read the six documental operations the panel is allowed to reach."""
+    rows: list[Mapping[str, object]] = []
+    for path, method in DOCUMENT_OPERATION_KEYS:
+        context = f"{path}.{method}"
+        operation = contract.operation_at(path, method)
+        body = operation.get("requestBody")
+        request = None
+        if body is not None:
+            declared = _mapping(body, f"{context}.requestBody")
+            if declared.get("required") is not True:
+                raise ContractGenerationError(f"{context} publica corpo opcional.")
+            media = _json_media(declared, f"{context}.requestBody")
+            request = contract.resolve(
+                _mapping(_entry(media, "schema", context), f"{context} request schema"),
+                f"{context} request schema",
+            )
+            pending.append(request)
+        rows.append(
+            {
+                "operationId": _text(
+                    _entry(operation, "operationId", context),
+                    f"{context}.operationId",
+                ),
+                "method": method.upper(),
+                "path": path,
+                "parameters": list(
+                    _path_parameters(contract, operation, path, context)
+                ),
+                "requestSchema": request,
+                "successStatus": _operation_success_status(operation, context),
+                "statuses": list(_operation_statuses(operation, context)),
+                "success": _schema_node(
+                    contract,
+                    _operation_success_schema(operation, context),
+                    f"{context} success schema",
+                    pending,
+                ),
+            }
+        )
+    return tuple(rows)
+
+
+def _request_fields(
+    contract: Contract,
+    schema_name: str,
+    pending: list[str],
+) -> tuple[Mapping[str, object], ...]:
+    """Read one request body as ordered fields the console can build and check."""
+    schema = contract.schema(schema_name)
+    properties = _mapping(
+        _entry(schema, "properties", schema_name),
+        f"{schema_name}.properties",
+    )
+    required = frozenset(
+        _text(entry, f"{schema_name}.required")
+        for entry in _sequence(schema.get("required", []), f"{schema_name}.required")
+    )
+    fields: list[Mapping[str, object]] = []
+    for name, value in properties.items():
+        node = _mapping(value, f"{schema_name}.properties.{name}")
+        fields.append(
+            {
+                "name": name,
+                "title": _text(_entry(node, "title", name), f"{name}.title"),
+                "required": name in required,
+                "node": _schema_node(
+                    contract,
+                    node,
+                    f"{schema_name}.properties.{name}",
+                    pending,
+                ),
+            }
+        )
+    return tuple(fields)
+
+
+def _document_examples(contract: Contract) -> tuple[tuple[str, str, object], ...]:
+    """Read the synthetic lifecycle examples, ordered by the published union.
+
+    Only the item examples are consumed: each one carries every member its
+    variant requires, so the fixtures the panel ships are decodable by the same
+    rules the client applies to a live answer.
+    """
+    operation = contract.operation_at(DOCUMENT_ITEM_PATH, "get")
+    context = f"{DOCUMENT_ITEM_PATH}.get"
+    media = _json_media(
+        _mapping(
+            _entry(
+                _mapping(_entry(operation, "responses", context), "responses"),
+                str(_operation_success_status(operation, context)),
+                "responses",
+            ),
+            "responses success",
+        ),
+        "responses success",
+    )
+    examples = {
+        name: (summary, value)
+        for name, summary, value in _named_examples(media, context)
+    }
+    order = [str(row["status"]) for row in _document_variants(contract)]
+    if sorted(examples) != sorted(order):
+        raise ContractGenerationError(
+            "Os exemplos documentais não cobrem exatamente os estados publicados."
+        )
+    collected: list[tuple[str, str, object]] = []
+    for status in order:
+        summary, value = examples[status]
+        collected.append((status, summary, value))
+    return tuple(collected)
+
+
+def _render_document_runtime(contract: Contract) -> str:
+    pending: list[str] = []
+    operations = _document_operations(contract, pending)
+    register = _request_fields(contract, "RegisterDocumentRequest", pending)
+    approve = _request_fields(contract, "ApproveDocumentRequest", pending)
+    reject = _request_fields(contract, "RejectDocumentRequest", pending)
+    pending.append("ErrorResponse")
+    schemas = _object_schema_table(contract, pending, total=False)
+    list_schema = contract.schema(DOCUMENT_LIST_SCHEMA)
+    list_members = [
+        _text(entry, f"{DOCUMENT_LIST_SCHEMA}.required")
+        for entry in _sequence(
+            _entry(list_schema, "required", DOCUMENT_LIST_SCHEMA),
+            f"{DOCUMENT_LIST_SCHEMA}.required",
+        )
+    ]
+    if len(list_members) != 1:
+        raise ContractGenerationError(
+            f"{DOCUMENT_LIST_SCHEMA} deveria exigir exatamente um membro."
+        )
+
+    lines = [
+        BANNER.rstrip(),
+        "",
+        f"export const DOCUMENT_CONTRACT_VERSION = {_literal(contract.version)};",
+        "",
+        "export const DOCUMENT_ID_PATTERN = "
+        f"{_literal(_document_id_pattern(contract))};",
+        "",
+        f"export const DOCUMENT_LIST_PROPERTY = {_literal(list_members[0])};",
+        "",
+    ]
+    statuses = ", ".join(
+        _literal(row["status"]) for row in _document_variants(contract)
+    )
+    lines.append(f"export const DOCUMENT_STATUSES = Object.freeze([{statuses}]);")
+    lines.append("")
+    lines.append("export const DOCUMENT_VARIANTS = Object.freeze([")
+    for row in _document_variants(contract):
+        lines.append("  Object.freeze({")
+        lines.append(f"    status: {_literal(row['status'])},")
+        lines.append(f"    schema: {_literal(row['schema'])},")
+        lines.append(f"    hasDecisionNote: {_literal(row['hasDecisionNote'])},")
+        lines.append(
+            f"    requiresDecisionNote: {_literal(row['requiresDecisionNote'])},"
+        )
+        lines.append(f"    hasFailure: {_literal(row['hasFailure'])},")
+        lines.append(f"    supersedes: {_literal(row['supersedes'])},")
+        lines.append("  }),")
+    lines.append("]);")
+    lines.append("")
+    lines.append("export const DOCUMENT_OPERATIONS = Object.freeze({")
+    for row in operations:
+        parameters = ", ".join(
+            _literal(name) for name in _sequence(row["parameters"], "parameters")
+        )
+        published = ", ".join(
+            _literal(status) for status in _sequence(row["statuses"], "statuses")
+        )
+        lines.append(f"  {row['operationId']}: Object.freeze({{")
+        lines.append(f"    operationId: {_literal(row['operationId'])},")
+        lines.append(f"    method: {_literal(row['method'])},")
+        lines.append(f"    path: {_literal(row['path'])},")
+        lines.append(f"    parameters: Object.freeze([{parameters}]),")
+        lines.append(f"    requestSchema: {_literal(row['requestSchema'])},")
+        lines.append(f"    successStatus: {_literal(row['successStatus'])},")
+        lines.append(f"    statuses: Object.freeze([{published}]),")
+        rendered = _render_node(_mapping(row["success"], "success"), "    ")
+        lines.append(f"    success: {rendered},")
+        lines.append("  }),")
+    lines.append("});")
+    lines.append("")
+    for constant, fields in (
+        ("REGISTER_FIELDS", register),
+        ("APPROVE_FIELDS", approve),
+        ("REJECT_FIELDS", reject),
+    ):
+        lines.append(f"export const {constant} = Object.freeze([")
+        for field in fields:
+            lines.append("  Object.freeze({")
+            lines.append(f"    name: {_literal(field['name'])},")
+            lines.append(f"    title: {_literal(field['title'])},")
+            lines.append(f"    required: {_literal(field['required'])},")
+            rendered = _render_node(_mapping(field["node"], "node"), "    ")
+            lines.append(f"    node: {rendered},")
+            lines.append("  }),")
+        lines.append("]);")
+        lines.append("")
+    lines.append("export const DOCUMENT_SCHEMAS = Object.freeze({")
+    for name, schema in schemas:
+        required = _sequence(schema["required"], f"{name}.required")
+        properties = _mapping(schema["properties"], f"{name}.properties")
+        lines.append(f"  {name}: Object.freeze({{")
+        lines.append("    required: Object.freeze([")
+        for entry in required:
+            lines.append(f"      {_literal(entry)},")
+        lines.append("    ]),")
+        lines.append("    properties: Object.freeze({")
+        for key, node in properties.items():
+            rendered = _render_node(
+                _mapping(node, f"{name}.properties.{key}"),
+                "      ",
+            )
+            lines.append(f"      {key}: {rendered},")
+        lines.append("    }),")
+        lines.append("  }),")
+    lines.append("});")
+    lines.append("")
+    lines.append("export const SYNTHETIC_DOCUMENT_EXAMPLES = Object.freeze([")
+    for name, summary, value in _document_examples(contract):
+        lines.append("  Object.freeze({")
+        lines.append(f"    name: {_literal(name)},")
+        lines.append(f"    summary: {_literal(summary)},")
+        lines.append(f"    document: {_block_literal(value, '    ')},")
+        lines.append("  }),")
+    lines.append("]);")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_document_types(contract: Contract) -> str:
+    pending: list[str] = []
+    operations = _document_operations(contract, pending)
+    roots = (
+        "RegisterDocumentRequest",
+        "ApproveDocumentRequest",
+        "RejectDocumentRequest",
+        DOCUMENT_UNION_SCHEMA,
+        DOCUMENT_LIST_SCHEMA,
+        "ErrorResponse",
+    )
+    blocks = [BANNER]
+    for name in _collect_schema_names(contract, roots):
+        blocks.append(_render_declaration(contract, name))
+    blocks.append(f'export type DocumentStatus = {DOCUMENT_UNION_SCHEMA}["status"];\n')
+    blocks.append(
+        "export interface DocumentVariant {\n"
+        "  readonly status: DocumentStatus;\n"
+        "  readonly schema: string;\n"
+        "  readonly hasDecisionNote: boolean;\n"
+        "  readonly requiresDecisionNote: boolean;\n"
+        "  readonly hasFailure: boolean;\n"
+        "  readonly supersedes: boolean;\n"
+        "}\n"
+    )
+    blocks.append(
+        "export type SchemaNode =\n"
+        '  | { readonly kind: "null" }\n'
+        '  | { readonly kind: "const"; readonly value: string }\n'
+        "  | {\n"
+        '      readonly kind: "string";\n'
+        "      readonly minLength: number | null;\n"
+        "      readonly maxLength: number | null;\n"
+        "      readonly pattern: string | null;\n"
+        "    }\n"
+        "  | {\n"
+        '      readonly kind: "integer" | "number";\n'
+        "      readonly minimum: number | null;\n"
+        "      readonly maximum: number | null;\n"
+        "    }\n"
+        "  | {\n"
+        '      readonly kind: "array";\n'
+        "      readonly items: SchemaNode;\n"
+        "      readonly minItems: number | null;\n"
+        "      readonly maxItems: number | null;\n"
+        "    }\n"
+        '  | { readonly kind: "enum"; readonly values: readonly string[] }\n'
+        '  | { readonly kind: "object"; readonly schema: string }\n'
+        '  | { readonly kind: "union"; readonly options: readonly SchemaNode[] };\n'
+    )
+    blocks.append(
+        "export interface ObjectSchema {\n"
+        "  readonly required: readonly string[];\n"
+        "  readonly properties: Readonly<Record<string, SchemaNode>>;\n"
+        "}\n"
+    )
+    blocks.append(
+        "export interface DocumentOperation {\n"
+        "  readonly operationId: string;\n"
+        '  readonly method: "GET" | "POST";\n'
+        "  readonly path: string;\n"
+        "  readonly parameters: readonly string[];\n"
+        "  readonly requestSchema: string | null;\n"
+        "  readonly successStatus: number;\n"
+        "  readonly statuses: readonly number[];\n"
+        "  readonly success: SchemaNode;\n"
+        "}\n"
+    )
+    members = "".join(
+        f"  readonly {row['operationId']}: DocumentOperation;\n" for row in operations
+    )
+    blocks.append(f"export interface DocumentOperations {{\n{members}}}\n")
+    blocks.append(
+        "export interface DocumentRequestField {\n"
+        "  readonly name: string;\n"
+        "  readonly title: string;\n"
+        "  readonly required: boolean;\n"
+        "  readonly node: SchemaNode;\n"
+        "}\n"
+    )
+    blocks.append(
+        "export interface SyntheticDocumentExample {\n"
+        "  readonly name: DocumentStatus;\n"
+        "  readonly summary: string;\n"
+        f"  readonly document: {DOCUMENT_UNION_SCHEMA};\n"
+        "}\n"
+    )
+    blocks.append("export declare const DOCUMENT_CONTRACT_VERSION: string;\n")
+    blocks.append("export declare const DOCUMENT_ID_PATTERN: string;\n")
+    blocks.append("export declare const DOCUMENT_LIST_PROPERTY: string;\n")
+    blocks.append(
+        "export declare const DOCUMENT_STATUSES: readonly DocumentStatus[];\n"
+    )
+    blocks.append(
+        "export declare const DOCUMENT_VARIANTS: readonly DocumentVariant[];\n"
+    )
+    blocks.append("export declare const DOCUMENT_OPERATIONS: DocumentOperations;\n")
+    for constant in ("REGISTER_FIELDS", "APPROVE_FIELDS", "REJECT_FIELDS"):
+        blocks.append(
+            f"export declare const {constant}: readonly DocumentRequestField[];\n"
+        )
+    blocks.append(
+        "export declare const DOCUMENT_SCHEMAS: Readonly<\n"
+        "  Record<string, ObjectSchema>\n"
+        ">;\n"
+    )
+    blocks.append(
+        "export declare const SYNTHETIC_DOCUMENT_EXAMPLES: readonly "
+        "SyntheticDocumentExample[];\n"
+    )
+    return "\n".join(blocks)
+
+
 def _rendered_modules() -> tuple[tuple[Path, bytes], ...]:
     document = _mapping(
         json.loads(OPENAPI_SNAPSHOT.read_text(encoding="utf-8")),
@@ -833,6 +1362,8 @@ def _rendered_modules() -> tuple[tuple[Path, bytes], ...]:
     return (
         (RUNTIME_MODULE, _render_runtime(contract).encode("utf-8")),
         (TYPES_MODULE, _render_types(contract).encode("utf-8")),
+        (DOCUMENT_RUNTIME_MODULE, _render_document_runtime(contract).encode("utf-8")),
+        (DOCUMENT_TYPES_MODULE, _render_document_types(contract).encode("utf-8")),
     )
 
 

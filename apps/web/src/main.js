@@ -2,12 +2,15 @@ import {
   API_CONTRACT_VERSION,
   SYNTHETIC_ANALYSIS_EXAMPLES,
 } from "./generated/analysis-contract.js";
+import { DOCUMENT_CONTRACT_VERSION } from "./generated/document-contract.js";
 import { createAnalysisClient } from "./api/analysis-client.js";
 import { buildAnalysisRequest, requestToConsoleValues } from "./core/features.js";
 import { checkImportSize, importAnalysisRequest } from "./core/request-import.js";
 import { presentAnalysis, presentFailure } from "./core/presentation.js";
 import { createConsoleView } from "./ui/console-view.js";
+import { createDocumentsPanel } from "./ui/documents-view.js";
 import { createReportView } from "./ui/report-view.js";
+import { startWorkspaceNavigation } from "./ui/workspace-navigation.js";
 import { clear, el, requireElement } from "./ui/dom.js";
 
 /**
@@ -60,6 +63,8 @@ export function startDashboard() {
   const importFile = requireElement("import-file");
   const form = requireElement("analysis-form");
   const contractLabel = requireElement("contract-version");
+  const documentContractLabel = requireElement("document-contract-version");
+  const documentsRoot = requireElement("documents-panel");
 
   if (
     !(exampleSelect instanceof HTMLSelectElement) ||
@@ -71,16 +76,20 @@ export function startDashboard() {
   }
 
   contractLabel.textContent = `v${API_CONTRACT_VERSION}`;
+  documentContractLabel.textContent = `v${DOCUMENT_CONTRACT_VERSION}`;
+  startWorkspaceNavigation();
 
   const consoleView = createConsoleView(consoleRoot);
   const reportView = createReportView(reportRoot);
   const client = createAnalysisClient();
+  const documentsPanel = createDocumentsPanel(documentsRoot);
 
   for (const example of SYNTHETIC_ANALYSIS_EXAMPLES) {
     exampleSelect.append(el("option", { value: example.name }, [example.summary]));
   }
 
   reportView.showIdle();
+  void documentsPanel.start();
 
   /**
    * @param {string} message

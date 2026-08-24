@@ -9,6 +9,7 @@ import {
   ANALYSIS_SUCCESS_STATUS,
   RESPONSE_SCHEMAS,
 } from "../generated/analysis-contract.js";
+import { createSchemaMatcher, isRecord, readErrorEnvelope } from "../core/contract-decode.js";
 
 /**
  * @typedef {object} AnalysisFailure
@@ -38,131 +39,7 @@ function failure(kind, status, detail, issues = []) {
   return { ok: false, failure: { kind, status, detail, issues } };
 }
 
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Read the contract error envelope without trusting its shape.
- *
- * @param {unknown} body
- * @returns {{ detail: string | null, issues: readonly ValidationIssue[] }}
- */
-function readErrorEnvelope(body) {
-  if (!isRecord(body) || !isRecord(body.error)) {
-    return { detail: null, issues: [] };
-  }
-  const error = body.error;
-  const detail = typeof error.message === "string" ? error.message : null;
-  const rawIssues = Array.isArray(error.issues) ? error.issues : [];
-  const issues = rawIssues.flatMap((entry) => {
-    if (!isRecord(entry)) {
-      return [];
-    }
-    const field = entry.field;
-    const code = entry.code;
-    if (typeof field !== "string" || typeof code !== "string") {
-      return [];
-    }
-    return [{ field, code }];
-  });
-  return { detail, issues: Object.freeze(issues) };
-}
-
-/** @type {Map<string, RegExp>} */
-const patterns = new Map();
-
-/**
- * The generator only publishes anchored patterns from a subset both engines
- * read the same way, so the contract text is applied as written.
- *
- * @param {string} value
- * @param {string} pattern
- * @returns {boolean}
- */
-function matchesPattern(value, pattern) {
-  let expression = patterns.get(pattern);
-  if (expression === undefined) {
-    expression = new RegExp(pattern);
-    patterns.set(pattern, expression);
-  }
-  return expression.test(value);
-}
-
-/**
- * Check one value against a node of the generated schema table.
- *
- * @param {unknown} value
- * @param {import("../generated/analysis-contract.js").SchemaNode} node
- * @returns {boolean}
- */
-function matchesNode(value, node) {
-  switch (node.kind) {
-    case "null":
-      return value === null;
-    case "const":
-      return value === node.value;
-    case "enum":
-      return typeof value === "string" && node.values.includes(value);
-    case "string":
-      return (
-        typeof value === "string" &&
-        (node.minLength === null || value.length >= node.minLength) &&
-        (node.maxLength === null || value.length <= node.maxLength) &&
-        (node.pattern === null || matchesPattern(value, node.pattern))
-      );
-    case "integer":
-    case "number":
-      return (
-        typeof value === "number" &&
-        Number.isFinite(value) &&
-        (node.kind === "number" || Number.isInteger(value)) &&
-        (node.minimum === null || value >= node.minimum) &&
-        (node.maximum === null || value <= node.maximum)
-      );
-    case "array":
-      return (
-        Array.isArray(value) &&
-        (node.minItems === null || value.length >= node.minItems) &&
-        (node.maxItems === null || value.length <= node.maxItems) &&
-        value.every((entry) => matchesNode(entry, node.items))
-      );
-    case "object":
-      return matchesSchema(value, node.schema);
-    default:
-      return false;
-  }
-}
-
-/**
- * Check one value against a closed object schema: every declared member must be
- * present and valid, and no other key may appear.
- *
- * @param {unknown} value
- * @param {string} name
- * @returns {boolean}
- */
-function matchesSchema(value, name) {
-  const schema = RESPONSE_SCHEMAS[name];
-  if (schema === undefined || !isRecord(value)) {
-    return false;
-  }
-  for (const key of Object.keys(value)) {
-    if (!Object.hasOwn(schema.properties, key)) {
-      return false;
-    }
-  }
-  return schema.required.every((key) => {
-    const node = schema.properties[key];
-    return (
-      node !== undefined && Object.hasOwn(value, key) && matchesNode(value[key], node)
-    );
-  });
-}
+const { matchesSchema } = createSchemaMatcher(RESPONSE_SCHEMAS);
 
 /**
  * Accept a success body only when it is exactly one of the contract results.
