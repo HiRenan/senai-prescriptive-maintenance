@@ -16,8 +16,11 @@ RUNTIME_MODULE: Final = GENERATED_ROOT / "analysis-contract.js"
 TYPES_MODULE: Final = GENERATED_ROOT / "analysis-contract.d.ts"
 DOCUMENT_RUNTIME_MODULE: Final = GENERATED_ROOT / "document-contract.js"
 DOCUMENT_TYPES_MODULE: Final = GENERATED_ROOT / "document-contract.d.ts"
+ASSISTANT_RUNTIME_MODULE: Final = GENERATED_ROOT / "assistant-contract.js"
+ASSISTANT_TYPES_MODULE: Final = GENERATED_ROOT / "assistant-contract.d.ts"
 
 ANALYSIS_PATH: Final = "/analysis"
+ASSISTANT_PATH: Final = "/assistant/query"
 DOCUMENT_COLLECTION_PATH: Final = "/documents"
 DOCUMENT_ITEM_PATH: Final = "/documents/{document_id}"
 DOCUMENT_ID_PARAMETER: Final = "document_id"
@@ -962,6 +965,234 @@ def _render_types(contract: Contract) -> str:
     return "\n".join(blocks)
 
 
+def _assistant_request_schema_name(contract: Contract) -> str:
+    operation = contract.operation_at(ASSISTANT_PATH, "post")
+    body = _mapping(
+        _entry(operation, "requestBody", f"{ASSISTANT_PATH}.post"),
+        f"{ASSISTANT_PATH}.post.requestBody",
+    )
+    media = _json_media(body, f"{ASSISTANT_PATH}.post.requestBody")
+    return contract.resolve(
+        _mapping(_entry(media, "schema", ASSISTANT_PATH), "assistant request schema"),
+        "assistant request schema",
+    )
+
+
+def _assistant_response_schema_name(contract: Contract) -> str:
+    operation = contract.operation_at(ASSISTANT_PATH, "post")
+    return contract.resolve(
+        _operation_success_schema(operation, f"{ASSISTANT_PATH}.post"),
+        "assistant success schema",
+    )
+
+
+def _assistant_variants(contract: Contract) -> tuple[Mapping[str, str], ...]:
+    union_name = _assistant_response_schema_name(contract)
+    union = contract.schema(union_name)
+    rows: list[Mapping[str, str]] = []
+    for variant in _sequence(
+        _entry(union, "oneOf", union_name),
+        f"{union_name}.oneOf",
+    ):
+        name = contract.resolve(
+            _mapping(variant, "assistant variant"),
+            "assistant variant",
+        )
+        rows.append({"status": _const_of(contract, name, "status"), "schema": name})
+    return tuple(rows)
+
+
+def _assistant_examples(
+    contract: Contract,
+) -> tuple[tuple[str, str, object, object], ...]:
+    operation = contract.operation_at(ASSISTANT_PATH, "post")
+    body = _mapping(
+        _entry(operation, "requestBody", ASSISTANT_PATH),
+        "assistant request body",
+    )
+    requests = _named_examples(
+        _json_media(body, "assistant request body"),
+        "assistant request examples",
+    )
+    responses = _mapping(_entry(operation, "responses", ASSISTANT_PATH), "responses")
+    success_status = _operation_success_status(operation, ASSISTANT_PATH)
+    success = _mapping(
+        _entry(responses, str(success_status), "assistant responses"),
+        "assistant success",
+    )
+    answers = _named_examples(
+        _json_media(success, "assistant success"),
+        "assistant response examples",
+    )
+    if tuple(item[0] for item in requests) != tuple(item[0] for item in answers):
+        raise ContractGenerationError(
+            "Os exemplos do assistente devem ter os mesmos nomes e a mesma ordem."
+        )
+    return tuple(
+        (name, summary, request, response)
+        for (name, summary, request), (_, _, response) in zip(
+            requests,
+            answers,
+            strict=True,
+        )
+    )
+
+
+def _assistant_response_schemas(
+    contract: Contract,
+) -> tuple[tuple[str, Mapping[str, object]], ...]:
+    pending = [str(row["schema"]) for row in _assistant_variants(contract)]
+    return _object_schema_table(contract, pending, total=True)
+
+
+def _render_assistant_runtime(contract: Contract) -> str:
+    operation = contract.operation_at(ASSISTANT_PATH, "post")
+    request_name = _assistant_request_schema_name(contract)
+    question = contract.property_schema(request_name, "question")
+    success_status = _operation_success_status(operation, ASSISTANT_PATH)
+    statuses = _operation_statuses(operation, ASSISTANT_PATH)
+    operation_id = _text(
+        _entry(operation, "operationId", ASSISTANT_PATH),
+        "assistant operationId",
+    )
+    question_minimum = _integer_like(
+        _entry(question, "minLength", "assistant question"),
+        "assistant question minLength",
+    )
+    question_maximum = _integer_like(
+        _entry(question, "maxLength", "assistant question"),
+        "assistant question maxLength",
+    )
+    lines = [
+        BANNER.rstrip(),
+        "",
+        f"export const ASSISTANT_CONTRACT_VERSION = {_literal(contract.version)};",
+        "",
+        "export const ASSISTANT_OPERATION = Object.freeze({",
+        f"  operationId: {_literal(operation_id)},",
+        '  method: "POST",',
+        f"  path: {_literal(ASSISTANT_PATH)},",
+        f"  successStatus: {_literal(success_status)},",
+        "  statuses: Object.freeze(["
+        + ", ".join(_literal(status) for status in statuses)
+        + "]),",
+        "});",
+        "",
+        "export const ASSISTANT_QUESTION = Object.freeze({",
+        f"  minimum: {_literal(question_minimum)},",
+        f"  maximum: {_literal(question_maximum)},",
+        "});",
+        "",
+        "export const ASSISTANT_VARIANTS = Object.freeze([",
+    ]
+    for row in _assistant_variants(contract):
+        lines.extend(
+            [
+                "  Object.freeze({",
+                f"    status: {_literal(row['status'])},",
+                f"    schema: {_literal(row['schema'])},",
+                "  }),",
+            ]
+        )
+    lines.extend(["]);", "", "export const ASSISTANT_SCHEMAS = Object.freeze({"])
+    for name, schema in _assistant_response_schemas(contract):
+        required = _sequence(schema["required"], f"{name}.required")
+        properties = _mapping(schema["properties"], f"{name}.properties")
+        lines.extend([f"  {name}: Object.freeze({{", "    required: Object.freeze(["])
+        for entry in required:
+            lines.append(f"      {_literal(entry)},")
+        lines.extend(["    ]),", "    properties: Object.freeze({"])
+        for key, node in properties.items():
+            rendered = _render_node(_mapping(node, f"{name}.{key}"), "      ")
+            lines.append(f"      {key}: {rendered},")
+        lines.extend(["    }),", "  }),"])
+    lines.extend(
+        [
+            "});",
+            "",
+            "export const SYNTHETIC_ASSISTANT_EXAMPLES = Object.freeze([",
+        ]
+    )
+    for name, summary, request, response in _assistant_examples(contract):
+        lines.extend(
+            [
+                "  Object.freeze({",
+                f"    name: {_literal(name)},",
+                f"    summary: {_literal(summary)},",
+                f"    request: {_block_literal(request, '    ')},",
+                f"    response: {_block_literal(response, '    ')},",
+                "  }),",
+            ]
+        )
+    lines.extend(["]);", ""])
+    return "\n".join(lines)
+
+
+def _render_assistant_types(contract: Contract) -> str:
+    roots = (
+        _assistant_request_schema_name(contract),
+        _assistant_response_schema_name(contract),
+        "ErrorResponse",
+    )
+    blocks = [BANNER]
+    for name in _collect_schema_names(contract, roots):
+        blocks.append(_render_declaration(contract, name))
+    response = _assistant_response_schema_name(contract)
+    blocks.append(f'export type AssistantStatus = {response}["status"];\n')
+    blocks.append(
+        "export type SchemaNode =\n"
+        '  | { readonly kind: "null" }\n'
+        '  | { readonly kind: "const"; readonly value: string }\n'
+        '  | { readonly kind: "string"; '
+        "readonly minLength: number | null; readonly maxLength: number | null; "
+        "readonly pattern: string | null }\n"
+        '  | { readonly kind: "integer" | "number"; '
+        "readonly minimum: number | null; readonly maximum: number | null }\n"
+        '  | { readonly kind: "array"; readonly items: SchemaNode; '
+        "readonly minItems: number | null; readonly maxItems: number | null }\n"
+        '  | { readonly kind: "enum"; readonly values: readonly string[] }\n'
+        '  | { readonly kind: "object"; readonly schema: string }\n'
+        '  | { readonly kind: "union"; readonly options: readonly SchemaNode[] };\n'
+    )
+    blocks.append(
+        "export interface ObjectSchema { readonly required: readonly string[]; "
+        "readonly properties: Readonly<Record<string, SchemaNode>>; }\n"
+    )
+    blocks.append(
+        "export interface AssistantVariant { readonly status: AssistantStatus; "
+        "readonly schema: string; }\n"
+    )
+    blocks.append(
+        "export interface AssistantOperation { readonly operationId: string; "
+        'readonly method: "POST"; readonly path: string; '
+        "readonly successStatus: number; readonly statuses: readonly number[]; }\n"
+    )
+    blocks.append(
+        "export interface SyntheticAssistantExample { "
+        "readonly name: AssistantStatus; readonly summary: string; "
+        "readonly request: AssistantQueryRequest; "
+        "readonly response: AssistantResponse; }\n"
+    )
+    blocks.append("export declare const ASSISTANT_CONTRACT_VERSION: string;\n")
+    blocks.append("export declare const ASSISTANT_OPERATION: AssistantOperation;\n")
+    blocks.append(
+        "export declare const ASSISTANT_QUESTION: { readonly minimum: number; "
+        "readonly maximum: number; };\n"
+    )
+    blocks.append(
+        "export declare const ASSISTANT_VARIANTS: readonly AssistantVariant[];\n"
+    )
+    blocks.append(
+        "export declare const ASSISTANT_SCHEMAS: "
+        "Readonly<Record<string, ObjectSchema>>;\n"
+    )
+    blocks.append(
+        "export declare const SYNTHETIC_ASSISTANT_EXAMPLES: "
+        "readonly SyntheticAssistantExample[];\n"
+    )
+    return "\n".join(blocks)
+
+
 def _document_variants(contract: Contract) -> tuple[Mapping[str, object], ...]:
     """Read the seven lifecycle states from the discriminated document union."""
     union = contract.schema(DOCUMENT_UNION_SCHEMA)
@@ -1404,6 +1635,8 @@ def _rendered_modules() -> tuple[tuple[Path, bytes], ...]:
         (TYPES_MODULE, _render_types(contract).encode("utf-8")),
         (DOCUMENT_RUNTIME_MODULE, _render_document_runtime(contract).encode("utf-8")),
         (DOCUMENT_TYPES_MODULE, _render_document_types(contract).encode("utf-8")),
+        (ASSISTANT_RUNTIME_MODULE, _render_assistant_runtime(contract).encode("utf-8")),
+        (ASSISTANT_TYPES_MODULE, _render_assistant_types(contract).encode("utf-8")),
     )
 
 

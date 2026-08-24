@@ -2,11 +2,12 @@ import type { WorkspaceName } from "./useHashWorkspace";
 
 const LINKS: readonly { workspace: WorkspaceName; label: string }[] = [
   { workspace: "analysis", label: "Análise" },
+  { workspace: "assistant", label: "Assistente" },
   { workspace: "documents", label: "Documentos" },
 ];
 
 /**
- * The two operational areas. Link ids and data attributes are part of the
+ * The operational areas. Link ids and data attributes are part of the
  * panel's public contract (labelling, tests, deep links).
  */
 export function WorkspaceNav({ active }: { active: WorkspaceName }) {

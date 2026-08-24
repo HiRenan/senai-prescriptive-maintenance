@@ -7,6 +7,8 @@ import type { AnalysisRequest } from "./generated/analysis-contract.js";
 import { DOCUMENT_CONTRACT_VERSION } from "./generated/document-contract.js";
 import { createAnalysisClient } from "./api/analysis-client";
 import type { AnalysisOutput } from "./api/analysis-client";
+import { createAssistantClient } from "./api/assistant-client";
+import type { AssistantOutput } from "./api/assistant-client";
 import { createAuthenticatedFetch } from "./api/authenticated-fetch";
 import { createDocumentClient } from "./api/document-client";
 import { createOfflineAnalysisClient } from "./api/offline-analysis-client";
@@ -23,7 +25,9 @@ import { AuthPanel } from "./components/app/AuthPanel";
 import type { AuthState } from "./components/app/AuthPanel";
 import { useStatus } from "./components/ui/StatusToaster";
 import { AnalysisWorkspace } from "./features/analysis/AnalysisWorkspace";
+import { AssistantPanel } from "./features/assistant/AssistantPanel";
 import { DocumentsPanel } from "./features/documents/DocumentsPanel";
+import { ASSISTANT_OPERATION } from "./generated/assistant-contract.js";
 
 type OAuthCallback = ReturnType<typeof readAndCleanOAuthCallback>;
 type DocumentClient = ReturnType<typeof createDocumentClient>;
@@ -69,6 +73,18 @@ function blockedAnalysisOutput(): AnalysisOutput {
   };
 }
 
+function blockedAssistantOutput(): AssistantOutput {
+  return {
+    ok: false,
+    failure: {
+      kind: "authentication",
+      status: null,
+      detail: null,
+      issues: [],
+    },
+  };
+}
+
 interface AuthView {
   state: AuthState;
   status: string;
@@ -79,6 +95,7 @@ interface Wiring {
   client: {
     requestAnalysis: (request: AnalysisRequest) => Promise<AnalysisOutput>;
   };
+  assistantClient: ReturnType<typeof createAssistantClient>;
   documentsClient: DocumentClient | null;
   login: (() => void) | null;
   logout: (() => void) | null;
@@ -134,6 +151,7 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
           kind: "ready",
           wiring: {
             client: createOfflineAnalysisClient(),
+            assistantClient: createAssistantClient(),
             documentsClient: null,
             login: null,
             logout: null,
@@ -153,6 +171,7 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
           kind: "ready",
           wiring: {
             client: createAnalysisClient(),
+            assistantClient: createAssistantClient(),
             documentsClient: createDocumentClient(),
             login: null,
             logout: null,
@@ -174,6 +193,7 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
           kind: "ready",
           wiring: {
             client: { requestAnalysis: async () => blockedAnalysisOutput() },
+            assistantClient: { query: async () => blockedAssistantOutput() },
             documentsClient: null,
             login: null,
             logout: null,
@@ -243,6 +263,10 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
             endpoint: `${loaded.config.apiBaseUrl}/analysis`,
             fetchImpl: authenticatedFetch,
           }),
+          assistantClient: createAssistantClient({
+            endpoint: `${loaded.config.apiBaseUrl}${ASSISTANT_OPERATION.path}`,
+            fetchImpl: authenticatedFetch,
+          }),
           documentsClient: createDocumentClient({
             prefix: loaded.config.apiBaseUrl,
             fetchImpl: authenticatedFetch,
@@ -286,6 +310,9 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
 
   const analysisClient = wiring?.client ?? {
     requestAnalysis: async () => blockedAnalysisOutput(),
+  };
+  const assistantClient = wiring?.assistantClient ?? {
+    query: async () => blockedAssistantOutput(),
   };
 
   let documentsContent: ReactNode;
@@ -375,6 +402,13 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
           login={wiring?.login ?? null}
           surface={formSurface}
           runtimeBlocked={runtimeBlocked || failed}
+        />
+      }
+      assistant={
+        <AssistantPanel
+          client={assistantClient}
+          offline={offline}
+          ready={formSurface.ready && !runtimeBlocked && !failed}
         />
       }
       documents={

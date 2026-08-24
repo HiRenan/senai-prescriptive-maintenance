@@ -18,6 +18,7 @@ interface AppShellProps {
   /** Global notice above the workspaces (e.g. the auth panel). */
   notice?: ReactNode;
   analysis: ReactNode;
+  assistant: ReactNode;
   documents: ReactNode;
 }
 
@@ -38,6 +39,7 @@ export function AppShell({
   footerNote,
   notice,
   analysis,
+  assistant,
   documents,
 }: AppShellProps) {
   const activeWorkspace = useHashWorkspace();
@@ -67,6 +69,16 @@ export function AppShell({
           hidden={activeWorkspace !== "analysis"}
         >
           {analysis}
+        </section>
+        <section
+          className="workspace-page"
+          id="assistant"
+          data-workspace="assistant"
+          aria-labelledby="assistant-navigation assistant-heading"
+          tabIndex={-1}
+          hidden={activeWorkspace !== "assistant"}
+        >
+          {assistant}
         </section>
         <section
           className="workspace-page"

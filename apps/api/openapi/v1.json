@@ -34,6 +34,118 @@
         }
       }
     },
+    "/assistant/query": {
+      "post": {
+        "tags": [
+          "assistant"
+        ],
+        "summary": "Consulta evidências documentais aprovadas",
+        "operationId": "queryAssistant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantQueryRequest"
+              },
+              "examples": {
+                "answered": {
+                  "summary": "Pergunta coberta pelo corpus sintético",
+                  "value": {
+                    "question": "Como verificar vibração radial elevada na bomba?"
+                  }
+                },
+                "insufficient_evidence": {
+                  "summary": "Pergunta fora do corpus sintético",
+                  "value": {
+                    "question": "Qual é a previsão do tempo para amanhã?"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Resposta extrativa citada ou abstenção explícita.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantResponse"
+                },
+                "examples": {
+                  "answered": {
+                    "summary": "Resposta extrativa sintética",
+                    "value": {
+                      "status": "answered",
+                      "answer": "DEMONSTRAÇÃO SINTÉTICA — Para o ativo fictício Bomba Aurora-01, vibração radial elevada deve ser verificada por inspeção visual da fixação e por uma nova medição confirmatória antes de qualquer decisão de manutenção.",
+                      "score": 0.315637518658,
+                      "threshold": 0.25,
+                      "policy_version": "assistant-tfidf-cosine.v1",
+                      "citations": [
+                        {
+                          "document_id": "doc_5f4ae47bced2d80285cb4abee2792b5fcbc0fbf9e2788f97519597fadfa48f4e",
+                          "document_version": "docver_ea56c644ed894b441d165d30cfc0d7664fd77b481f04c2401a80098d20a58ef8",
+                          "chunk": "chunk_8176e27398e73caaa2459bf81e0fc404cb167e3cfb32ba5dbf2af83b9597f8b5",
+                          "page_number": 1
+                        }
+                      ],
+                      "human_review_notice": "Demonstração sintética: confirme a evidência e submeta qualquer decisão à revisão humana qualificada."
+                    }
+                  },
+                  "insufficient_evidence": {
+                    "summary": "Abstenção por evidência insuficiente",
+                    "value": {
+                      "status": "insufficient_evidence",
+                      "message": "Não há evidência aprovada e vigente suficiente para responder com segurança.",
+                      "max_score": 0.213528746852,
+                      "threshold": 0.25,
+                      "policy_version": "assistant-tfidf-cosine.v1",
+                      "citations": []
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida; nenhuma porta interna é chamada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
+            }
+          },
+          "503": {
+            "description": "O assistente está temporariamente indisponível.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Analysis-Mode": {
+                "$ref": "#/components/headers/AnalysisMode"
+              }
+            }
+          }
+        }
+      }
+    },
     "/analysis": {
       "post": {
         "tags": [
@@ -1682,6 +1794,67 @@
         ],
         "title": "AnalysisWarning"
       },
+      "AnsweredAssistantResult": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "answered",
+            "title": "Status"
+          },
+          "answer": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Answer"
+          },
+          "score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "description": "Similaridade cosseno TF-IDF normalizada; não representa acurácia, probabilidade nem confiança estatística."
+          },
+          "threshold": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Threshold",
+            "description": "Similaridade cosseno TF-IDF normalizada; não representa acurácia, probabilidade nem confiança estatística."
+          },
+          "policy_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "title": "Policy Version"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Citations"
+          },
+          "human_review_notice": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Human Review Notice"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "answer",
+          "score",
+          "threshold",
+          "policy_version",
+          "citations",
+          "human_review_notice"
+        ],
+        "title": "AnsweredAssistantResult"
+      },
       "ApproveDocumentRequest": {
         "properties": {
           "note": {
@@ -1783,6 +1956,43 @@
           "superseded_by_document_id"
         ],
         "title": "ApprovedDocument"
+      },
+      "AssistantQueryRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Question",
+            "description": "Pergunta normalizada em NFC, sem controles ou formatação."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "AssistantQueryRequest",
+        "description": "Untrusted natural-language question accepted by the assistant."
+      },
+      "AssistantResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AnsweredAssistantResult"
+          },
+          {
+            "$ref": "#/components/schemas/InsufficientEvidenceAssistantResult"
+          }
+        ],
+        "title": "AssistantResponse",
+        "description": "Closed assistant result: extracted evidence or explicit abstention.",
+        "discriminator": {
+          "propertyName": "status",
+          "mapping": {
+            "answered": "#/components/schemas/AnsweredAssistantResult",
+            "insufficient_evidence": "#/components/schemas/InsufficientEvidenceAssistantResult"
+          }
+        }
       },
       "Citation": {
         "properties": {
@@ -2234,6 +2444,66 @@
           "superseded_by_document_id"
         ],
         "title": "FailedDocument"
+      },
+      "InsufficientEvidenceAssistantResult": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "insufficient_evidence",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "description": "Similaridade cosseno TF-IDF normalizada; não representa acurácia, probabilidade nem confiança estatística."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Score"
+          },
+          "threshold": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Threshold",
+            "description": "Similaridade cosseno TF-IDF normalizada; não representa acurácia, probabilidade nem confiança estatística."
+          },
+          "policy_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "title": "Policy Version"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "maxItems": 0,
+            "title": "Citations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "message",
+          "max_score",
+          "threshold",
+          "policy_version",
+          "citations"
+        ],
+        "title": "InsufficientEvidenceAssistantResult"
       },
       "InsufficientSupport": {
         "properties": {

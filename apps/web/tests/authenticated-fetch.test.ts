@@ -8,8 +8,9 @@ import {
 
 const API_ORIGIN = "https://abc123def4.execute-api.us-east-1.amazonaws.com";
 
-test("a allowlist contém análise e somente as operações documentais publicadas", () => {
+test("a allowlist contém análise, assistente e operações documentais publicadas", () => {
   assert.equal(isAllowedApiRequest("POST", "/analysis"), true);
+  assert.equal(isAllowedApiRequest("POST", "/assistant/query"), true);
   assert.equal(isAllowedApiRequest("GET", "/documents"), true);
   assert.equal(isAllowedApiRequest("POST", "/documents"), true);
   assert.equal(isAllowedApiRequest("GET", "/documents/doc_example"), true);
@@ -18,6 +19,8 @@ test("a allowlist contém análise e somente as operações documentais publicad
   assert.equal(isAllowedApiRequest("POST", "/documents/doc_example/reprocess"), true);
   assert.equal(isAllowedApiRequest("DELETE", "/documents"), false);
   assert.equal(isAllowedApiRequest("POST", "/admin"), false);
+  assert.equal(isAllowedApiRequest("GET", "/assistant/query"), false);
+  assert.equal(isAllowedApiRequest("POST", "/assistant/query/extra"), false);
   assert.equal(isAllowedApiRequest("GET", "/documents/%2e%2e/admin"), false);
 });
 

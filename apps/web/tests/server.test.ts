@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterAll, beforeAll, test } from "vitest";
+import { SYNTHETIC_ASSISTANT_EXAMPLES } from "../src/generated/assistant-contract.js";
 
 import {
   documentExample,
@@ -211,6 +212,38 @@ test("a análise é encaminhada para POST /analysis da API", async () => {
   assert.equal(received[0].method, "POST");
   assert.equal(received[0].url, "/analysis");
   assert.deepEqual(JSON.parse(received[0].body), request);
+});
+
+test("o assistente é encaminhado somente para POST /assistant/query", async () => {
+  received = [];
+  const fixture = SYNTHETIC_ASSISTANT_EXAMPLES[0];
+  assert.ok(fixture);
+  upstreamReply = { status: 200, body: JSON.stringify(fixture.response) };
+
+  const response = await fetch(`${origin}/api/assistant/query`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fixture.request),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), fixture.response);
+  assert.deepEqual(received, [
+    {
+      method: "POST",
+      url: "/assistant/query",
+      body: JSON.stringify(fixture.request),
+    },
+  ]);
+
+  const wrongMethod = await fetch(`${origin}/api/assistant/query`);
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "POST");
+  const extraPath = await fetch(`${origin}/api/assistant/query/extra`, {
+    method: "POST",
+  });
+  assert.equal(extraPath.status, 404);
+  assert.equal(received.length, 1);
 });
 
 test("o proxy encaminha exatamente as seis operações documentais do contrato", async () => {
