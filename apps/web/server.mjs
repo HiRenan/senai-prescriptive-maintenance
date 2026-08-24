@@ -4,11 +4,16 @@ import { createServer } from "node:http";
 import { join, normalize, resolve, sep } from "node:path";
 
 import { ANALYSIS_STATUSES } from "./src/generated/analysis-contract.js";
+import {
+  DOCUMENT_ID_PATTERN,
+  DOCUMENT_OPERATIONS,
+} from "./src/generated/document-contract.js";
 
 const HEALTH_BODY = '{"status":"ok"}';
 const HOST = process.env.HOST ?? "0.0.0.0";
 const rawPort = process.env.PORT ?? "3000";
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_PREFIX = "/api";
 const ANALYSIS_ROUTE = "/api/analysis";
 const JSON_CONTENT_TYPE = "application/json";
 const MAX_REQUEST_BYTES = 64 * 1024;
@@ -86,7 +91,86 @@ if (apiOrigin.protocol !== "http:" && apiOrigin.protocol !== "https:") {
 }
 
 const staticRoot = resolve(import.meta.dirname, "src");
-const analysisEndpoint = new URL("/analysis", apiOrigin).toString();
+const documentIdExpression = new RegExp(DOCUMENT_ID_PATTERN);
+
+/**
+ * @typedef {object} ProxyRoute
+ * @property {string} method
+ * @property {string} upstreamPath
+ * @property {readonly number[]} statuses
+ * @property {boolean} hasRequestBody
+ */
+
+/**
+ * Resolve one generated document path template against a same-origin path.
+ * The only substituted value is a document identifier in the exact public
+ * shape; no arbitrary browser path can become an upstream path.
+ *
+ * @param {import("./src/generated/document-contract.js").DocumentOperation} operation
+ * @param {string} pathname
+ * @returns {string | null}
+ */
+function resolveDocumentPath(operation, pathname) {
+  const localTemplate = `${API_PREFIX}${operation.path}`;
+  if (operation.parameters.length === 0) {
+    return pathname === localTemplate ? operation.path : null;
+  }
+  if (
+    operation.parameters.length !== 1 ||
+    operation.parameters[0] !== "document_id"
+  ) {
+    return null;
+  }
+  const marker = "{document_id}";
+  const markerAt = localTemplate.indexOf(marker);
+  if (markerAt < 0) {
+    return null;
+  }
+  const prefix = localTemplate.slice(0, markerAt);
+  const suffix = localTemplate.slice(markerAt + marker.length);
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
+    return null;
+  }
+  const end = suffix.length === 0 ? pathname.length : -suffix.length;
+  const documentId = pathname.slice(prefix.length, end);
+  const match = documentIdExpression.exec(documentId);
+  if (match === null || match[0] !== documentId) {
+    return null;
+  }
+  return operation.path.replace(marker, documentId);
+}
+
+/**
+ * Return every operation that owns an exact public path. Multiple entries are
+ * possible only for the document collection, which publishes GET and POST.
+ *
+ * @param {string} pathname
+ * @returns {readonly ProxyRoute[]}
+ */
+function proxyRoutes(pathname) {
+  /** @type {ProxyRoute[]} */
+  const routes = [];
+  if (pathname === ANALYSIS_ROUTE) {
+    routes.push({
+      method: "POST",
+      upstreamPath: "/analysis",
+      statuses: ANALYSIS_STATUSES,
+      hasRequestBody: true,
+    });
+  }
+  for (const operation of Object.values(DOCUMENT_OPERATIONS)) {
+    const upstreamPath = resolveDocumentPath(operation, pathname);
+    if (upstreamPath !== null) {
+      routes.push({
+        method: operation.method,
+        upstreamPath,
+        statuses: operation.statuses,
+        hasRequestBody: operation.requestSchema !== null,
+      });
+    }
+  }
+  return Object.freeze(routes);
+}
 
 /**
  * Resolve one request path inside the static root, or reject it.
@@ -278,14 +362,15 @@ async function readUpstreamBody(upstream) {
 }
 
 /**
- * Forward the analysis request to the API from the same origin as the page, so
- * the browser never needs a cross-origin exception.
+ * Forward one allowlisted contract operation to the API from the same origin
+ * as the page, so the browser never needs a cross-origin exception.
  *
  * @param {import("node:http").IncomingMessage} request
  * @param {import("node:http").ServerResponse} response
+ * @param {ProxyRoute} route
  * @returns {Promise<void>}
  */
-async function proxyAnalysis(request, response) {
+async function proxyContract(request, response, route) {
   const read = await readBody(request);
   if (read.status === "aborted") {
     response.destroy();
@@ -305,6 +390,15 @@ async function proxyAnalysis(request, response) {
     discardRest(request, response);
     return;
   }
+  if (!route.hasRequestBody && read.body.length > 0) {
+    sendError(
+      response,
+      400,
+      "request_body_not_allowed",
+      "Esta operação não aceita corpo.",
+    );
+    return;
+  }
 
   const controller = new AbortController();
   // The deadline covers reading the answer too: headers arriving early do not
@@ -313,10 +407,12 @@ async function proxyAnalysis(request, response) {
   try {
     let upstream;
     try {
-      upstream = await fetch(analysisEndpoint, {
-        method: "POST",
-        headers: { "content-type": JSON_CONTENT_TYPE, accept: JSON_CONTENT_TYPE },
-        body: read.body,
+      upstream = await fetch(new URL(route.upstreamPath, apiOrigin), {
+        method: route.method,
+        headers: route.hasRequestBody
+          ? { "content-type": JSON_CONTENT_TYPE, accept: JSON_CONTENT_TYPE }
+          : { accept: JSON_CONTENT_TYPE },
+        body: route.hasRequestBody ? read.body : undefined,
         redirect: "error",
         signal: controller.signal,
       });
@@ -326,7 +422,7 @@ async function proxyAnalysis(request, response) {
         response,
         timedOut ? 504 : 502,
         timedOut ? "api_timeout" : "api_unreachable",
-        "A API de análise não respondeu.",
+        "A API não respondeu.",
       );
       return;
     }
@@ -335,7 +431,7 @@ async function proxyAnalysis(request, response) {
     // Only what the v1 operation publishes is relayed, and only as JSON. A
     // status or a media type the contract does not declare is an API the panel
     // cannot read, so it is reported as a gateway failure instead of passed on.
-    if (!ANALYSIS_STATUSES.includes(upstream.status) || !isJsonMedia(declared)) {
+    if (!route.statuses.includes(upstream.status) || !isJsonMedia(declared)) {
       // Refuse before reading, then let go of the body and the connection: an
       // answer the proxy will never use must not keep streaming into it.
       await releaseUpstream(upstream);
@@ -431,7 +527,7 @@ function failClosed(response) {
 }
 
 const server = createServer((request, response) => {
-  const { pathname } = new URL(request.url ?? "/", "http://localhost");
+  const { pathname, search } = new URL(request.url ?? "/", "http://localhost");
 
   if (request.method === "GET" && pathname === "/health/live") {
     response.writeHead(200, {
@@ -443,17 +539,25 @@ const server = createServer((request, response) => {
     return;
   }
 
-  if (pathname === ANALYSIS_ROUTE) {
-    if (request.method !== "POST") {
+  const candidates = proxyRoutes(pathname);
+  if (candidates.length > 0) {
+    if (search !== "") {
+      response.writeHead(404, { ...SECURITY_HEADERS, "content-length": "0" });
+      response.end();
+      return;
+    }
+    const route = candidates.find((entry) => entry.method === request.method);
+    if (route === undefined) {
+      const allowed = [...new Set(candidates.map((entry) => entry.method))].join(", ");
       response.writeHead(405, {
         ...SECURITY_HEADERS,
-        allow: "POST",
+        allow: allowed,
         "content-length": "0",
       });
       response.end();
       return;
     }
-    proxyAnalysis(request, response).catch(failClosed(response));
+    proxyContract(request, response, route).catch(failClosed(response));
     return;
   }
 

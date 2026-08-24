@@ -52,6 +52,18 @@ export function formatInstant(value) {
 }
 
 /**
+ * Format an instant published by the API, keeping the original text when it
+ * cannot be read as a date instead of inventing one.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+export function formatTimestamp(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : timeFormatter.format(parsed);
+}
+
+/**
  * Join a unit to a value, keeping unitless features clean.
  *
  * @param {number} value

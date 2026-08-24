@@ -6,23 +6,23 @@
     <meta name="color-scheme" content="light" />
     <meta
       name="description"
-      content="Painel de demonstração da análise prescritiva: 18 features, cinco resultados fechados e prescrição auditável."
+      content="Painel de demonstração da manutenção prescritiva: análise rastreável e gestão documental governada."
     />
-    <title>Análise prescritiva — demonstração</title>
+    <title>Manutenção prescritiva — demonstração</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles.css" />
     <script type="module" src="./main.js"></script>
   </head>
   <body>
-    <a class="skip-link" href="#report">Ir para o resultado</a>
+    <a class="skip-link" href="#workspace-content">Ir para o conteúdo</a>
 
     <header class="masthead">
       <div class="masthead-inner">
         <p class="masthead-kicker">Manutenção prescritiva</p>
-        <h1 class="masthead-title">Análise da leitura</h1>
+        <h1 class="masthead-title">Demonstração operacional</h1>
         <p class="masthead-lede">
-          Informe as 18 features do contrato, execute a análise e leia o resultado com
-          diagnóstico, suporte, abstenção, vizinhos, prescrição e citações.
+          Analise uma leitura industrial e governe os documentos que podem sustentar
+          citações. Nenhum resultado autoriza manutenção e nenhum registro aprova um PDF.
         </p>
         <dl class="masthead-meta">
           <div>
@@ -30,10 +30,33 @@
             <dd class="mono" id="contract-version">v1</dd>
           </div>
           <div>
-            <dt>Operação</dt>
+            <dt>Análise</dt>
             <dd class="mono">POST /analysis</dd>
           </div>
+          <div>
+            <dt>Documentos</dt>
+            <dd class="mono">GET · POST /documents</dd>
+          </div>
         </dl>
+        <nav class="workspace-nav" aria-label="Áreas da demonstração">
+          <a
+            class="workspace-link"
+            id="analysis-navigation"
+            href="#analysis"
+            data-workspace-link="analysis"
+            aria-current="page"
+          >
+            Análise
+          </a>
+          <a
+            class="workspace-link"
+            id="documents-navigation"
+            href="#documents"
+            data-workspace-link="documents"
+          >
+            Documentos
+          </a>
+        </nav>
       </div>
     </header>
 
@@ -43,75 +66,126 @@
       </p>
     </noscript>
 
-    <main class="workbench">
-      <section class="console" id="console" aria-labelledby="console-heading">
-        <h2 class="console-heading" id="console-heading">Entrada da análise</h2>
+    <main id="workspace-content" tabindex="-1">
+      <section
+        class="workspace-page"
+        id="analysis"
+        data-workspace="analysis"
+        aria-labelledby="analysis-navigation"
+        tabindex="-1"
+      >
+        <div class="workbench">
+          <section class="console" id="console" aria-labelledby="console-heading">
+            <h2 class="console-heading" id="console-heading">Entrada da análise</h2>
 
-        <form id="analysis-form" novalidate>
-          <div class="import">
-            <h3 class="block-label">Importar entrada</h3>
-            <div class="import-row">
-              <label class="field-label" for="example-select">Exemplo sintético</label>
-              <select id="example-select" class="field-input">
-                <option value="">Selecione um exemplo</option>
-              </select>
-            </div>
-            <div class="import-row">
-              <label class="field-label" for="import-text">JSON do contrato</label>
-              <textarea
-                id="import-text"
-                class="field-input import-text"
-                rows="4"
-                spellcheck="false"
-                placeholder='{"features": {"rpm": 1000, ...}, "top_k": 3}'
-              ></textarea>
-            </div>
-            <div class="import-row import-actions">
-              <label class="field-label" for="import-file">Arquivo JSON</label>
-              <input id="import-file" class="field-file" type="file" accept="application/json,.json" />
-              <button type="button" id="import-apply" class="button button-quiet">
-                Importar JSON
-              </button>
-            </div>
-            <div class="import-issues" id="import-issues" hidden></div>
-          </div>
+            <form id="analysis-form" novalidate>
+              <div class="import">
+                <h3 class="block-label">Importar entrada</h3>
+                <div class="import-row">
+                  <label class="field-label" for="example-select">Exemplo sintético</label>
+                  <select id="example-select" class="field-input">
+                    <option value="">Selecione um exemplo</option>
+                  </select>
+                </div>
+                <div class="import-row">
+                  <label class="field-label" for="import-text">JSON do contrato</label>
+                  <textarea
+                    id="import-text"
+                    class="field-input import-text"
+                    rows="4"
+                    spellcheck="false"
+                    placeholder='{"features": {"rpm": 1000, ...}, "top_k": 3}'
+                  ></textarea>
+                </div>
+                <div class="import-row import-actions">
+                  <label class="field-label" for="import-file">Arquivo JSON</label>
+                  <input
+                    id="import-file"
+                    class="field-file"
+                    type="file"
+                    accept="application/json,.json"
+                  />
+                  <button type="button" id="import-apply" class="button button-quiet">
+                    Importar JSON
+                  </button>
+                </div>
+                <div class="import-issues" id="import-issues" hidden></div>
+              </div>
 
-          <div class="metrics"></div>
+              <div class="metrics"></div>
 
-          <div class="run">
-            <div class="field field-topk">
-              <label class="field-label" for="top-k">Vizinhos solicitados</label>
-              <input
-                id="top-k"
-                name="top_k"
-                class="field-input"
-                type="number"
-                inputmode="numeric"
-                step="1"
-                autocomplete="off"
-                aria-describedby="top-k-error"
-              />
-              <p class="field-error" id="top-k-error" data-error-for="top_k"></p>
-            </div>
-            <div class="run-actions">
-              <button type="submit" class="button button-primary">Executar análise</button>
-              <button type="button" id="console-reset" class="button button-quiet">
-                Limpar
-              </button>
-            </div>
-          </div>
-        </form>
+              <div class="run">
+                <div class="field field-topk">
+                  <label class="field-label" for="top-k">Vizinhos solicitados</label>
+                  <input
+                    id="top-k"
+                    name="top_k"
+                    class="field-input"
+                    type="number"
+                    inputmode="numeric"
+                    step="1"
+                    autocomplete="off"
+                    aria-describedby="top-k-error"
+                  />
+                  <p class="field-error" id="top-k-error" data-error-for="top_k"></p>
+                </div>
+                <div class="run-actions">
+                  <button type="submit" class="button button-primary">Executar análise</button>
+                  <button type="button" id="console-reset" class="button button-quiet">
+                    Limpar
+                  </button>
+                </div>
+              </div>
+            </form>
+          </section>
+
+          <section
+            class="report"
+            id="report"
+            aria-labelledby="report-heading"
+            tabindex="-1"
+          ></section>
+        </div>
       </section>
 
-      <section class="report" id="report" aria-labelledby="report-heading" tabindex="-1"></section>
+      <section
+        class="workspace-page documents-workspace"
+        id="documents"
+        data-workspace="documents"
+        aria-labelledby="documents-navigation documents-heading"
+        tabindex="-1"
+        hidden
+      >
+        <div class="documents-shell">
+          <header class="documents-intro">
+            <p class="masthead-kicker">Base de conhecimento governada</p>
+            <h2 class="documents-heading" id="documents-heading">Gestão documental</h2>
+            <p class="documents-intro-text">
+              Sete estados do contrato, decisões humanas explícitas, vigência rastreável e
+              falhas sanitizadas.
+            </p>
+            <dl class="masthead-meta documents-meta">
+              <div>
+                <dt>Contrato</dt>
+                <dd class="mono" id="document-contract-version">v1</dd>
+              </div>
+              <div>
+                <dt>Registro</dt>
+                <dd class="mono">metadados, sem bytes</dd>
+              </div>
+            </dl>
+          </header>
+          <div id="documents-panel"></div>
+        </div>
+      </section>
     </main>
 
     <p class="status" id="run-status" role="status" aria-live="polite"></p>
 
     <footer class="colophon">
       <p>
-        Demonstração local. Os exemplos de importação vêm do contrato público e são
-        inteiramente sintéticos.
+        Demonstração local. Entradas e metadados de exemplo vêm do contrato público e são
+        inteiramente sintéticos; nenhum PDF é lido ou enviado pelo painel.
       </p>
     </footer>
   </body>

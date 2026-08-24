@@ -51,3 +51,25 @@ export function requestExample(name) {
 }
 
 export const outcomeNames = Object.keys(responseExamples);
+
+const documentItemOperation =
+  snapshot.paths["/documents/{document_id}"].get;
+
+export const documentResponseExamples =
+  documentItemOperation.responses["200"].content["application/json"].examples;
+
+export const documentStatusNames = Object.keys(documentResponseExamples);
+
+/**
+ * Read one entirely synthetic document example from the frozen contract.
+ *
+ * @param {string} name
+ * @returns {any}
+ */
+export function documentExample(name) {
+  const example = documentResponseExamples[name];
+  if (example === undefined) {
+    throw new Error(`O snapshot não declara o exemplo documental ${name}.`);
+  }
+  return structuredClone(example.value);
+}

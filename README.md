@@ -31,7 +31,7 @@ local integralmente identificado e autorizado.
 | Modelo | Busca k-NN v3 determinística de históricos semelhantes, política operacional exata e abstenção. | O voto sugere uma condição candidata; não é probabilidade, classificação aprovada ou automação. |
 | Documentos e RAG | Extração local rastreável, ciclo de sete estados, recuperação governada, contrato de geração e guardrails pré/pós-provider. | A API registra metadados, não recebe bytes; o embedding e o provider padrão são fakes e não provam qualidade semântica. |
 | Persistência | Adapters em memória e PostgreSQL/pgvector, UoW e migrações reversíveis. | O runtime offline usa memória; derivados reais não são instalados automaticamente. |
-| Web | Painel de análise em módulos ESM, contrato derivado do OpenAPI v1 e processo Node com liveness, ativos e proxy de mesma origem. | O painel cobre o fluxo de análise; gestão documental, acabamento de acessibilidade e teste em navegador não existem. |
+| Web | Painel de análise e gestão documental em módulos ESM, contratos derivados do OpenAPI v1 e processo Node com liveness, ativos e proxy de mesma origem. | O cadastro documental registra somente metadados; acabamento final de responsividade e teste automatizado de ponta a ponta em navegador não existem. |
 | AWS | Perfil Terraform efêmero e workflows manuais protegidos, validados offline. | Nenhum recurso, identidade, deploy, smoke ou teardown foi executado na AWS. |
 
 As afirmações públicas usam quatro rótulos:
@@ -120,15 +120,16 @@ uv run --frozen poe services-down
 
 O painel fica em `127.0.0.1:3000` e localiza a API por `API_BASE_URL`, cujo
 padrão é `http://127.0.0.1:8000` e cujo valor no Compose é `http://api:8000`. O
-navegador chama sempre a mesma origem da página: o processo web encaminha
-`POST /api/analysis` para `POST /analysis`, então a API não precisa de exceção
-de CORS. O [README do painel](apps/web/README.md) descreve o fluxo, o contrato
-gerado e os estados da prescrição.
+navegador chama sempre a mesma origem da página: o processo web encaminha a
+análise e somente as seis operações documentais publicadas no contrato, então a
+API não precisa de exceção de CORS. O [README do painel](apps/web/README.md)
+descreve os fluxos, os contratos gerados e os estados apresentados.
 
 ## Arquitetura
 
 O backend é um monólito modular em `apps/api`; `apps/web` serve o painel de
-análise e o proxy de mesma origem, sem framework, bundler nem etapa de build.
+análise e gestão documental e o proxy de mesma origem, sem framework, bundler
+nem etapa de build.
 PostgreSQL/pgvector apoia o perfil local, e os artefatos reais de dados, modelo
 e documentos continuam fora do Git. A factory HTTP não descobre esses
 artefatos: `artifacts` exige o caminho e o SHA-256 de um
@@ -142,7 +143,7 @@ código que o comprova.
 
 ```text
 apps/api       API, domínio, dados, modelo, recuperação, geração e persistência
-apps/web       painel de análise e processo que o serve
+apps/web       painel de análise e gestão documental e processo que o serve
 data           manifesto, fixtures sintéticas e derivados públicos permitidos
 docs           arquitetura, cards, decisões, runbooks e evidências
 infra          Compose local e perfil Terraform AWS demo
@@ -229,8 +230,8 @@ Não estão implementados:
 - artefatos operacionais distribuíveis, embedding semântico aprovado, pgvector
   preenchido e provider de geração real habilitado;
 - autenticação, autorização, rate limiting e operação de produção;
-- gestão documental na interface, acabamento final de acessibilidade e
-  responsividade e teste automatizado de ponta a ponta em navegador;
+- acabamento final de responsividade e teste automatizado de ponta a ponta em
+  navegador;
 - infraestrutura AWS aplicada, bootstrap OIDC/IAM, deploy ou evidência live.
 
 Esses itens são futuro, não compromisso desta versão.

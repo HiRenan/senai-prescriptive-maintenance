@@ -1,7 +1,8 @@
-# Painel de análise
+# Painel de demonstração
 
-Este diretório contém o fluxo principal de demonstração: informar as 18 features
-do contrato, executar `POST /analysis` e ler o resultado de forma auditável.
+Este diretório contém os dois fluxos da demonstração: informar as 18 features,
+executar `POST /analysis` e ler o resultado de forma auditável; e operar o ciclo
+documental mínimo publicado pela API v1.
 
 O painel não tem framework, bundler nem dependência de execução. São módulos ESM
 servidos diretamente ao navegador por um processo Node mínimo.
@@ -15,8 +16,8 @@ apps/web/
 │   ├── index.html    # documento e marcos de acessibilidade
 │   ├── styles.css    # tokens, tons dos desfechos e layout
 │   ├── main.js       # ponto de entrada e ligação do fluxo
-│   ├── api/          # cliente de POST /analysis
-│   ├── core/         # regras puras: features, importação, laudo, comparação
+│   ├── api/          # clientes da análise e do ciclo documental
+│   ├── core/         # regras puras: entrada, decodificação e apresentação
 │   ├── generated/    # contrato derivado do OpenAPI v1, não editar à mão
 │   └── ui/           # construção de DOM do console e do laudo
 └── tests/            # testes essenciais do fluxo com o runner do Node
@@ -24,11 +25,12 @@ apps/web/
 
 ## Contrato
 
-`src/generated/analysis-contract.js` e o `.d.ts` irmão são gerados a partir de
+`src/generated/analysis-contract.js`, `src/generated/document-contract.js` e os
+arquivos `.d.ts` irmãos são gerados a partir de
 [`apps/api/openapi/v1.json`](../api/openapi/v1.json). Nenhum tipo de request ou
-response é escrito à mão. O módulo publica as 18 features na ordem do contrato,
-os limites de `top_k`, os cinco desfechos com o que cada um pode conter e os
-exemplos sintéticos usados na importação.
+response é escrito à mão. Os módulos publicam as 18 features, os cinco
+desfechos, os sete estados documentais, as seis operações documentais, limites,
+esquemas e exemplos sintéticos na forma declarada pelo contrato.
 
 O gerador recusa um padrão de texto que não esteja ancorado ou que use
 construção fora do subconjunto lido igual por Python e pelo navegador. Os
@@ -93,6 +95,22 @@ Essa checagem é independente da validação do cliente. O corpo contraditório 
 recusado antes de chegar ao laudo, e mesmo assim a apresentação continua
 incapaz de exibir uma prescrição que o contrato não autoriza.
 
+## Ciclo documental
+
+A área de documentos lista e consulta o estado atual, mostra última atualização,
+vigência, decisão e falha sanitizada e oferece somente as transições aplicáveis:
+aprovar ou rejeitar com motivo em `pending_approval`, e reprocessar em `rejected`
+ou `failed`. Cada comando exige confirmação; durante uma requisição todos os
+controles ficam inertes para impedir duplo envio. Se o comando terminar e a
+atualização posterior da lista falhar, a tela preserva as duas informações sem
+afirmar que a lista está atualizada.
+
+`POST /documents` não é upload. A tela envia estritamente `filename`,
+`media_type`, `size_bytes` e `sha256`; nenhum PDF, caminho local ou conteúdo é
+lido ou transmitido. O recibo também não significa aprovação automática. Como o
+contrato não publica versão nem instante de processamento, a tela não inventa
+esses valores.
+
 ## Comparação de features
 
 A comparação mostra os oito pares de eixo X e Z e as duas leituras de processo.
@@ -110,10 +128,17 @@ causa, gravidade nem relação com o desfecho.
 | `GET /health/live` | `{"status":"ok"}` para o healthcheck do contêiner |
 | `GET` de `src/` | `index.html`, CSS e módulos, com allowlist de extensão |
 | `POST /api/analysis` | encaminha para `POST /analysis` da API |
+| `GET`, `POST /api/documents` | lista ou registra metadados em `/documents` |
+| `GET /api/documents/{document_id}` | consulta exatamente um documento |
+| `POST /api/documents/{document_id}/approve` | registra aprovação |
+| `POST /api/documents/{document_id}/reject` | registra rejeição com motivo |
+| `POST /api/documents/{document_id}/reprocess` | solicita reprocessamento |
 
 O proxy existe para que o navegador use a mesma origem da página e a API não
-precise de exceção de CORS. Ele encaminha apenas essa rota. Caminhos fora da
-raiz estática são recusados.
+precise de exceção de CORS. A allowlist documental é gerada das seis operações
+do OpenAPI; só substitui um `document_id` que corresponda integralmente ao padrão
+publicado. Path arbitrário, query, método ou corpo fora da operação são recusados
+sem chegar à API. Caminhos fora da raiz estática também são recusados.
 
 Os dois sentidos são limitados e temporizados:
 
@@ -161,5 +186,8 @@ uv run --frozen poe web-test
 A verificação de tipos usa TypeScript sobre JavaScript anotado com JSDoc, sem
 etapa de build: os mesmos arquivos que rodam no navegador são os verificados. Os
 testes usam o runner do Node e tomam os exemplos do próprio snapshot OpenAPI, de
-modo que nenhum material original participa da suíte. As três tarefas também
-fazem parte de `uv run --frozen poe check`.
+modo que nenhum material original participa da suíte. Eles cobrem as seis
+operações do proxy e do cliente, os sete estados, teclado, bloqueio de duplo
+envio, sucesso com falha da atualização, rejeição inválida com foco e a
+distinção entre carregamento e lista vazia. As três tarefas também fazem parte
+de `uv run --frozen poe check`.
