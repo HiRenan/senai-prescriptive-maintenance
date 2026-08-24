@@ -367,6 +367,46 @@ _DOCUMENT_LIFECYCLE_DOWN: Final[tuple[LiteralString, ...]] = (
 )
 
 
+_ANALYSIS_NEIGHBOR_TRACEABILITY_UP: Final[tuple[LiteralString, ...]] = (
+    """
+    ALTER TABLE analyses
+    ADD COLUMN index_id TEXT
+        CHECK (
+            index_id IS NULL
+            OR index_id ~ '^similarity_index_v1_[0-9a-f]{32}$'
+        ),
+    ADD CONSTRAINT analyses_index_identity_unique
+        UNIQUE (analysis_id, index_id)
+    """,
+    """
+    CREATE TABLE analysis_neighbor_references (
+        analysis_id TEXT NOT NULL,
+        index_id TEXT NOT NULL
+            CHECK (index_id ~ '^similarity_index_v1_[0-9a-f]{32}$'),
+        neighbor_ref TEXT NOT NULL
+            CHECK (neighbor_ref ~ '^neighbor_[a-z0-9_]{3,64}$'),
+        ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+        PRIMARY KEY (analysis_id, ordinal),
+        CONSTRAINT analysis_neighbor_reference_unique
+            UNIQUE (analysis_id, neighbor_ref),
+        CONSTRAINT analysis_neighbor_analysis_fk
+            FOREIGN KEY (analysis_id, index_id)
+            REFERENCES analyses (analysis_id, index_id)
+            ON DELETE RESTRICT
+    )
+    """,
+)
+
+_ANALYSIS_NEIGHBOR_TRACEABILITY_DOWN: Final[tuple[LiteralString, ...]] = (
+    "DROP TABLE analysis_neighbor_references",
+    """
+    ALTER TABLE analyses
+    DROP CONSTRAINT analyses_index_identity_unique,
+    DROP COLUMN index_id
+    """,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class Migration:
     version: int
@@ -398,6 +438,12 @@ MIGRATIONS: Final[tuple[Migration, ...]] = (
         name="document_lifecycle_registry",
         up=_DOCUMENT_LIFECYCLE_UP,
         down=_DOCUMENT_LIFECYCLE_DOWN,
+    ),
+    Migration(
+        version=4,
+        name="analysis_neighbor_traceability",
+        up=_ANALYSIS_NEIGHBOR_TRACEABILITY_UP,
+        down=_ANALYSIS_NEIGHBOR_TRACEABILITY_DOWN,
     ),
 )
 LATEST_MIGRATION_VERSION: Final = MIGRATIONS[-1].version

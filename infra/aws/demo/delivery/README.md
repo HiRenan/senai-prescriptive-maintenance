@@ -826,6 +826,16 @@ consultas aceitam a ausência do contêiner externo, e apenas quando o objeto no
 nível ausente está vazio; qualquer campo inesperado preserva a reprovação
 fail-closed. As demais coleções continuam obrigatórias conforme seu contrato.
 
+O ECS mantém um cluster excluído no estado `INACTIVE` e pode deixá-lo
+descobrível por algum tempo. A consulta genérica de tags delega somente o ARN
+canônico desse cluster a duas provas específicas: `list-clusters` deve omiti-lo
+e `describe-clusters` deve devolvê-lo como `INACTIVE` ou informar sua ausência.
+Qualquer outro status, ARN ou recurso com as tags da demo continua reprovando o
+teardown. Esse comportamento segue a documentação oficial de
+[`DeleteCluster`](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeleteCluster.html)
+e de
+[`GetResources`](https://docs.aws.amazon.com/resourcegroupstagging/latest/APIReference/API_GetResources.html).
+
 ## Validação sem AWS
 
 Os gates locais não usam credencial, endpoint ou subprocesso AWS:

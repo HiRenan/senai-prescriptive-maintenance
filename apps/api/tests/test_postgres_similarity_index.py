@@ -168,7 +168,7 @@ def test_similarity_migration_up_down_up_is_reproducible(
     connection = postgres_connection_factory()
     try:
         assert current_version(connection) == 0
-        assert LATEST_MIGRATION_VERSION == 3
+        assert LATEST_MIGRATION_VERSION == 4
         upgrade(connection, target=2)
         assert current_version(connection) == 2
         assert _table_names(connection) >= _SIMILARITY_TABLES

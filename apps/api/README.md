@@ -245,7 +245,8 @@ conseguir alcançá-lo.
 `prescriptive_maintenance.persistence` define agregados imutáveis, repositórios
 tipados e uma unidade de trabalho explícita. `AnalysisMetadata` registra somente
 `analysis_id`, resultado fechado da API v1, `dataset_id`, `model_id`,
-`prompt_id`, `configuration_id`, instante e referências ordenadas de evidência.
+`prompt_id`, `configuration_id`, `index_id`, instante, vizinhos opacos ordenados
+e referências ordenadas de evidência.
 Documentos registram identidade estável; versões registram SHA-256 e instante;
 chunks registram referência opaca e página positiva. A evidência liga a análise
 ao trio documento–versão–chunk por chaves estrangeiras compostas.
@@ -257,7 +258,7 @@ composta `(analysis_id, evidence_id)`; o mesmo identificador pode ser reutilizad
 por outra análise sem perder a origem de cada referência.
 
 As tabelas de metadados de análise e documentos não possuem features, linhas,
-vetores, embeddings, texto, conteúdo bruto, caminho, nome de arquivo,
+labels, vetores, embeddings, texto, conteúdo bruto, caminho, nome de arquivo,
 diagnóstico ou prescrição. Assim, a recuperação de uma análise devolve todos os
 IDs de versão usados sem persistir os materiais originais ou dados privados. Um
 replay com o mesmo ID e os mesmos metadados é idempotente; reutilizar o ID com
@@ -277,9 +278,10 @@ fronteira sobre uma conexão psycopg ociosa com autocommit desabilitado; ela nã
 assume uma transação externa. Uma violação relacional retorna erro de domínio
 sanitizado e marca a unidade como `rollback-only` até `rollback()` ou a saída.
 
-As migrações `initial_analysis_metadata`, `versioned_similarity_index` e
-`document_lifecycle_registry` são aplicadas por `upgrade()` e revertidas por
-`downgrade()`. As operações são transacionais, verificam o checksum das versões
+As migrações `initial_analysis_metadata`, `versioned_similarity_index`,
+`document_lifecycle_registry` e `analysis_neighbor_traceability` são aplicadas
+por `upgrade()` e revertidas por `downgrade()`. As operações são transacionais,
+verificam o checksum das versões
 aplicadas, serializam concorrência por lock transacional e são idempotentes no
 alvo atual. O bootstrap do Compose continua responsável somente pelo pgvector;
 migrações da aplicação são sempre chamadas explicitamente:
@@ -1221,13 +1223,15 @@ serializado canonicamente e seu SHA-256 é verificado antes do opener. O cálcul
 usa distância euclidiana exata em lotes com memória de trabalho limitada, aplica
 a mesma decisão do modelo e audita uma amostra contra `predict_candidate()`.
 
-O relatório schema 2 separa o objetivo operacional primário em `candidate_*`
+O relatório schema 3 separa o objetivo operacional primário em `candidate_*`
 antes da abstenção, `selective_*` somente entre aceitas, cobertura e
 `abstained` com motivos. Os dois recortes incluem uma baseline tipada de
 candidata constante problema, com fórmula, numerador e denominador explícitos.
-O diagnóstico exato anterior permanece secundário para todas as linhas e para
-classes que existem no treino: top-1, Hit/Recall@K, MRR, baseline majoritária,
-cobertura, abstenção e acurácia seletiva. Latência é medida após warmup e com
+O diagnóstico exato anterior permanece secundário para todas as linhas, classes
+conhecidas e classes ausentes: top-1, Hit@K, Precision@K, Recall@K, MRR, ganho
+incremental de k=2..5, baseline majoritária, cobertura, abstenção e acurácia
+seletiva. O recorte open-set inclui FAR, rejeição, cobertura conhecida,
+acurácia seletiva e Wilson 95%. Latência é medida após warmup e com
 cache aquecido. O pico primário usa working set do processo no Windows ou
 `ru_maxrss` no Unix; `tracemalloc` aparece apenas como complemento. Plataforma
 sem suporte declara a métrica indisponível.
@@ -1241,7 +1245,7 @@ uv run --frozen python -m prescriptive_maintenance.modeling.evaluation `
   --holdout "<derivado>/test.parquet" `
   --model-artifact "<artefato-knn-v3>" `
   --index-artifact "<indice-versionado>" `
-  --report-output "data/processed/sen-78-evaluation/evaluation-report.v2.json"
+  --report-output "data/processed/sen-73-evaluation/evaluation-report.v3.json"
 ```
 
 Artefatos e relatórios reais permanecem ignorados. O índice é validado como
@@ -1257,7 +1261,8 @@ constante. A cobertura foi 39,7408%; entre aceitas, o recall operacional foi
 linhas depois abstidas, portanto não representa o comportamento final. Nenhum
 threshold foi alterado pelo holdout, que não constitui estimativa independente.
 O [relatório histórico](../../docs/validation/model-evaluation.md), a
-[correção v2](../../docs/validation/model-evaluation-v2.md) e o
+[correção v2](../../docs/validation/model-evaluation-v2.md), o
+[protocolo open-set v3](../../docs/validation/model-evaluation-v3.md) e o
 [model card v3](../../docs/model-cards/temporal-knn-v3.md) registram os
 denominadores e a decisão de não aprovar automação.
 

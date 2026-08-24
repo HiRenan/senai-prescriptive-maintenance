@@ -284,6 +284,22 @@ def exact_name(key: str, expected: set[str]) -> Predicate:
     return lambda item: base_text(item, key) in expected
 
 
+def tagged_resource_outside(delegated_arns: set[str]) -> Predicate:
+    return lambda item: base_text(item, "ResourceARN") not in delegated_arns
+
+
+def ecs_cluster_is_residual(expected_arn: str) -> Predicate:
+    def matches(item: object) -> bool:
+        cluster = mapping(item, context="descrição do cluster ECS")
+        cluster_arn = cluster.get("clusterArn")
+        status = cluster.get("status")
+        if cluster_arn != expected_arn or type(status) is not str or not status:
+            fail("Descrição do cluster ECS está ausente ou inválida.")
+        return status != "INACTIVE"
+
+    return matches
+
+
 def text_suffix(expected: str) -> Predicate:
     def matches(item: object) -> bool:
         if type(item) is not str or not item:
@@ -391,6 +407,7 @@ def inventory_queries(
     }
     domain_seed = f"{name_prefix}:{frontend_domain}:{region}"
     cognito_domain = f"spm-{hashlib.sha256(domain_seed.encode()).hexdigest()[:20]}"
+    ecs_cluster_arn = f"arn:aws:ecs:{region}:{account_id}:cluster/{name}"
     tag_filters = (
         "Key=Environment,Values=demo",
         "Key=Profile,Values=aws-demo",
@@ -411,7 +428,7 @@ def inventory_queries(
                 *tag_filters,
             ),
             ("ResourceTagMappingList",),
-            lambda item: True,
+            tagged_resource_outside({ecs_cluster_arn}),
         ),
         InventoryQuery(
             "S3 buckets",
@@ -430,6 +447,19 @@ def inventory_queries(
             ("ecs", "list-clusters", "--region", region),
             ("clusterArns",),
             text_suffix(f"cluster/{name}"),
+        ),
+        InventoryQuery(
+            "ECS canonical cluster status",
+            (
+                "ecs",
+                "describe-clusters",
+                "--clusters",
+                ecs_cluster_arn,
+                "--region",
+                region,
+            ),
+            ("clusters",),
+            ecs_cluster_is_residual(ecs_cluster_arn),
         ),
         InventoryQuery(
             "CloudWatch log groups",
