@@ -48,6 +48,8 @@ interface DocumentsPanelProps {
   client: DocumentClient;
   offline?: boolean;
   announce: (message: string, options?: AnnounceOptions) => void;
+  /** Fires once the first listing settled, so the shell can lift the lock. */
+  onInitialLoad?: () => void;
 }
 
 /**
@@ -60,6 +62,7 @@ export function DocumentsPanel({
   client,
   offline = false,
   announce,
+  onInitialLoad,
 }: DocumentsPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [documents, setDocuments] = useState<readonly DocumentResponse[]>([]);
@@ -168,6 +171,7 @@ export function DocumentsPanel({
     if (offline) {
       setListLoading(false);
       announce("Modo offline ativo. Nenhuma chamada foi feita à API documental.");
+      onInitialLoad?.();
       return;
     }
     setBusy(true);
@@ -179,8 +183,9 @@ export function DocumentsPanel({
       })
       .finally(() => {
         setBusy(false);
+        onInitialLoad?.();
       });
-  }, [announce, loadDocuments, offline, reportFailure]);
+  }, [announce, loadDocuments, offline, onInitialLoad, reportFailure]);
 
   const cancelPending = (documentId: string) => {
     if (busy) {

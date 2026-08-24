@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { flushSync } from "react-dom";
 
 import { API_CONTRACT_VERSION } from "./generated/analysis-contract.js";
 import type { AnalysisRequest } from "./generated/analysis-contract.js";
@@ -106,6 +107,10 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
 
   const [bootstrap, setBootstrap] = useState<Bootstrap>({ kind: "pending" });
   const [protectedReady, setProtectedReady] = useState(false);
+  const [documentsLoaded, setDocumentsLoaded] = useState(false);
+  const markDocumentsLoaded = useCallback(() => {
+    setDocumentsLoaded(true);
+  }, []);
   const [authView, setAuthView] = useState<AuthView | null>(null);
   const [loginPending, setLoginPending] = useState(false);
   const [logoutDisabled, setLogoutDisabled] = useState(false);
@@ -211,7 +216,11 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
           return;
         }
         pending = true;
-        setLoginPending(true);
+        // Flush the busy state before the browser can deliver a second click:
+        // one activation must never produce two authorization redirects.
+        flushSync(() => {
+          setLoginPending(true);
+        });
         void auth.login().catch(() => {
           pending = false;
           setLoginPending(false);
@@ -303,13 +312,30 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
     );
   } else if (wiring !== null) {
     documentsContent = offline ? (
-      <DocumentsPanel client={createDocumentClient()} offline announce={announce} />
+      <DocumentsPanel
+        client={createDocumentClient()}
+        offline
+        announce={announce}
+        onInitialLoad={markDocumentsLoaded}
+      />
     ) : wiring.documentsClient !== null ? (
-      <DocumentsPanel client={wiring.documentsClient} announce={announce} />
+      <DocumentsPanel
+        client={wiring.documentsClient}
+        announce={announce}
+        onInitialLoad={markDocumentsLoaded}
+      />
     ) : null;
   } else {
     documentsContent = null;
   }
+
+  // The documents surface stays locked until its first listing settles, so a
+  // pending list is never mistaken for an empty cycle.
+  const documentsMounted = documentsContent !== null && !pendingBootstrap;
+  const documentsReady =
+    formSurface.ready && (!documentsMounted || documentsLoaded);
+  const documentsBusy =
+    pendingBootstrap || (documentsMounted && !documentsLoaded);
 
   const modeDescription = offline
     ? "Offline ativo: somente as cinco fixtures sintéticas do contrato, sem chamadas à API. Entradas alteradas não recebem outcome inventado."
@@ -365,8 +391,8 @@ export function App({ oauthCallback }: { oauthCallback: OAuthCallback }) {
           </header>
           <div
             id="documents-panel"
-            inert={!formSurface.ready || undefined}
-            aria-busy={pendingBootstrap ? "true" : "false"}
+            inert={!documentsReady || undefined}
+            aria-busy={documentsBusy ? "true" : "false"}
           >
             {documentsContent}
           </div>

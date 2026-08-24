@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 
-import { PKCE_STORAGE_KEY } from "../../src/auth/pkce.js";
-import { requestExample, responseExample } from "../helpers/contract-fixtures.js";
+import { PKCE_STORAGE_KEY } from "../../src/auth/pkce";
+import { requestExample, responseExample } from "../helpers/contract-fixtures";
+import { deferred } from "../helpers/async";
 
 const PUBLISHED_ORIGIN = "https://senai.maib.com.br";
 const API_ORIGIN = "https://abc123def4.execute-api.us-east-1.amazonaws.com";
@@ -21,9 +23,9 @@ const OUTCOMES = [
   ["undocumented_fault", "Falha sem documentação"],
   ["out_of_distribution", "Fora da distribuição"],
   ["degraded", "Análise degradada"],
-];
+] as const;
 
-async function mockEmptyDocuments(page) {
+async function mockEmptyDocuments(page: Page): Promise<void> {
   await page.route("**/api/documents", async (route) => {
     await route.fulfill({ status: 200, json: { items: [] } });
   });
@@ -46,11 +48,11 @@ function publishedRuntimeConfig() {
 /**
  * Serve the production origin from the local static server while keeping the
  * production CSP and a controllable runtime-config response.
- *
- * @param {import("@playwright/test").Page} page
- * @param {(route: import("@playwright/test").Route) => Promise<void>} runtimeHandler
  */
-async function routePublishedFrontend(page, runtimeHandler) {
+async function routePublishedFrontend(
+  page: Page,
+  runtimeHandler: (route: Route) => Promise<void>,
+): Promise<void> {
   await page.route(`${PUBLISHED_ORIGIN}/**`, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/runtime-config.v1.json") {
@@ -60,7 +62,7 @@ async function routePublishedFrontend(page, runtimeHandler) {
     const local = await page.request.fetch(
       `http://127.0.0.1:3000${url.pathname}${url.search}`,
     );
-    const headers = {
+    const headers: Record<string, string> = {
       ...local.headers(),
       "content-security-policy": PUBLISHED_CSP,
     };
@@ -73,8 +75,9 @@ async function routePublishedFrontend(page, runtimeHandler) {
   });
 }
 
-function accessToken() {
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+function accessToken(): string {
+  const encode = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none" })}.${encode({
     client_id: CLIENT_ID,
     exp: Math.floor(Date.now() / 1000) + 3600,
@@ -82,23 +85,44 @@ function accessToken() {
   })}.signature`;
 }
 
+/**
+ * Type a value into a React-controlled field from page context. Assigning
+ * `.value` alone bypasses React's value tracker, so the native setter is used
+ * and an input event is dispatched, exactly like a real keystroke.
+ */
+const FILL_CONTROLLED_FIELDS = (request: {
+  features: Record<string, number>;
+  top_k: number;
+}) => {
+  const write = (element: Element | null, value: string) => {
+    if (element === null) {
+      throw new Error("O console não declara o controle esperado.");
+    }
+    const prototype =
+      element instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+    setter?.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  for (const [name, value] of Object.entries(request.features)) {
+    write(document.querySelector(`[data-feature="${name}"]`), String(value));
+  }
+  write(document.querySelector("#top-k"), String(request.top_k));
+};
+
 test("config publicada pendente mantem toda superficie protegida bloqueada", async ({
   page,
 }) => {
-  let releaseRuntime;
-  let markRuntimeRequested;
-  const runtimeRelease = new Promise((resolve) => {
-    releaseRuntime = resolve;
-  });
-  const runtimeRequested = new Promise((resolve) => {
-    markRuntimeRequested = resolve;
-  });
+  const runtimeRelease = deferred<void>();
+  const runtimeRequested = deferred<void>();
   await routePublishedFrontend(page, async (route) => {
-    markRuntimeRequested();
-    await runtimeRelease;
+    runtimeRequested.resolve();
+    await runtimeRelease.promise;
     await route.fulfill({ status: 503, body: "" });
   });
-  const apiRequests = [];
+  const apiRequests: string[] = [];
   page.on("request", (request) => {
     const endpoint = new URL(request.url());
     if (
@@ -111,7 +135,7 @@ test("config publicada pendente mantem toda superficie protegida bloqueada", asy
 
   const state = "s".repeat(43);
   await page.goto(`${PUBLISHED_ORIGIN}/?code=temporary-code&state=${state}`);
-  await runtimeRequested;
+  await runtimeRequested.promise;
 
   await expect(page).toHaveURL(`${PUBLISHED_ORIGIN}/`);
   await expect(page.locator("#analysis-form")).toHaveAttribute("inert", "");
@@ -120,9 +144,9 @@ test("config publicada pendente mantem toda superficie protegida bloqueada", asy
   await expect(page.locator("#documents-panel")).toHaveAttribute("aria-busy", "true");
   expect(apiRequests).toEqual([]);
 
-  releaseRuntime();
+  runtimeRelease.resolve();
   await expect(page.locator("#auth-status")).toHaveText(
-    "Configura\u00e7\u00e3o de publica\u00e7\u00e3o indispon\u00edvel",
+    "Configuração de publicação indisponível",
   );
   await expect(page.locator("#analysis-form")).toHaveAttribute("inert", "");
   await expect(page.locator("#analysis-form")).toHaveAttribute("aria-busy", "false");
@@ -141,12 +165,9 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
     });
   });
   let authorizeCalls = 0;
-  let authorizeUrl = null;
-  let callbackUrl = null;
-  let markAuthorizeRequested;
-  const authorizeRequested = new Promise((resolve) => {
-    markAuthorizeRequested = resolve;
-  });
+  let authorizeUrl: URL | null = null;
+  let callbackUrl: URL | null = null;
+  const authorizeRequested = deferred<void>();
   await page.route(`${COGNITO_ORIGIN}/oauth2/authorize?*`, async (route) => {
     authorizeCalls += 1;
     const request = route.request();
@@ -179,18 +200,12 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
       contentType: "text/html",
       body: "<!doctype html><title>Synthetic Cognito Hosted UI</title>",
     });
-    markAuthorizeRequested();
+    authorizeRequested.resolve();
   });
 
   const expectedAccessToken = accessToken();
-  let releaseToken;
-  let markTokenRequested;
-  const tokenRelease = new Promise((resolve) => {
-    releaseToken = resolve;
-  });
-  const tokenRequested = new Promise((resolve) => {
-    markTokenRequested = resolve;
-  });
+  const tokenRelease = deferred<void>();
+  const tokenRequested = deferred<void>();
   let tokenCalls = 0;
   await page.route(`${COGNITO_ORIGIN}/oauth2/token`, async (route) => {
     tokenCalls += 1;
@@ -205,7 +220,7 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
       throw new Error("The real PKCE exchange did not provide verifier material.");
     }
     expect(createHash("sha256").update(verifier).digest("base64url")).toBe(
-      authorizeUrl.searchParams.get("code_challenge"),
+      (authorizeUrl as URL).searchParams.get("code_challenge"),
     );
     expect(parameters).toEqual({
       client_id: CLIENT_ID,
@@ -214,8 +229,8 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
       grant_type: "authorization_code",
       redirect_uri: `${PUBLISHED_ORIGIN}/`,
     });
-    markTokenRequested();
-    await tokenRelease;
+    tokenRequested.resolve();
+    await tokenRelease.promise;
     await route.fulfill({
       status: 200,
       headers: {
@@ -230,15 +245,9 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
     });
   });
 
-  const apiRequests = [];
-  let releaseDocuments;
-  let markDocumentsRequested;
-  const documentsRelease = new Promise((resolve) => {
-    releaseDocuments = resolve;
-  });
-  const documentsRequested = new Promise((resolve) => {
-    markDocumentsRequested = resolve;
-  });
+  const apiRequests: string[] = [];
+  const documentsRelease = deferred<void>();
+  const documentsRequested = deferred<void>();
   let analysisCalls = 0;
   await page.route(`${API_ORIGIN}/**`, async (route) => {
     const request = route.request();
@@ -258,8 +267,8 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
     }
     expect(request.headers().authorization).toBe(`Bearer ${expectedAccessToken}`);
     if (request.method() === "GET" && pathname === "/documents") {
-      markDocumentsRequested();
-      await documentsRelease;
+      documentsRequested.resolve();
+      await documentsRelease.promise;
       await route.fulfill({
         status: 200,
         headers: {
@@ -288,14 +297,14 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
   });
 
   await page.goto(`${PUBLISHED_ORIGIN}/`);
-  await expect(page.locator("#auth-status")).toHaveText("Login necess\u00e1rio");
+  await expect(page.locator("#auth-status")).toHaveText("Login necessário");
   await page.getByRole("button", { name: "Entrar com Cognito" }).click();
-  await authorizeRequested;
+  await authorizeRequested.promise;
   if (callbackUrl === null) {
     throw new Error("The real authorize request did not produce a callback URL.");
   }
-  await page.goto(callbackUrl.href, { waitUntil: "commit" });
-  await tokenRequested;
+  await page.goto((callbackUrl as URL).href, { waitUntil: "commit" });
+  await tokenRequested.promise;
 
   await expect(page).toHaveURL(`${PUBLISHED_ORIGIN}/`);
   await expect(page.locator("#analysis-form")).toHaveAttribute("inert", "");
@@ -308,10 +317,10 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
     await page.evaluate((key) => sessionStorage.getItem(key), PKCE_STORAGE_KEY),
   ).toBeNull();
 
-  releaseToken();
+  tokenRelease.resolve();
   await page.waitForLoadState("load");
-  await documentsRequested;
-  await expect(page.locator("#auth-status")).toHaveText("Sess\u00e3o autenticada");
+  await documentsRequested.promise;
+  await expect(page.locator("#auth-status")).toHaveText("Sessão autenticada");
   await expect(page.locator("#analysis-form")).not.toHaveAttribute("inert", "");
   await expect(page.locator("#analysis-form")).toHaveAttribute("aria-busy", "false");
   await expect(page.locator("#documents-panel")).toHaveAttribute("inert", "");
@@ -320,11 +329,11 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
     "true",
   );
   await page.locator("#example-select").selectOption("normal");
-  await page.getByRole("button", { name: "Executar an\u00e1lise" }).click();
-  await expect(page.locator("#report-heading")).toHaveText("Condi\u00e7\u00e3o normal");
+  await page.getByRole("button", { name: "Executar análise" }).click();
+  await expect(page.locator("#report-heading")).toHaveText("Condição normal");
   expect(analysisCalls).toBe(1);
 
-  releaseDocuments();
+  documentsRelease.resolve();
   await expect(page.locator("#documents-panel")).not.toHaveAttribute("inert", "");
   await expect(page.locator("#documents-panel")).toHaveAttribute(
     "aria-busy",
@@ -333,16 +342,19 @@ test("callback publicado libera uma analise exata antes dos documentos", async (
   await page.waitForTimeout(150);
   expect(analysisCalls).toBe(1);
   expect(tokenCalls).toBe(1);
-  await page.goto(callbackUrl.href);
+  await page.goto((callbackUrl as URL).href);
   await expect(page.locator("#auth-status")).toHaveText(
     "Callback de login recusado",
   );
   expect(tokenCalls).toBe(1);
   expect(
-    await page.evaluate((key) => ({
-      local: localStorage.getItem(key),
-      session: sessionStorage.getItem(key),
-    }), PKCE_STORAGE_KEY),
+    await page.evaluate(
+      (key) => ({
+        local: localStorage.getItem(key),
+        session: sessionStorage.getItem(key),
+      }),
+      PKCE_STORAGE_KEY,
+    ),
   ).toEqual({ local: null, session: null });
 });
 
@@ -351,14 +363,14 @@ test("login publicado permanece ocupado e produz um unico redirect PKCE", async 
 }) => {
   await page.addInitScript(() => {
     const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
-    /** @type {() => void} */
-    let releaseDigest = () => {};
-    /** @type {Promise<void>} */
-    const digestRelease = new Promise((resolve) => {
+    let releaseDigest: () => void = () => {};
+    const digestRelease = new Promise<void>((resolve) => {
       releaseDigest = resolve;
     });
-    /** @type {SubtleCrypto["digest"]} */
-    const delayedDigest = async (algorithm, data) => {
+    const delayedDigest = async (
+      algorithm: AlgorithmIdentifier,
+      data: BufferSource,
+    ) => {
       await digestRelease;
       return originalDigest(algorithm, data);
     };
@@ -373,26 +385,23 @@ test("login publicado permanece ocupado e produz um unico redirect PKCE", async 
     });
   });
   let authorizeCalls = 0;
-  let authorizeUrl = null;
-  let markAuthorizeRequested;
-  const authorizeRequested = new Promise((resolve) => {
-    markAuthorizeRequested = resolve;
-  });
+  let authorizeUrl: URL | null = null;
+  const authorizeRequested = deferred<void>();
   await page.route(`${COGNITO_ORIGIN}/oauth2/authorize?*`, async (route) => {
     authorizeCalls += 1;
     authorizeUrl = new URL(route.request().url());
-    markAuthorizeRequested();
+    authorizeRequested.resolve();
     await route.abort();
   });
 
   await page.goto(`${PUBLISHED_ORIGIN}/`);
-  await expect(page.locator("#auth-status")).toHaveText("Login necess\u00e1rio");
+  await expect(page.locator("#auth-status")).toHaveText("Login necessário");
   const busy = await page.locator("#auth-login").evaluate((button) => {
-    button.click();
-    button.click();
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
     return {
       buttonBusy: button.getAttribute("aria-busy"),
-      disabled: button.disabled,
+      disabled: (button as HTMLButtonElement).disabled,
       panelBusy: document.querySelector("#auth-panel")?.getAttribute("aria-busy"),
     };
   });
@@ -409,26 +418,28 @@ test("login publicado permanece ocupado e produz um unico redirect PKCE", async 
     }
     release();
   });
-  await authorizeRequested;
+  await authorizeRequested.promise;
 
   expect(authorizeCalls).toBe(1);
-  expect(Object.fromEntries(authorizeUrl.searchParams)).toMatchObject({
+  expect(Object.fromEntries((authorizeUrl as unknown as URL).searchParams)).toMatchObject({
     client_id: CLIENT_ID,
     code_challenge_method: "S256",
     redirect_uri: `${PUBLISHED_ORIGIN}/`,
     response_type: "code",
     scope: "openid",
   });
-  expect(authorizeUrl.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
-  expect(authorizeUrl.searchParams.get("code_challenge")).toMatch(
-    /^[A-Za-z0-9_-]{43}$/,
-  );
+  expect(
+    (authorizeUrl as unknown as URL).searchParams.get("state"),
+  ).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(
+    (authorizeUrl as unknown as URL).searchParams.get("code_challenge"),
+  ).toMatch(/^[A-Za-z0-9_-]{43}$/);
 });
 
 test("offline demonstra cinco outcomes e toda a navegação sem chamar a API", async ({
   page,
 }) => {
-  const apiRequests = [];
+  const apiRequests: string[] = [];
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
     if (
@@ -460,7 +471,9 @@ test("offline demonstra cinco outcomes e toda a navegação sem chamar a API", a
   expect(apiRequests).toEqual([]);
 });
 
-test("teclado, foco e erros associados cobrem análise e troca de área", async ({ page }) => {
+test("teclado, foco e erros associados cobrem análise e troca de área", async ({
+  page,
+}) => {
   await page.goto("/?mode=offline");
 
   await page.keyboard.press("Tab");
@@ -494,10 +507,7 @@ test("teclado, foco e erros associados cobrem análise e troca de área", async 
 test("loading, erro e retry preservam o último resultado válido", async ({ page }) => {
   await mockEmptyDocuments(page);
   let calls = 0;
-  let releaseFailure;
-  const delayedFailure = new Promise((resolve) => {
-    releaseFailure = resolve;
-  });
+  const delayedFailure = deferred<void>();
   await page.route("**/api/analysis", async (route) => {
     calls += 1;
     if (calls === 1) {
@@ -505,7 +515,7 @@ test("loading, erro e retry preservam o último resultado válido", async ({ pag
       return;
     }
     if (calls === 2) {
-      await delayedFailure;
+      await delayedFailure.promise;
       await route.fulfill({ status: 502, json: {} });
       return;
     }
@@ -524,36 +534,34 @@ test("loading, erro e retry preservam o último resultado válido", async ({ pag
   await expect(page.locator("#report")).toContainText("Resultado anterior preservado");
   await expect(page.locator("#report-heading")).toHaveText("Condição normal");
 
-  releaseFailure();
+  delayedFailure.resolve();
   await expect(page.locator(".report-state-title")).toHaveText("A API não respondeu");
   await expect(page.locator("#report-heading")).toHaveText("Condição normal");
   await page.getByRole("button", { name: "Tentar novamente" }).click();
   await expect(page.locator("#report-heading")).toHaveText("Falha documentada");
-  await expect(page.locator("#report")).not.toContainText("Resultado anterior preservado");
+  await expect(page.locator("#report")).not.toContainText(
+    "Resultado anterior preservado",
+  );
 });
 
-test("uma resposta fora de ordem não substitui a análise mais recente", async ({ page }) => {
+test("uma resposta fora de ordem não substitui a análise mais recente", async ({
+  page,
+}) => {
   await mockEmptyDocuments(page);
   let calls = 0;
   let completedCalls = 0;
-  let releaseOld;
-  let resolveBothResponses;
-  const oldResponse = new Promise((resolve) => {
-    releaseOld = resolve;
-  });
-  const bothResponsesCompleted = new Promise((resolve) => {
-    resolveBothResponses = resolve;
-  });
+  const oldResponse = deferred<void>();
+  const bothResponsesCompleted = deferred<void>();
   const markResponseCompleted = () => {
     completedCalls += 1;
     if (completedCalls === 2) {
-      resolveBothResponses();
+      bothResponsesCompleted.resolve();
     }
   };
   await page.route("**/api/analysis", async (route) => {
     calls += 1;
     if (calls === 1) {
-      await oldResponse;
+      await oldResponse.promise;
       await route.fulfill({ status: 200, json: responseExample("normal") });
       markResponseCompleted();
       return;
@@ -565,17 +573,18 @@ test("uma resposta fora de ordem não substitui a análise mais recente", async 
   await page.locator("#example-select").selectOption("normal");
   await page.getByRole("button", { name: "Executar análise" }).click();
 
-  await page.evaluate((request) => {
-    for (const [name, value] of Object.entries(request.features)) {
-      document.querySelector(`[data-feature="${name}"]`).value = String(value);
+  await page.evaluate(FILL_CONTROLLED_FIELDS, requestExample("documented_fault"));
+  await page.evaluate(() => {
+    const form = document.querySelector("#analysis-form");
+    if (!(form instanceof HTMLFormElement)) {
+      throw new Error("O painel não declara o formulário de análise.");
     }
-    document.querySelector("#top-k").value = String(request.top_k);
-    document.querySelector("#analysis-form").requestSubmit();
-  }, requestExample("documented_fault"));
+    form.requestSubmit();
+  });
 
   await expect(page.locator("#report-heading")).toHaveText("Falha documentada");
-  releaseOld();
-  await bothResponsesCompleted;
+  oldResponse.resolve();
+  await bothResponsesCompleted.promise;
   await page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -629,8 +638,8 @@ for (const viewport of [
     ]) {
       const box = await page.locator(selector).boundingBox();
       expect(box, selector).not.toBeNull();
-      expect(box.height, selector).toBeGreaterThanOrEqual(44);
-      expect(box.width, selector).toBeGreaterThanOrEqual(44);
+      expect(box?.height, selector).toBeGreaterThanOrEqual(44);
+      expect(box?.width, selector).toBeGreaterThanOrEqual(44);
     }
   });
 }
@@ -638,10 +647,16 @@ for (const viewport of [
 test("reduced motion remove animações funcionais longas", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/?mode=offline#analysis");
-  await expect.poll(() => page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
-  const duration = await page.locator("#report").evaluate(
-    (element) => getComputedStyle(element).animationDuration,
-  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches),
+    )
+    .toBe(true);
+  // The report's entrance animation lives on the inner container that React
+  // remounts per state, which is what the motion clamp has to neutralise.
+  const duration = await page
+    .locator("#report .report-enter")
+    .evaluate((element) => getComputedStyle(element).animationDuration);
   const durationSeconds = duration.endsWith("ms")
     ? Number.parseFloat(duration) / 1000
     : Number.parseFloat(duration);

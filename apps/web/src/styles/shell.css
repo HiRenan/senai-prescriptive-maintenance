@@ -11,6 +11,12 @@
   );
 }
 
+/* The sticky bar must never cover what the browser scrolls to, whether the
+   target is a fragment, a focused section, or a control being activated. */
+:where([id], [tabindex="-1"]) {
+  scroll-margin-top: calc(3.5rem + var(--space-sm));
+}
+
 /* Top bar ---------------------------------------------------------------- */
 
 .topbar {
