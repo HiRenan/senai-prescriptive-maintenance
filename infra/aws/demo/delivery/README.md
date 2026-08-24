@@ -237,17 +237,22 @@ Uma **conta AWS exclusiva da demo, sem workloads de produção ou compartilhados
 e tags limitam todas as mutações em que a matriz oficial oferece esses controles;
 o gate de state/plano acrescenta a identidade de valor. Ainda assim, algumas
 leituras do provider e criações globais exigem ou conservam `Resource: "*"`.
-Nenhuma ação de delete, update, policy, pass-role, upload de camada ou escrita de
-state aparece nos statements globais abaixo.
+Além de criações já justificadas, a única mutação global é a ação
+permission-only `aws-portal:ModifyBilling`, exigida pela autorização composta do
+AWS Budgets e isolada em statement próprio. Nenhuma ação de delete, policy,
+pass-role, upload de camada ou escrita de state aparece nos statements globais
+abaixo.
 
-- Plan, `ReadDemoResources`: `apigateway:GET`, `budgets:ViewBudget`,
+- Plan, `ReadDemoResources`: `apigateway:GET`, `aws-portal:ViewBilling`,
+  `budgets:ViewBudget`,
   `cloudfront:GetCachePolicy`, `cloudfront:GetDistribution`,
   `cloudfront:GetOriginAccessControl`, `cloudfront:GetResponseHeadersPolicy`,
   `cloudfront:ListTagsForResource`, `cloudwatch:DescribeAlarms`,
   `cloudwatch:ListTagsForResource`, `cognito-idp:DescribeUserPool`,
   `cognito-idp:DescribeUserPoolClient`, `cognito-idp:DescribeUserPoolDomain`,
   `cognito-idp:ListTagsForResource`,
-  `ec2:DescribeAvailabilityZones`, `ec2:DescribeRouteTables`,
+  `ec2:DescribeAvailabilityZones`, `ec2:DescribeNetworkAcls`,
+  `ec2:DescribeRouteTables`,
   `ec2:DescribeSecurityGroupRules`, `ec2:DescribeSecurityGroups`,
   `ec2:DescribeSubnets`, `ec2:DescribeVpcAttribute`,
   `ec2:DescribeVpcEndpoints`, `ec2:DescribeVpcs`, `ecs:DescribeClusters`,
@@ -263,14 +268,16 @@ state aparece nos statements globais abaixo.
 - Deploy, `EcrAuth`: `ecr:GetAuthorizationToken`. Motivo: a matriz ECR
   não oferece resource-level authorization para a credencial temporária do
   registry; nenhum segredo retornado é impresso.
-- Deploy, `GlobalReads`: `apigateway:GET`, `budgets:ViewBudget`,
+- Deploy, `GlobalReads`: `apigateway:GET`, `aws-portal:ViewBilling`,
+  `budgets:ViewBudget`,
   `cloudfront:GetCachePolicy`, `cloudfront:GetDistribution`,
   `cloudfront:GetOriginAccessControl`, `cloudfront:GetResponseHeadersPolicy`,
   `cloudfront:ListTagsForResource`, `cloudwatch:DescribeAlarms`,
   `cloudwatch:ListTagsForResource`, `cognito-idp:DescribeUserPool`,
   `cognito-idp:DescribeUserPoolClient`, `cognito-idp:DescribeUserPoolDomain`,
   `cognito-idp:ListTagsForResource`,
-  `ec2:DescribeAvailabilityZones`, `ec2:DescribeRouteTables`,
+  `ec2:DescribeAvailabilityZones`, `ec2:DescribeNetworkAcls`,
+  `ec2:DescribeRouteTables`,
   `ec2:DescribeSecurityGroupRules`, `ec2:DescribeSecurityGroups`,
   `ec2:DescribeSubnets`, `ec2:DescribeVpcAttribute`,
   `ec2:DescribeVpcEndpoints`, `ec2:DescribeVpcs`, `ecs:DescribeClusters`,
@@ -282,6 +289,11 @@ state aparece nos statements globais abaixo.
   `sqs:GetQueueUrl`, `sqs:ListQueueTags` e `sts:GetCallerIdentity`. Motivo:
   refresh/reconciliação do provider; o statement é somente leitura e está
   separado de todas as mutações.
+- Deploy, `BudgetPortalRW`: `aws-portal:ModifyBilling`. A matriz oficial do AWS
+  Budgets exige essa permissão junto de `budgets:ModifyBudget` para criar,
+  atualizar ou excluir o Budget, mas não oferece ARN nem condition key. A ação
+  fica isolada na role OIDC temporária do environment protegido; o controlador
+  limita a mutação ao Budget determinístico auditado no plano.
 - Deploy, `GlobalNew`: `cloudfront:CreateDistribution`,
   `cognito-idp:CreateUserPool` e
   `servicediscovery:CreatePrivateDnsNamespace`. Motivo: a autorização oficial
@@ -305,7 +317,7 @@ state aparece nos statements globais abaixo.
   `aws:RequestTag/Profile = aws-demo`. Os demais `POST`/`PATCH` ficam em
   `ApiWrites` sob `/apis/*`, pois atuam somente depois que o API ID existe.
 - Teardown, `InventoryDemoResourcesGlobal`: `apigateway:GET`,
-  `budgets:ViewBudget`, `cloudfront:GetCachePolicy`,
+  `aws-portal:ViewBilling`, `budgets:ViewBudget`, `cloudfront:GetCachePolicy`,
   `cloudfront:GetDistribution`, `cloudfront:GetDistributionConfig`,
   `cloudfront:GetOriginAccessControl`, `cloudfront:GetResponseHeadersPolicy`,
   `cloudfront:ListCachePolicies`, `cloudfront:ListDistributions`,
@@ -314,7 +326,8 @@ state aparece nos statements globais abaixo.
   `cloudwatch:ListTagsForResource`, `cognito-idp:DescribeUserPool`,
   `cognito-idp:DescribeUserPoolClient`, `cognito-idp:DescribeUserPoolDomain`,
   `cognito-idp:ListTagsForResource`,
-  `cognito-idp:ListUserPools`, `ec2:DescribeRouteTables`,
+  `cognito-idp:ListUserPools`, `ec2:DescribeNetworkAcls`,
+  `ec2:DescribeRouteTables`,
   `ec2:DescribeSecurityGroupRules`, `ec2:DescribeSecurityGroups`,
   `ec2:DescribeSubnets`, `ec2:DescribeVpcAttribute`,
   `ec2:DescribeVpcEndpoints`, `ec2:DescribeVpcs`,
@@ -332,6 +345,9 @@ state aparece nos statements globais abaixo.
   a conta/região para
   provar ausência dentro do escopo. O parser aceita apenas nomes, ARNs e tags
   canônicos e falha em qualquer erro, truncamento ou schema novo.
+- Teardown, `BudgetPortalRW`: `aws-portal:ModifyBilling`. A mesma permissão
+  composta é necessária para excluir o Budget durante o destroy; ela permanece
+  isolada, temporária e limitada pelo state e pelo plano destrutivo auditados.
 - Teardown, `DestroyTaskDefinitions`: `ecs:DeregisterTaskDefinition`. Mesma
   limitação da matriz ECS; a ação fica isolada e depende da identidade exata do
   state/plano aprovada antes do destroy.
