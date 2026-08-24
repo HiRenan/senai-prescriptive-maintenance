@@ -548,7 +548,68 @@ def terraform_init(
     )
 
 
+def remote_state_exists(
+    configuration: Mapping[str, str],
+    environment: Mapping[str, str],
+) -> bool:
+    account_id = configuration.get("account_id")
+    state_bucket = configuration.get("state_bucket")
+    state_key = configuration.get("state_key")
+    if (
+        type(account_id) is not str
+        or ACCOUNT_PATTERN.fullmatch(account_id) is None
+        or type(state_bucket) is not str
+        or re.fullmatch(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", state_bucket) is None
+        or type(state_key) is not str
+        or state_key != STATE_KEY
+    ):
+        fail("Identidade do state remoto está ausente ou inválida.")
+    raw = capture_silent(
+        "aws",
+        (
+            "s3api",
+            "list-objects-v2",
+            "--bucket",
+            state_bucket,
+            "--prefix",
+            state_key,
+            "--max-keys",
+            "2",
+            "--expected-bucket-owner",
+            account_id,
+            "--no-paginate",
+            "--output",
+            "json",
+            "--no-cli-pager",
+        ),
+        environment=environment,
+        timeout_seconds=60,
+        max_bytes=65_536,
+    )
+    document = strict_json(raw, context="Consulta privada do state")
+    if type(document) is not dict:
+        fail("Consulta privada do state possui estrutura inválida.")
+    contents = document.get("Contents", [])
+    key_count = document.get("KeyCount")
+    if (
+        document.get("IsTruncated") is not False
+        or type(key_count) is not int
+        or type(contents) is not list
+        or key_count != len(contents)
+    ):
+        fail("Consulta privada do state possui paginação ou contagem inválida.")
+    keys: list[str] = []
+    for item in contents:
+        if type(item) is not dict or type(item.get("Key")) is not str:
+            fail("Consulta privada do state possui item inválido.")
+        keys.append(cast(str, item["Key"]))
+    if any(key != state_key for key in keys) or len(keys) > 1:
+        fail("Prefixo privado do state contém objeto inesperado.")
+    return keys == [state_key]
+
+
 def terraform_state_list(
+    configuration: Mapping[str, str],
     environment: Mapping[str, str],
     temporary: Path,
     *,
@@ -556,6 +617,11 @@ def terraform_state_list(
     allow_missing: bool = False,
 ) -> tuple[Path, Mapping[str, object] | None]:
     output_path = temporary / f"state-{suffix}.txt"
+    if not remote_state_exists(configuration, environment):
+        if not allow_missing:
+            fail("State remoto esperado não existe.")
+        output_path.write_bytes(b"")
+        return output_path, None
     pulled = capture_silent(
         "terraform",
         terraform_arguments("state", "pull"),
@@ -564,10 +630,7 @@ def terraform_state_list(
         max_bytes=MAX_CAPTURE_BYTES,
     )
     if not pulled.strip():
-        if not allow_missing:
-            fail("State remoto esperado não existe.")
-        output_path.write_bytes(b"")
-        return output_path, None
+        fail("State remoto confirmado não pôde ser carregado.")
     document = strict_json(pulled, context="Snapshot privado do state")
     if (
         type(document) is not dict
@@ -743,7 +806,7 @@ def plan_operation(configuration: Mapping[str, str], temporary: Path) -> None:
     )
     terraform_init(configuration, base_environment)
     state_path, state_snapshot = terraform_state_list(
-        base_environment, temporary, suffix="plan"
+        configuration, base_environment, temporary, suffix="plan"
     )
     audit_pulled_state(
         state_path,
@@ -1056,6 +1119,7 @@ def foundation_operation(configuration: Mapping[str, str], temporary: Path) -> N
     )
     terraform_init(configuration, base_environment)
     state_path, state_snapshot = terraform_state_list(
+        configuration,
         base_environment,
         temporary,
         suffix="before-foundation",
@@ -1080,7 +1144,10 @@ def foundation_operation(configuration: Mapping[str, str], temporary: Path) -> N
         require_session_window(configuration, 3_600)
         terraform_apply(base_environment, foundation_plan)
         state_path, state_snapshot = terraform_state_list(
-            base_environment, temporary, suffix="after-foundation"
+            configuration,
+            base_environment,
+            temporary,
+            suffix="after-foundation",
         )
     audit_pulled_state(
         state_path,
@@ -1123,6 +1190,7 @@ def deploy_operation(configuration: Mapping[str, str], temporary: Path) -> None:
     )
     terraform_init(configuration, base_environment)
     state_path, state_snapshot = terraform_state_list(
+        configuration,
         base_environment,
         temporary,
         suffix="before-deploy",
@@ -1160,6 +1228,7 @@ def deploy_operation(configuration: Mapping[str, str], temporary: Path) -> None:
     terraform_apply(runtime_environment, runtime_plan)
 
     deployed_state, deployed_snapshot = terraform_state_list(
+        configuration,
         runtime_environment,
         temporary,
         suffix="after-deploy",
@@ -1239,6 +1308,7 @@ def teardown_operation(configuration: Mapping[str, str], temporary: Path) -> Non
     )
     terraform_init(configuration, base_environment)
     state_path, state_snapshot = terraform_state_list(
+        configuration,
         base_environment,
         temporary,
         suffix="before-destroy",
@@ -1276,7 +1346,10 @@ def teardown_operation(configuration: Mapping[str, str], temporary: Path) -> Non
         require_session_window(configuration, 3_600)
         terraform_apply(base_environment, destroy_plan)
         empty_state, empty_snapshot = terraform_state_list(
-            base_environment, temporary, suffix="after-destroy"
+            configuration,
+            base_environment,
+            temporary,
+            suffix="after-destroy",
         )
     audit_pulled_state(
         empty_state,
