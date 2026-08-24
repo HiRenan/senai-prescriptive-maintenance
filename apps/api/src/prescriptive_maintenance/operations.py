@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import sys
+from collections.abc import Callable
 from contextvars import ContextVar, Token
 from math import ceil, isfinite
 from typing import Final, Protocol, TextIO
@@ -16,12 +17,14 @@ from psycopg import Connection
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from prescriptive_maintenance.settings import Settings
+from prescriptive_maintenance.settings import AnalysisMode, Settings
 
+ANALYSIS_MODE_HEADER: Final = "X-Analysis-Mode"
 CORRELATION_ID_HEADER: Final = "X-Correlation-ID"
 READINESS_TIMEOUT_SECONDS: Final = 1.0
 MAX_READINESS_TIMEOUT_SECONDS: Final = 10.0
 _CORRELATION_ID_HEADER_BYTES: Final = CORRELATION_ID_HEADER.lower().encode("ascii")
+_ANALYSIS_MODE_HEADER_BYTES: Final = ANALYSIS_MODE_HEADER.lower().encode("ascii")
 _CORRELATION_ID_PATTERN: Final = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,62}[A-Za-z0-9])?"
 )
@@ -101,19 +104,26 @@ class PostgresReadinessProbe:
 class ReadinessService:
     """Evaluate only the dependencies required by the selected profile."""
 
-    __slots__ = ("_in_flight_probe", "_probe", "_timeout_seconds")
+    __slots__ = (
+        "_in_flight_probe",
+        "_probe",
+        "_runtime_available",
+        "_timeout_seconds",
+    )
 
     def __init__(
         self,
         settings: Settings,
         *,
         database_probe: ReadinessProbe | None,
+        runtime_available: bool = True,
         timeout_seconds: float = READINESS_TIMEOUT_SECONDS,
     ) -> None:
         if type(settings) is not Settings:
             raise TypeError("Readiness settings must use the canonical type.")
         if (
-            type(timeout_seconds) is not float
+            type(runtime_available) is not bool
+            or type(timeout_seconds) is not float
             or not isfinite(timeout_seconds)
             or timeout_seconds <= 0
             or timeout_seconds > MAX_READINESS_TIMEOUT_SECONDS
@@ -132,12 +142,17 @@ class ReadinessService:
             )
 
         self._probe = selected_probe
+        self._runtime_available = runtime_available
         self._timeout_seconds = timeout_seconds
         self._in_flight_probe: asyncio.Task[None] | None = None
 
     async def check(self) -> None:
         """Fail closed without exposing a probe exception or timing out the API."""
 
+        if not self._runtime_available:
+            raise RequiredDependencyUnavailableError(
+                "The configured analysis runtime is unavailable."
+            )
         probe = self._probe
         if probe is None:
             return
@@ -176,6 +191,44 @@ def current_correlation_id() -> str | None:
     """Return the identifier isolated to the current request context."""
 
     return _CORRELATION_ID.get()
+
+
+class AnalysisModeHeaderMiddleware:
+    """Expose only the closed configured mode as response metadata."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        mode_provider: Callable[[], AnalysisMode | None],
+    ) -> None:
+        self._app = app
+        self._mode_provider = mode_provider
+
+    async def __call__(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        async def send_with_analysis_mode(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                mode = self._mode_provider()
+                if mode in {"synthetic_demo", "artifacts"}:
+                    headers = [
+                        (name, value)
+                        for name, value in message.get("headers", [])
+                        if name.lower() != _ANALYSIS_MODE_HEADER_BYTES
+                    ]
+                    headers.append((_ANALYSIS_MODE_HEADER_BYTES, mode.encode("ascii")))
+                    message["headers"] = headers
+            await send(message)
+
+        await self._app(scope, receive, send_with_analysis_mode)
 
 
 class CorrelationIdMiddleware:

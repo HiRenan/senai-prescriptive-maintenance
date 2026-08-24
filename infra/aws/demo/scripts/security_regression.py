@@ -314,6 +314,14 @@ def wrong_persistence_backend(plan: Plan) -> None:
     )
 
 
+def wrong_analysis_mode(plan: Plan) -> None:
+    set_task_environment(
+        plan,
+        name="PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE",
+        value="artifacts",
+    )
+
+
 def injected_database_url(plan: Plan) -> None:
     def mutate(container: dict[str, Any]) -> None:
         environment = object_list(container.get("environment"), context="environment")
@@ -443,6 +451,10 @@ MUTATIONS: dict[str, tuple[Mutation, str]] = {
     ),
     "wrong_persistence_backend": (
         wrong_persistence_backend,
+        "A task diverge do contrato exato de imagem, runtime, ambiente ou readiness",
+    ),
+    "wrong_analysis_mode": (
+        wrong_analysis_mode,
         "A task diverge do contrato exato de imagem, runtime, ambiente ou readiness",
     ),
     "injected_database_url": (

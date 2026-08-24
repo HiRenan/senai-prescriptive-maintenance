@@ -85,6 +85,10 @@ resource "aws_ecs_task_definition" "api" {
 
       environment = [
         {
+          name  = "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE"
+          value = "synthetic_demo"
+        },
+        {
           name  = "PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT"
           value = "aws"
         },

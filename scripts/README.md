@@ -38,6 +38,18 @@ correlation ID seguro. O Uvicorn do smoke nasce em um diretório temporário vaz
 e recebe somente a configuração explícita desse perfil; um `.env` local e
 variáveis AWS herdadas não participam do processo.
 
+Para verificar derivados locais já aprovados, sem torná-los requisito do smoke
+público, use:
+
+```powershell
+uv run --frozen poe smoke --with-artifacts
+```
+
+O modo opcional só executa a composição quando `artifacts` está configurado. A
+ausência é reportada como indisponível/skip, enquanto configuração presente e
+incompatível falha o comando. A saída contém apenas contagens agregadas e nunca
+paths, IDs, labels ou conteúdo.
+
 Para também verificar um PostgreSQL já iniciado, o healthcheck, pgvector 0.8.6
 e uma operação vetorial mínima, use:
 

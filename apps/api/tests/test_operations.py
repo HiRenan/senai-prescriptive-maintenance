@@ -61,6 +61,7 @@ def _settings(
     values: dict[str, object] = {
         "environment": environment,
         "persistence_backend": selected_backend,
+        "analysis_mode": "synthetic_demo",
     }
     if selected_backend == "postgres":
         values["database_url"] = _DATABASE_URL
@@ -198,6 +199,10 @@ def test_offline_profile_never_calls_database_or_aws(
     probe = RecordingProbe(AssertionError("offline touched an external dependency"))
     monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT", "offline")
     monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND", "memory")
+    monkeypatch.setenv(
+        "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE",
+        "synthetic_demo",
+    )
     monkeypatch.delenv("PRESCRIPTIVE_MAINTENANCE_DATABASE_URL", raising=False)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "must_not_be_read")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must_not_be_read")
@@ -331,6 +336,10 @@ def test_invalid_startup_configuration_fails_early_with_sanitized_message(
     monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT", "local")
     monkeypatch.setenv("PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND", "postgres")
     monkeypatch.setenv(
+        "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE",
+        "synthetic_demo",
+    )
+    monkeypatch.setenv(
         "PRESCRIPTIVE_MAINTENANCE_DATABASE_URL",
         "not-a-url?token=synthetic-secret&path=C:\\synthetic-private",
     )
@@ -373,6 +382,7 @@ def test_settings_subclass_from_loader_fails_closed() -> None:
         {
             "environment": "offline",
             "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
         }
     )
 
@@ -392,6 +402,7 @@ def test_database_url_is_absent_from_operational_object_representations() -> Non
         {
             "environment": "aws",
             "persistence_backend": "postgres",
+            "analysis_mode": "synthetic_demo",
             "database_url": (
                 "postgresql://operations_user:"
                 f"{private_marker}@127.0.0.1/operations_database"

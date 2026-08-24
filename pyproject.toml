@@ -165,10 +165,11 @@ cmd = "docker compose down"
 
 [tool.poe.tasks.smoke]
 help = "Valida runtimes, configuração, liveness e readiness offline; banco é opcional."
-script = "scripts.smoke:main(with_services, with_applications, environ.get('POE_EXTRA_ARGS'))"
+script = "scripts.smoke:main(with_services, with_applications, with_artifacts, environ.get('POE_EXTRA_ARGS'))"
 args = [
   { name = "with_services", options = ["--with-services"], type = "boolean", help = "Verifica o PostgreSQL já iniciado e o pgvector." },
   { name = "with_applications", options = ["--with-applications"], type = "boolean", help = "Verifica API, web e OpenAPI v1 em contêineres já iniciados." },
+  { name = "with_artifacts", options = ["--with-artifacts"], type = "boolean", help = "Compõe derivados aprovados quando artifacts está configurado localmente." },
 ]
 
 [tool.ruff]

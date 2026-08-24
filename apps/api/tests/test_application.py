@@ -39,6 +39,7 @@ def test_liveness_contract_with_explicit_offline_profile(
         {
             "environment": "offline",
             "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
         }
     )
 
@@ -59,6 +60,7 @@ def test_smoke_health_process_ignores_repository_dotenv(
     (tmp_path / ".env").write_text(
         "PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT=local\n"
         "PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND=postgres\n"
+        "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE=synthetic_demo\n"
         "PRESCRIPTIVE_MAINTENANCE_DATABASE_URL="
         f"postgresql://smoke_user:{private_marker}@127.0.0.1/smoke_database\n",
         encoding="utf-8",

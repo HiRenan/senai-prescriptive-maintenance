@@ -1129,7 +1129,11 @@ def test_projection_failure_is_not_misreported_as_persistence(
         fail_projection,
     )
     settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
     with (
         caplog.at_level(logging.INFO, logger="prescriptive_maintenance.analysis"),
@@ -1166,7 +1170,11 @@ def test_metadata_failure_stops_before_persistence(
         clock=lambda: datetime(2032, 1, 2, 3, 4, 5),
     )
     settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
     with (
         caplog.at_level(logging.INFO, logger="prescriptive_maintenance.analysis"),
@@ -1200,7 +1208,11 @@ def test_persistence_failure_is_classified_and_never_publishes_cache(
         provider=FakeGenerationProvider(),
     )
     settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
     with (
         caplog.at_level(logging.INFO, logger="prescriptive_maintenance.analysis"),
@@ -1237,7 +1249,11 @@ def test_cache_failure_after_commit_does_not_turn_success_into_503(
     )
     monkeypatch.setattr(service, "_results", _FailingResultCache())
     settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
     with (
         caplog.at_level(logging.INFO, logger="prescriptive_maintenance.analysis"),
@@ -1278,7 +1294,11 @@ def test_correlation_id_is_shared_by_allowlisted_analysis_stage_logs(
         provider=FakeGenerationProvider(),
     )
     settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
 
     with (
@@ -1324,7 +1344,11 @@ def test_correlation_context_and_cache_are_isolated_under_concurrency(
         provider=FakeGenerationProvider(),
     )
     settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
     application = create_app(analysis_service=service, settings=settings)
 

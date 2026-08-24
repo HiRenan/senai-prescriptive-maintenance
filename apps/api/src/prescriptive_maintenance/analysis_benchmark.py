@@ -651,7 +651,11 @@ def run_local_analysis_benchmark(
     recorder = _BenchmarkRecorder()
     timed_service, authorization = _build_integrated_service(recorder)
     timed_settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
     timed_application = create_app(
         analysis_service=timed_service,
@@ -690,7 +694,11 @@ def run_local_analysis_benchmark(
     if memory_authorization.authorization_sha256 != authorization.authorization_sha256:
         raise AnalysisBenchmarkError("Benchmark runtime binding is inconsistent.")
     memory_settings = Settings.model_validate(
-        {"environment": "offline", "persistence_backend": "memory"}
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
+        }
     )
     memory_application = create_app(
         analysis_service=memory_service,

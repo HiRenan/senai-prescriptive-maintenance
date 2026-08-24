@@ -20,6 +20,7 @@ Inicie a aplicação em uma interface exclusivamente local:
 ```powershell
 $env:PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT = "offline"
 $env:PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND = "memory"
+$env:PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE = "synthetic_demo"
 uv run --frozen uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -27,10 +28,12 @@ uv run --frozen uvicorn prescriptive_maintenance.main:app --host 127.0.0.1 --por
 `application/json` e corpo `{"status":"ok"}`. A liveness verifica apenas que o
 processo está vivo e não acessa banco, arquivos, rede, configurações externas
 ou outros serviços. `GET /health/ready` responde `{"status":"ready"}` quando
-todas as dependências obrigatórias do perfil estão disponíveis; no perfil
-`offline`, não há dependência externa a consultar.
+todas as dependências obrigatórias do perfil e o runtime configurado estão
+disponíveis; no perfil `offline`, não há dependência externa a consultar.
 
-Toda resposta recebe `X-Correlation-ID`. Um único identificador ASCII entre 1 e
+Toda resposta recebe `X-Correlation-ID` e `X-Analysis-Mode`. O segundo contém
+somente `synthetic_demo` ou `artifacts`; caminhos, IDs internos, labels,
+conteúdo, prompt e motivo de falha não são expostos. Um único correlation ID ASCII entre 1 e
 64 caracteres, limitado a letras, números, `.`, `_`, `:` e `-` e delimitado por
 letra ou número, é propagado; valor ausente, vazio, duplicado, longo ou inseguro
 é substituído por um ID novo. O registro da requisição é um objeto JSON com
@@ -63,11 +66,13 @@ referências opacas e uma página positiva, sem título, caminho ou texto bruto.
 `support_score` é uma heurística agregada não calibrada, não uma probabilidade ou
 medida de confiança.
 
-Por padrão, o fluxo HTTP de análise usa fakes determinísticos e inteiramente
-sintéticos. A factory aceita a injeção explícita de `IntegratedAnalysisService`,
-que compõe modelo, índice, recuperação, guardrails e persistência somente quando
-todo o binding está autorizado; nenhum artefato real é selecionado ou descoberto
-automaticamente. O ciclo documental usa o adapter escolhido por `Settings`: memória nos
+O fluxo HTTP não possui modo implícito. `PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE`
+é obrigatório e aceita exclusivamente `synthetic_demo` ou `artifacts`.
+`synthetic_demo` conserva os fakes determinísticos públicos; `artifacts` usa o
+composition root para carregar k-NN e índice versionado, conferir ranking,
+recuperar apenas chunks de versões aprovadas e vigentes, aplicar guardrails,
+gerar a resposta e persistir metadados pela UoW. Nenhum artefato é descoberto e
+qualquer binding divergente interrompe a composição sem fallback. O ciclo documental usa o adapter escolhido por `Settings`: memória nos
 perfis efêmeros ou PostgreSQL quando esse backend é declarado. `POST /documents`
 é um **registro de metadados**, não um upload, e nunca implica aprovação. Nenhuma
 dessas rotas lê arquivos ou materiais originais. Para regenerar e conferir o
@@ -78,11 +83,18 @@ uv run --frozen python scripts/generate_openapi.py
 uv run --frozen python scripts/generate_openapi.py --check
 ```
 
-Os endpoints de health são operacionais. A readiness nova permanece fora do
-snapshot OpenAPI v1 para não alterar o contrato de negócio congelado; os bodies
+Os endpoints de health são operacionais. Configuração estrutural ausente ou
+inválida impede o startup. Já um manifesto `artifacts` ausente, corrompido ou
+incompatível mantém o processo vivo para diagnóstico operacional: liveness 200,
+readiness 503 e rotas de análise 503 sanitizado. Essa separação fornece evidência
+de indisponibilidade sem aceitar tráfego nem mascarar a falha com
+`synthetic_demo`. A readiness permanece fora do snapshot OpenAPI v1; os bodies
 de sucesso e o shape sanitizado dos erros 422, 409 e 503 também foram
-preservados. O correlation ID é devolvido pelo header, sem acrescentar campos
-aos modelos públicos.
+preservados. Os dois metadados são devolvidos por headers, sem acrescentar
+campos aos modelos públicos.
+
+O manifesto e a validação local opcional estão detalhados em
+[`../../docs/validation/analysis-runtime.md`](../../docs/validation/analysis-runtime.md).
 
 A verificação canônica inicia o Uvicorn em loopback e porta efêmera, faz a
 requisição HTTP real e encerra o processo ao final, sem exigir banco ou `.env`:
@@ -932,7 +944,7 @@ global, não repete a chamada e não produz efeito além do provider explicitame
 injetado. A suíte padrão usa o `FakeGenerationProvider` e doubles sintéticos;
 nenhuma chamada Bedrock live ocorre. `IntegratedAnalysisService` executa o
 modelo antes desta camada e a injeta na rota somente por composição explícita;
-o runtime padrão continua sintético. A segunda revalidação de vigência não
+o modo `artifacts` realiza essa composição após validar o manifesto. A segunda revalidação de vigência não
 elimina uma alteração posterior. Suporte estrutural e citações válidas também
 não provam, por si sós, a correção semântica de uma prescrição.
 
@@ -1145,9 +1157,9 @@ treino e a contagem determinística esperada, enquanto validação deve possuir
 hash distinto. Os arrays reais contêm derivados por registro e nunca
 devem ser versionados ou publicados.
 
-A factory HTTP padrão continua injetando fakes sintéticos. O adapter real pode
-participar apenas de uma composição explícita cuja autorização também vincule o
-índice equivalente; nenhum artefato real está aprovado ou conectado por padrão.
+A factory HTTP exige um modo explícito. `synthetic_demo` injeta os fakes;
+`artifacts` só conecta o adapter real quando a autorização também vincula o
+índice equivalente. Nenhum artefato privado é aprovado pelo repositório.
 As evidências históricas permanecem em
 [`docs/validation/knn-baseline.md`](../../docs/validation/knn-baseline.md) e
 [`docs/validation/knn-abstention.md`](../../docs/validation/knn-abstention.md).

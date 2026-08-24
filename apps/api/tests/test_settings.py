@@ -10,6 +10,7 @@ ENV_EXAMPLE = Path(__file__).parents[3] / ".env.example"
 ENVIRONMENT_VARIABLE = "PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT"
 PERSISTENCE_BACKEND_VARIABLE = "PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND"
 DATABASE_URL_VARIABLE = "PRESCRIPTIVE_MAINTENANCE_DATABASE_URL"
+ANALYSIS_MODE_VARIABLE = "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE"
 
 
 def _load_settings(env_file: Path | None) -> Settings:
@@ -21,6 +22,7 @@ def clear_settings_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENVIRONMENT_VARIABLE, raising=False)
     monkeypatch.delenv(PERSISTENCE_BACKEND_VARIABLE, raising=False)
     monkeypatch.delenv(DATABASE_URL_VARIABLE, raising=False)
+    monkeypatch.setenv(ANALYSIS_MODE_VARIABLE, "synthetic_demo")
 
 
 def test_settings_load_complete_local_env_example() -> None:
@@ -29,6 +31,7 @@ def test_settings_load_complete_local_env_example() -> None:
 
     assert settings.environment == "local"
     assert settings.persistence_backend == "postgres"
+    assert settings.analysis_mode == "synthetic_demo"
     assert isinstance(database_url, PostgresDsn)
     assert database_url.scheme == "postgresql"
     assert database_url.path == "/prescriptive_maintenance"
@@ -42,6 +45,7 @@ def test_database_url_is_excluded_from_settings_representation() -> None:
         {
             "environment": "local",
             "persistence_backend": "postgres",
+            "analysis_mode": "synthetic_demo",
             "database_url": (
                 "postgresql://settings_user:"
                 f"{private_marker}@127.0.0.1/settings_database"
@@ -53,6 +57,27 @@ def test_database_url_is_excluded_from_settings_representation() -> None:
     assert "database_url" not in repr(settings)
 
 
+def test_artifact_references_are_excluded_from_settings_representation(
+    tmp_path: Path,
+) -> None:
+    private_marker = "sen79-private-artifact-directory"
+    manifest = tmp_path / private_marker / "runtime.json"
+    settings = Settings.model_validate(
+        {
+            "environment": "offline",
+            "persistence_backend": "memory",
+            "analysis_mode": "artifacts",
+            "analysis_artifacts_manifest": manifest,
+            "analysis_artifacts_manifest_sha256": "0" * 64,
+        }
+    )
+
+    representation = repr(settings)
+    assert private_marker not in representation
+    assert "analysis_artifacts_manifest" not in representation
+    assert "analysis_artifacts_manifest_sha256" not in representation
+
+
 def test_invalid_database_url_is_hidden_from_validation_error_text() -> None:
     private_marker = "sen62-private-invalid-url"
 
@@ -61,6 +86,7 @@ def test_invalid_database_url_is_hidden_from_validation_error_text() -> None:
             {
                 "environment": "local",
                 "persistence_backend": "postgres",
+                "analysis_mode": "synthetic_demo",
                 "database_url": f"not-a-url?token={private_marker}",
             }
         )
@@ -106,6 +132,7 @@ def test_connected_profiles_can_select_memory_explicitly(environment: str) -> No
         {
             "environment": environment,
             "persistence_backend": "memory",
+            "analysis_mode": "synthetic_demo",
         }
     )
 
@@ -153,6 +180,7 @@ def test_memory_backend_rejects_database_url(environment: str) -> None:
             {
                 "environment": environment,
                 "persistence_backend": "memory",
+                "analysis_mode": "synthetic_demo",
                 "database_url": "postgresql://memory_user@127.0.0.1/memory_database",
             }
         )
@@ -170,6 +198,7 @@ def test_offline_profile_rejects_postgres_backend(
     values: dict[str, object] = {
         "environment": "offline",
         "persistence_backend": "postgres",
+        "analysis_mode": "synthetic_demo",
     }
     if database_url is not None:
         values["database_url"] = database_url
@@ -238,6 +267,7 @@ def test_undeclared_alias_and_extra_field_are_rejected() -> None:
             {
                 "environment": "offline",
                 "persistence_backend": "memory",
+                "analysis_mode": "synthetic_demo",
                 "profile": "aws",
             }
         )
@@ -251,6 +281,7 @@ def test_extra_dotenv_field_is_rejected(tmp_path: Path) -> None:
     env_file.write_text(
         "PRESCRIPTIVE_MAINTENANCE_ENVIRONMENT=offline\n"
         "PRESCRIPTIVE_MAINTENANCE_PERSISTENCE_BACKEND=memory\n"
+        "PRESCRIPTIVE_MAINTENANCE_ANALYSIS_MODE=synthetic_demo\n"
         "PRESCRIPTIVE_MAINTENANCE_UNDECLARED=unsafe\n",
         encoding="utf-8",
         newline="\n",

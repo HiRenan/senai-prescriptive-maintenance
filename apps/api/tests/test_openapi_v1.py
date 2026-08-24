@@ -265,22 +265,27 @@ def test_openapi_examples_cover_five_outcomes_and_document_states() -> None:
 
 def test_every_local_reference_resolves_for_future_client_generation() -> None:
     schema = json.loads(openapi_bytes())
-    components = schema["components"]["schemas"]
+    components = schema["components"]
+    schemas = components["schemas"]
+    headers = components["headers"]
     for reference in _iter_refs(schema):
-        assert reference.startswith("#/components/schemas/")
+        assert reference.startswith(("#/components/schemas/", "#/components/headers/"))
         component = reference.rsplit("/", maxsplit=1)[-1]
-        assert component in components
+        if reference.startswith("#/components/schemas/"):
+            assert component in schemas
+        else:
+            assert component in headers
 
-    analysis_response = components["AnalysisResponse"]
-    document_response = components["DocumentResponse"]
+    analysis_response = schemas["AnalysisResponse"]
+    document_response = schemas["DocumentResponse"]
     assert analysis_response["discriminator"]["propertyName"] == "outcome"
     assert document_response["discriminator"]["propertyName"] == "status"
     for reference in analysis_response["oneOf"]:
         component = reference["$ref"].rsplit("/", maxsplit=1)[-1]
-        assert "outcome" in components[component]["required"]
+        assert "outcome" in schemas[component]["required"]
     for reference in document_response["oneOf"]:
         component = reference["$ref"].rsplit("/", maxsplit=1)[-1]
-        assert "status" in components[component]["required"]
+        assert "status" in schemas[component]["required"]
 
     serialized = json.dumps(schema)
     assert "ModelPrediction" not in serialized

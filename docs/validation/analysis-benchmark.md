@@ -5,9 +5,8 @@
 O comando `scripts.analysis_benchmark` executa uma carga curta, sequencial,
 inteiramente sintética e offline contra o `POST /analysis` real. A aplicação é
 criada pela mesma `create_app()` usada pelo backend e recebe um
-`IntegratedAnalysisService` completo por injeção explícita. O runtime padrão da
-API continua usando os fakes do contrato e não descobre esse benchmark
-automaticamente.
+`IntegratedAnalysisService` completo por injeção explícita. O benchmark declara
+`synthetic_demo`; a API não descobre esse harness automaticamente.
 
 O cenário exercita as fronteiras implementadas na SEN-46:
 

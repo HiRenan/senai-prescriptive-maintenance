@@ -6,8 +6,8 @@
   `apps/web`; capacidades ainda não integradas não estão representadas
 
 As setas contínuas representam o caminho executável no contexto indicado.
-Setas tracejadas representam uma composição disponível somente por injeção ou
-um recurso declarativo ainda não aplicado. “Local” e “AWS” são perfis
+Setas tracejadas representam um recurso declarativo ainda não aplicado.
+“Local” e “AWS” são perfis
 diferentes; o diagrama AWS não descreve o ambiente Compose.
 
 ## Diagrama lógico
@@ -15,10 +15,11 @@ diferentes; o diagrama AWS não descreve o ambiente Compose.
 ```mermaid
 flowchart LR
   Client[Cliente HTTP] --> API[FastAPI e contrato v1]
-  API --> Default[Serviços sintéticos padrão]
-  Default --> Result[Cinco estados públicos]
+  API --> Mode{Modo obrigatório}
+  Mode -->|synthetic_demo| Demo[Serviços sintéticos]
+  Demo --> Result[Cinco estados públicos]
 
-  API -. injeção explícita e autorização exata .-> Integrated[IntegratedAnalysisService]
+  Mode -->|artifacts + manifesto e hash| Integrated[IntegratedAnalysisService]
   Integrated --> Model[ModelPort]
   Integrated --> Similarity[SimilarityIndexPort]
   Model --> Orchestration[Orquestração prescritiva]
@@ -43,13 +44,13 @@ flowchart LR
     Extracted --> Chunking[Chunking e indexação]
   end
 
-  ModelArtifact -. não descoberto automaticamente .-> Model
-  Chunking -. configuração e carga explícitas .-> Chunks
+  ModelArtifact -->|referência relativa e hash| Model
+  Chunking -->|manifesto aprovado| Chunks
 ```
 
-O caminho sólido `API → serviços sintéticos` é o runtime entregue por padrão.
-A composição integrada é código executável e testado, mas nenhum dataset,
-modelo, índice, mapping documental ou provider real é descoberto ou autorizado
+Não há runtime padrão: Compose e AWS declaram `synthetic_demo`, enquanto
+`artifacts` só é composto com manifesto local e autorização exata. Nenhum
+dataset, modelo, índice, mapping documental ou provider é descoberto
 automaticamente. O resultado público nunca transporta feature, texto
 documental, prompt ou output bruto.
 
