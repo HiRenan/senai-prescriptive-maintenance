@@ -81,6 +81,8 @@ STATE_INSTANCE_KEYS = {
     "attributes",
     "create_before_destroy",
     "dependencies",
+    "identity",
+    "identity_schema_version",
     "index_key",
     "private",
     "schema_version",
@@ -937,7 +939,41 @@ def state_instance_address(
     return address
 
 
-def state_managed_values(snapshot: object) -> dict[str, tuple[str, Mapping[str, Any]]]:
+def validate_state_instance_identity(
+    instance: Mapping[str, Any],
+    attributes: Mapping[str, Any],
+    scope: Mapping[str, str],
+) -> None:
+    if "identity_schema_version" in instance:
+        version = instance.get("identity_schema_version")
+        if type(version) is not int or not 0 <= version <= 100:
+            fail("Instância do state possui identity_schema_version desconhecida.")
+    if "identity" not in instance:
+        return
+    if "identity_schema_version" not in instance:
+        fail("Identidade da instância não declara sua versão de schema.")
+    resource_identity = mapping(
+        instance.get("identity"), context="identidade da instância do state"
+    )
+    if not resource_identity:
+        fail("Identidade da instância do state está vazia.")
+    for key, value in resource_identity.items():
+        if (
+            re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key) is None
+            or type(value) is not str
+            or not value
+            or attributes.get(key) != value
+        ):
+            fail("Identidade da instância diverge dos atributos do state.")
+    if resource_identity.get("account_id", scope["account_id"]) != scope["account_id"]:
+        fail("Identidade da instância pertence a outra conta.")
+    if resource_identity.get("region", scope["region"]) != scope["region"]:
+        fail("Identidade da instância pertence a outra região.")
+
+
+def state_managed_values(
+    snapshot: object, *, identity: Mapping[str, str]
+) -> dict[str, tuple[str, Mapping[str, Any]]]:
     document = mapping(snapshot, context="snapshot do state")
     if set(document) - STATE_TOP_LEVEL_KEYS or not {
         "lineage",
@@ -977,12 +1013,16 @@ def state_managed_values(snapshot: object) -> dict[str, tuple[str, Mapping[str, 
             schema_version = instance.get("schema_version")
             if type(schema_version) is not int or not 0 <= schema_version <= 100:
                 fail("Instância do state possui schema_version desconhecida.")
+            attributes = mapping(
+                instance.get("attributes"), context="atributos do state"
+            )
+            validate_state_instance_identity(instance, attributes, identity)
             address = state_instance_address(resource, instance)
             if address in result:
                 fail("State possui endereço gerenciado duplicado.")
             result[address] = (
                 resource_type,
-                mapping(instance.get("attributes"), context="atributos do state"),
+                attributes,
             )
     return result
 
@@ -1143,7 +1183,7 @@ def audit_state_snapshot(
     expected_image: str | None = None,
 ) -> None:
     scope = identity_configuration(identity)
-    resources = state_managed_values(snapshot)
+    resources = state_managed_values(snapshot, identity=scope)
     addresses = set(resources)
     if mode in {"fresh", "destroyed"}:
         if addresses or state_output_values(snapshot):

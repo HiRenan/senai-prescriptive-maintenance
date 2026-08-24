@@ -1292,6 +1292,7 @@ def synthetic_state(addresses: Iterable[str]) -> dict[str, object]:
         attributes_by_address[address] = attributes
         instance: dict[str, object] = {
             "attributes": attributes,
+            "identity_schema_version": 0,
             "schema_version": 0,
             "sensitive_attributes": [],
         }
@@ -1371,7 +1372,7 @@ def synthetic_state(addresses: Iterable[str]) -> dict[str, object]:
     }
 
 
-def state_attributes(snapshot: Mapping[str, object], address: str) -> dict[str, Any]:
+def state_instance(snapshot: Mapping[str, object], address: str) -> dict[str, Any]:
     base = address.split("[", maxsplit=1)[0]
     resource_type, resource_name = base.split(".", maxsplit=1)
     matches = [
@@ -1392,7 +1393,11 @@ def state_attributes(snapshot: Mapping[str, object], address: str) -> dict[str, 
         ]
     if len(instances) != 1:
         raise DeliveryRegressionError("Fixture do state não possui instância única.")
-    return cast(dict[str, Any], instances[0]["attributes"])
+    return instances[0]
+
+
+def state_attributes(snapshot: Mapping[str, object], address: str) -> dict[str, Any]:
+    return cast(dict[str, Any], state_instance(snapshot, address)["attributes"])
 
 
 def action_map(default: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
@@ -1673,6 +1678,19 @@ def prove_plan_and_state_gates() -> int:
             lambda: audit_state(extra, mode="destroyable"), DeliveryGateError
         )
     complete_snapshot = synthetic_state(EXPECTED_MANAGED)
+    vpc_instance = state_instance(complete_snapshot, "aws_vpc.demo")
+    vpc_attributes = cast(dict[str, Any], vpc_instance["attributes"])
+    vpc_attributes.update(
+        {
+            "account_id": SYNTHETIC_IDENTITY["account_id"],
+            "region": SYNTHETIC_IDENTITY["region"],
+        }
+    )
+    vpc_instance["identity"] = {
+        "account_id": vpc_attributes["account_id"],
+        "id": vpc_attributes["id"],
+        "region": vpc_attributes["region"],
+    }
     if cast(dict[str, Any], complete_snapshot["outputs"])["bedrock_enabled"] != {
         "sensitive": False,
         "type": "bool",
@@ -1740,6 +1758,69 @@ def prove_plan_and_state_gates() -> int:
     expect_failure(
         lambda: audit_state_snapshot(
             hostile_instance_schema,
+            mode="existing",
+            identity=SYNTHETIC_IDENTITY,
+        ),
+        DeliveryGateError,
+    )
+    hostile_identity_version = copy.deepcopy(complete_snapshot)
+    state_instance(hostile_identity_version, "aws_vpc.demo")[
+        "identity_schema_version"
+    ] = "0"
+    expect_failure(
+        lambda: audit_state_snapshot(
+            hostile_identity_version,
+            mode="existing",
+            identity=SYNTHETIC_IDENTITY,
+        ),
+        DeliveryGateError,
+    )
+    missing_identity_version = copy.deepcopy(complete_snapshot)
+    del state_instance(missing_identity_version, "aws_vpc.demo")[
+        "identity_schema_version"
+    ]
+    expect_failure(
+        lambda: audit_state_snapshot(
+            missing_identity_version,
+            mode="existing",
+            identity=SYNTHETIC_IDENTITY,
+        ),
+        DeliveryGateError,
+    )
+    malformed_resource_identity = copy.deepcopy(complete_snapshot)
+    state_instance(malformed_resource_identity, "aws_vpc.demo")["identity"] = []
+    expect_failure(
+        lambda: audit_state_snapshot(
+            malformed_resource_identity,
+            mode="existing",
+            identity=SYNTHETIC_IDENTITY,
+        ),
+        DeliveryGateError,
+    )
+    detached_resource_identity = copy.deepcopy(complete_snapshot)
+    cast(
+        dict[str, Any],
+        state_instance(detached_resource_identity, "aws_vpc.demo")["identity"],
+    )["id"] = "vpc-ffffffff"
+    expect_failure(
+        lambda: audit_state_snapshot(
+            detached_resource_identity,
+            mode="existing",
+            identity=SYNTHETIC_IDENTITY,
+        ),
+        DeliveryGateError,
+    )
+    foreign_resource_identity = copy.deepcopy(complete_snapshot)
+    foreign_vpc_instance = state_instance(foreign_resource_identity, "aws_vpc.demo")
+    cast(dict[str, Any], foreign_vpc_instance["attributes"])["account_id"] = (
+        "111111111111"
+    )
+    cast(dict[str, Any], foreign_vpc_instance["identity"])["account_id"] = (
+        "111111111111"
+    )
+    expect_failure(
+        lambda: audit_state_snapshot(
+            foreign_resource_identity,
             mode="existing",
             identity=SYNTHETIC_IDENTITY,
         ),
@@ -1865,7 +1946,7 @@ def prove_plan_and_state_gates() -> int:
         ),
         DeliveryGateError,
     )
-    return 39
+    return 44
 
 
 def synthetic_result(name: str) -> dict[str, object]:
